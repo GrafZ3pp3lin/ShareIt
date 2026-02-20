@@ -18,9 +18,13 @@ public static class ContentStorageExtensions
         /// </summary>
         public IServiceCollection AddContentStorage(IConfiguration configuration)
         {
-            if (configuration.GetSection(PostgreSqlDbSettings.SectionName).Exists())
+            if (configuration.GetSection(PostgreSqlContentStorageSettings.SectionName).Exists())
             {
                 services.AddPostgreSqlContentStorage();
+            }
+            if (configuration.GetSection(InMemoryContentStorageSettings.SectionName).Exists())
+            {
+                services.AddInMemoryContentStorage();
             }
             else
             {
@@ -32,45 +36,68 @@ public static class ContentStorageExtensions
 
         private IServiceCollection AddPostgreSqlContentStorage()
         {
-            services.AddOptions<PostgreSqlDbSettings>()
-                .BindConfiguration(PostgreSqlDbSettings.SectionName)
-                .ValidateWithFluentValidator<PostgreSqlDbSettings, PostgreSqlDbSettingsValidator>()
+            services.AddOptions<PostgreSqlContentStorageSettings>()
+                .BindConfiguration(PostgreSqlContentStorageSettings.SectionName)
+                .ValidateWithFluentValidator<PostgreSqlContentStorageSettings, PostgreSqlDbSettingsValidator>()
                 .ValidateOnStart();
         
             services.AddSingleton<IContentStorageHandler, SqlContentStorageHandler>();
 
             return services;
         }
-    }
-
-    /// <summary>
-    /// Initializes the SQL package storage schema.
-    /// Call this during application startup.
-    /// </summary>
-    public static async Task InitializePackageStorageAsync(this WebApplication app)
-    {
-        var settings = app.Services.GetRequiredService<PostgreSqlDbSettings>();
-        var logger = app.Services.GetRequiredService<ILogger<Program>>();
-        if (!settings.AutoInitializeSchema)
-        {
-            logger.LogDebug("Skipping SQL package storage schema initialization as per configuration");
-            return;
-        }
         
+        private IServiceCollection AddInMemoryContentStorage()
+        {
+            services.AddSingleton<IContentStorageHandler, InMemoryContentStorageHandler>();
 
-        try
-        {
-            logger.LogDebug("Initializing SQL package storage schema...");
-            await InitializeDatabaseAsync(settings.ConnectionString, app.Lifetime.ApplicationStopping);
-            logger.LogInformation("SQL package storage schema initialized successfully");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to initialize SQL package storage schema");
-            throw;
+            return services;
         }
     }
-    
+
+    extension(WebApplication app)
+    {
+        /// <summary>
+        /// Initializes the SQL package storage schema.
+        /// Call this during application startup.
+        /// </summary>
+        public Task InitializePackageStorageAsync()
+        {
+            if (app.Configuration.GetSection(PostgreSqlContentStorageSettings.SectionName).Exists())
+            {
+                return app.InitializePostgresPackageStorageAsync();
+            }
+            
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Initializes the SQL package storage schema.
+        /// Call this during application startup.
+        /// </summary>
+        private async Task InitializePostgresPackageStorageAsync()
+        {
+            var settings = app.Services.GetRequiredService<PostgreSqlContentStorageSettings>();
+            var logger = app.Services.GetRequiredService<ILogger<Program>>();
+            if (!settings.AutoInitializeSchema)
+            {
+                logger.LogDebug("Skipping SQL package storage schema initialization as per configuration");
+                return;
+            }
+        
+            try
+            {
+                logger.LogDebug("Initializing SQL package storage schema...");
+                await InitializeDatabaseAsync(settings.ConnectionString, app.Lifetime.ApplicationStopping);
+                logger.LogInformation("SQL package storage schema initialized successfully");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to initialize SQL package storage schema");
+                throw;
+            }
+        }
+    }
+
     /// <summary>
     /// Initializes the database schema. Should be called on application startup.
     /// </summary>

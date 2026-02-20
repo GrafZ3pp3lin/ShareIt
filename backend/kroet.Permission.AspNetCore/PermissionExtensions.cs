@@ -1,7 +1,6 @@
 ﻿using kroet.Permissions;
 using kroet.Permissions.Authorization;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

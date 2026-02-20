@@ -1,14 +1,8 @@
-using System.Data;
 using Asp.Versioning;
 using kroet.Permissions;
 using kroet.ShareIt.Api.Content;
-using kroet.ShareIt.Api.Content.Configuration;
 using kroet.ShareIt.Api.Content.Extensions;
-using kroet.ShareIt.Api.Content.Services;
 using kroet.ShareIt.Api.Content.Storage;
-using kroet.ShareIt.Api.Content.Storage.Blobs;
-using kroet.ShareIt.Api.Content.Storage.Package;
-using MongoDB.Driver;
 using Serilog;
 
 // The initial "bootstrap" logger is able to log errors during start-up. It's completely replaced by the

@@ -5,7 +5,7 @@ namespace kroet.ShareIt.Api.Content.Configuration;
 /// <summary>
 /// Configuration options for PostgreSQL content package storage.
 /// </summary>
-public sealed class PostgreSqlDbSettings : ISettings
+public sealed class PostgreSqlContentStorageSettings : ISettings
 {
     /// <summary>
     /// PostgreSQL connection string.
@@ -20,7 +20,7 @@ public sealed class PostgreSqlDbSettings : ISettings
     public static string SectionName => "ContentStorage:PostgreSqlDb";
 }
 
-public sealed class PostgreSqlDbSettingsValidator : AbstractValidator<PostgreSqlDbSettings>
+public sealed class PostgreSqlDbSettingsValidator : AbstractValidator<PostgreSqlContentStorageSettings>
 {
     public PostgreSqlDbSettingsValidator()
     {

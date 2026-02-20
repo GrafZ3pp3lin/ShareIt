@@ -21,7 +21,11 @@ public static class BlobStorageExtensions
             {
                 services.AddMongoBlobStorage();
             }
-            else 
+            else if (configuration.GetSection(InMemoryBlobStorageSettings.SectionName).Exists())
+            {
+                services.AddInMemoryBlobStorage();
+            }
+            else
             {
                 throw new InvalidOperationException("No valid blob storage configuration found.");
             }
@@ -35,7 +39,8 @@ public static class BlobStorageExtensions
         private IServiceCollection AddMongoBlobStorage()
         {
             // MongoDB configuration
-            services.AddOptions<MongoBlobStorageSettings>()
+            services
+                .AddOptions<MongoBlobStorageSettings>()
                 .BindConfiguration(MongoBlobStorageSettings.SectionName)
                 .ValidateWithFluentValidator<MongoBlobStorageSettings, MongoBlobStorageSettingsValidator>()
                 .ValidateOnStart();
@@ -48,13 +53,22 @@ public static class BlobStorageExtensions
         private IServiceCollection AddS3BlobStorage()
         {
             // S3 configuration
-            services.AddOptions<S3BlobStorageSettings>()
+            services
+                .AddOptions<S3BlobStorageSettings>()
                 .BindConfiguration(S3BlobStorageSettings.SectionName)
                 .ValidateWithFluentValidator<S3BlobStorageSettings, S3BlobStorageSettingsValidator>()
                 .ValidateOnStart();
 
             services.AddSingleton<IBlobStorageHandler, S3BlobStorageHandler>();
 
+            return services;
+        }
+
+        private IServiceCollection AddInMemoryBlobStorage()
+        {
+            // In-memory blob storage for testing or development
+            services.AddSingleton<IBlobStorageHandler, InMemoryBlobStorageHandler>();
+            
             return services;
         }
     }

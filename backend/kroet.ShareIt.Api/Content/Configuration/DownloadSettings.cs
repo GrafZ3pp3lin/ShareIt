@@ -14,13 +14,6 @@ public sealed class DownloadSettings : ISettings
     public int DefaultTokenExpirationMinutes { get; set; } = 15;
 
     /// <summary>
-    /// Whether to validate client IP when consuming tokens.
-    /// If true, tokens can only be used from the same IP that requested them.
-    /// Default: false.
-    /// </summary>
-    public bool ValidateClientIp { get; set; } = false;
-
-    /// <summary>
     /// How long to keep used tokens before cleanup (for audit purposes) in hours.
     /// Default: 24 hours.
     /// </summary>

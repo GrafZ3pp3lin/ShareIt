@@ -11,11 +11,11 @@ namespace kroet.ShareIt.Api.Content.Storage.Package;
 /// </summary>
 public class SqlContentStorageHandler : IContentStorageHandler
 {
-    private readonly PostgreSqlDbSettings _settings;
+    private readonly PostgreSqlContentStorageSettings _settings;
     private readonly ILogger<SqlContentStorageHandler> _logger;
 
     public SqlContentStorageHandler(
-        IOptions<PostgreSqlDbSettings> settings,
+        IOptions<PostgreSqlContentStorageSettings> settings,
         ILogger<SqlContentStorageHandler> logger)
     {
         _settings = settings.Value;

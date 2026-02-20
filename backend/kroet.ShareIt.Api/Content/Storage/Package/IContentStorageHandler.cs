@@ -3,16 +3,6 @@
 namespace kroet.ShareIt.Api.Content.Storage.Package;
 
 /// <summary>
-/// Result of incrementing download count.
-/// </summary>
-public record DownloadIncrementResult(
-    bool Success,
-    int NewCount,
-    int? MaxCount,
-    bool LimitReached
-);
-
-/// <summary>
 /// Storage handler for content packages.
 /// </summary>
 public interface IContentStorageHandler

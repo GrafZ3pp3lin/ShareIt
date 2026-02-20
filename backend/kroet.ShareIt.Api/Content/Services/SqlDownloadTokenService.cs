@@ -12,12 +12,12 @@ namespace kroet.ShareIt.Api.Content.Services;
 /// </summary>
 public class SqlDownloadTokenService : IDownloadTokenService
 {
-    private readonly PostgreSqlDbSettings _settings;
+    private readonly PostgreSqlContentStorageSettings _settings;
     private readonly DownloadSettings _downloadSettings;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SqlDownloadTokenService> _logger;
 
-    public SqlDownloadTokenService(IOptions<PostgreSqlDbSettings> settings, IOptions<DownloadSettings> downloadSettings, TimeProvider timeProvider,
+    public SqlDownloadTokenService(IOptions<PostgreSqlContentStorageSettings> settings, IOptions<DownloadSettings> downloadSettings, TimeProvider timeProvider,
         ILogger<SqlDownloadTokenService> logger)
     {
         _settings = settings.Value;

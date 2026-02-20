@@ -30,7 +30,7 @@ public static class PermissionExtensions
     
     private static bool ForAuthenticatedUsers(System.Security.Claims.ClaimsPrincipal user)
     {
-        var userIsAnonymous = user?.Identity is null || !user.Identities.Any(i => i.IsAuthenticated);
+        var userIsAnonymous = user.Identity is null || !user.Identities.Any(i => i.IsAuthenticated);
         
         return !userIsAnonymous;
     }
