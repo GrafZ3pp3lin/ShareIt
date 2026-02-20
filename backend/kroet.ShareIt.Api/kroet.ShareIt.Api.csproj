@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Asp.Versioning.Http" Version="8.1.1" />
+        <PackageReference Include="AWSSDK.S3" Version="4.0.18.1" />
+        <PackageReference Include="AWSSDK.S3" Version="4.0.16.4" />
+        <PackageReference Include="Dapper" Version="2.1.66" />
+        <PackageReference Include="FluentValidation" Version="12.1.1" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
+        <PackageReference Include="MongoDB.Driver" Version="3.6.0" />
+        <PackageReference Include="Npgsql" Version="10.0.1" />
+        <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Include="..\.dockerignore">
+        <Link>.dockerignore</Link>
+      </Content>
+      <None Remove="Content\Storage\Package\PostgreSqlSchema.sql" />
+      <Content Update="Resources\PostgreSqlSchema.sql">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\kroet.Permission.AspNetCore\kroet.Permission.AspNetCore.csproj" />
+    </ItemGroup>
+
+</Project>

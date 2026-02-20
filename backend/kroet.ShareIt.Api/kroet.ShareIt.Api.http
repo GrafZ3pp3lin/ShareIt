@@ -1,0 +1,6 @@
+@kroet.ShareIt.Api_HostAddress = http://localhost:5155
+
+GET {{kroet.ShareIt.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
