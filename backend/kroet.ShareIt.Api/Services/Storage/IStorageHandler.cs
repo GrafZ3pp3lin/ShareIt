@@ -1,0 +1,33 @@
+﻿namespace kroet.ShareIt.Api.Services.Storage;
+
+/// <summary>
+/// High-level storage handler that manages content storage with automatic routing
+/// to MongoDB (embedded) or Blob Storage based on size.
+/// </summary>
+public interface IStorageHandler
+{
+    /// <summary>
+    /// Stores content with its associated data stream.
+    /// </summary>
+    /// <param name="content">The content metadata to store.</param>
+    /// <param name="dataStream">The data stream to store</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task StoreContentAsync(Api.Models.Content content, Stream dataStream, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Deletes content and its associated data.
+    /// </summary>
+    /// <param name="contentId">The unique content identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if deleted, false if not found.</returns>
+    Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Retrieves the content data stream.
+    /// </summary>
+    /// <param name="contentId">The unique content identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Stream containing the content data.</returns>
+    /// <exception cref="KeyNotFoundException">Thrown when content is not found.</exception>
+    Task<Stream> RetrieveContentAsync(Guid contentId, CancellationToken cancellationToken = default);
+}

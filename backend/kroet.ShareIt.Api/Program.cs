@@ -1,8 +1,9 @@
 using Asp.Versioning;
 using kroet.Permissions;
 using kroet.ShareIt.Api.Content;
-using kroet.ShareIt.Api.Content.Extensions;
-using kroet.ShareIt.Api.Content.Storage;
+using kroet.ShareIt.Api.Services.Cleanup;
+using kroet.ShareIt.Api.Services.Storage;
+using kroet.ShareIt.Api.Storage.Extensions;
 using Serilog;
 
 // The initial "bootstrap" logger is able to log errors during start-up. It's completely replaced by the
@@ -31,11 +32,11 @@ try
     // Register content storage handler
     builder.Services.AddContentStorage(configuration);
     
+    // Register download token storage handler
+    builder.Services.AddDownloadTokenStorage(configuration);
+    
     // Main storage handler
     builder.Services.AddSingleton<IStorageHandler, StorageHandler>();
-
-    // Download settings and token service
-    builder.Services.AddDownloadTokenService();
 
     // Register System TimeProvider
     builder.Services.AddSingleton(TimeProvider.System);
