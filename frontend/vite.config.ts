@@ -3,9 +3,15 @@ import { defineConfig } from 'vite';
 import solid from 'vite-plugin-solid';
 import tailwindcss from '@tailwindcss/vite';
 import Icons from 'unplugin-icons/vite';
+import mkcert from 'vite-plugin-mkcert';
 
 export default defineConfig({
-  plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' })],
+  server: {
+    host: 'localhost',
+    https: true,
+    port: 3001,
+  },
+  plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' }), mkcert()],
   esbuild: {
     jsx: 'preserve',
     jsxImportSource: 'solid-js',

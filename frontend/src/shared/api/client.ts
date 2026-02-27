@@ -1,6 +1,7 @@
-import { client } from '../../client/client.gen';
-import { getAuthToken } from '../auth/oidc';
-import { getGuestId } from './guest';
+import { client } from "../../client/client.gen";
+import { getRuntimeConfig } from "../config/runtime-config";
+import { getAuthToken } from "../auth/oidc";
+import { getGuestId } from "./guest";
 
 let isConfigured = false;
 
@@ -10,26 +11,26 @@ export const configureApiClient = () => {
   }
 
   isConfigured = true;
-  const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5155';
+  const baseUrl = getRuntimeConfig().apiBaseUrl;
   client.setConfig({
     baseUrl,
-    responseStyle: 'fields',
+    responseStyle: "fields",
     throwOnError: false,
   });
 
   client.interceptors.request.use(async (request) => {
     const headers = new Headers(request.headers);
-    if (headers.has('Authorization') || headers.has('X-Guest-ID')) {
+    if (headers.has("Authorization") || headers.has("X-Guest-ID")) {
       return request;
     }
 
     const authToken = await getAuthToken();
     if (authToken) {
-      headers.set('Authorization', `Bearer ${authToken}`);
+      headers.set("Authorization", `Bearer ${authToken}`);
     } else {
       const guestId = getGuestId();
       if (guestId) {
-        headers.set('X-Guest-ID', guestId);
+        headers.set("X-Guest-ID", guestId);
       }
     }
 

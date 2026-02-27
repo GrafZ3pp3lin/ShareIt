@@ -25,6 +25,8 @@ export const dict = {
       text: 'Paste or type your text',
     },
     encryptLabel: 'Encrypt this text before upload',
+    dropzoneLabel: 'Drop files here or use the file picker.',
+    chooseFiles: 'Choose files',
     filesSelected: '{{ count }} file(s) selected.',
     submit: {
       uploading: 'Uploading...',

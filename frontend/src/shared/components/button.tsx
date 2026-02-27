@@ -2,7 +2,7 @@ import { clsx } from 'clsx/lite';
 import type { JSX, ParentProps } from 'solid-js';
 import { splitProps } from 'solid-js';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
 
 type ButtonProps = ParentProps<
   JSX.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -11,14 +11,14 @@ type ButtonProps = ParentProps<
 >;
 
 const baseClass =
-  'inline-flex items-center justify-center gap-2 rounded-xl border border-transparent px-4 py-2 text-sm font-semibold transition duration-200';
+  'inline-flex items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2 text-sm font-semibold tracking-wide transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/25';
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'bg-brand text-white shadow-button hover:-translate-y-0.5 hover:bg-brand-hover disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none',
+    'bg-brand text-white shadow-button hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none',
   secondary:
-    'border-border-soft bg-white text-ink shadow-button-soft hover:-translate-y-0.5 hover:shadow-button-soft-hover disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none',
-  ghost: 'bg-transparent text-ink hover:bg-panel-soft',
+    'border-border-soft bg-white text-ink shadow-button-soft hover:shadow-button-soft-hover disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none',
+  ghost: 'bg-transparent text-muted hover:bg-panel-soft hover:text-ink',
 };
 
 export function Button(props: ButtonProps) {

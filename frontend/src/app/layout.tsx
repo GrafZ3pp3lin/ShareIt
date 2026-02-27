@@ -2,60 +2,62 @@ import { Link, Outlet } from '@tanstack/solid-router';
 import { Show } from 'solid-js';
 import { useAuth } from '../features/auth/auth-context';
 import { useI18n } from '../i18n';
-import { getButtonClass } from '../shared/components/button';
+import { Button } from '../shared/components/button';
+import { LinkButton } from '../shared/components/link-button';
 import { PillBadge } from '../shared/components/pill-badge';
 
 export function AppLayout() {
   const auth = useAuth();
   const { t } = useI18n();
 
-  const buttonSecondary = getButtonClass('secondary');
-  const buttonGhost = getButtonClass('ghost');
-
   return (
     <div class="min-h-screen flex flex-col">
-      <header class="flex flex-wrap items-center justify-between gap-4 px-5 py-6 sm:px-8 lg:px-14">
-        <Link class="flex items-center gap-3 font-bold tracking-wide" to="/">
-          <span
-            class="h-10 w-10 rounded-2xl bg-gradient-to-br from-brand to-brand-deep shadow-[inset_0_0_0_2px_rgba(255,255,255,0.2)]"
-            aria-hidden="true"
-          />
-          <span>{t('app.brand')}</span>
-        </Link>
-        <nav class="flex flex-wrap items-center gap-3">
-          <Link class={buttonGhost} to="/">
-            {t('app.nav.upload')}
+      <header class="fixed inset-x-0 top-0 z-50 border-b border-border-soft/80 bg-white/80 backdrop-blur-sm">
+        <div class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-5 py-5 sm:px-8">
+          <Link class="flex items-center gap-3 text-sm font-semibold tracking-[0.2em] uppercase" to="/">
+            <span
+              class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border-soft bg-white text-xs font-semibold"
+              aria-hidden="true"
+            >
+              SI
+            </span>
+            <span>{t('app.brand')}</span>
           </Link>
-          <Show
-            when={auth.isEnabled}
-            fallback={
-              <PillBadge as="span" title={t('app.nav.oidcNotConfigured')}>
-                {t('app.nav.loginUnavailable')}
-              </PillBadge>
-            }
-          >
+          <nav class="flex flex-wrap items-center gap-2">
+            <LinkButton variant="ghost" to="/">
+              {t('app.nav.upload')}
+            </LinkButton>
             <Show
-              when={auth.isAuthenticated}
+              when={auth.isEnabled}
               fallback={
-                <Link class={buttonSecondary} to="/login">
-                  {t('app.nav.login')}
-                </Link>
+                <PillBadge as="span" title={t('app.nav.oidcNotConfigured')}>
+                  {t('app.nav.loginUnavailable')}
+                </PillBadge>
               }
             >
-              <Link class={buttonSecondary} to="/account">
-                {t('app.nav.myUploads')}
-              </Link>
-              <button class={buttonGhost} onClick={auth.logout}>
-                {t('app.nav.logout')}
-              </button>
+              <Show
+                when={auth.isAuthenticated}
+                fallback={
+                  <Button variant="secondary" type="button" onClick={auth.login}>
+                    {t('app.nav.login')}
+                  </Button>
+                }
+              >
+                <LinkButton variant="secondary" to="/account">
+                  {t('app.nav.myUploads')}
+                </LinkButton>
+                <Button variant="ghost" onClick={auth.logout}>
+                  {t('app.nav.logout')}
+                </Button>
+              </Show>
             </Show>
-          </Show>
-        </nav>
+          </nav>
+        </div>
       </header>
-      <main class="flex-1 px-5 pb-12 sm:px-8 lg:px-14">
+      <main class="mx-auto w-full max-w-5xl flex-1 px-5 pt-28 pb-8 sm:px-8 sm:pt-30 sm:pb-10">
         <Outlet />
       </main>
-      <footer class="px-5 pb-8 text-sm text-muted sm:px-8 lg:px-14">{t('app.footer')}</footer>
+      <footer class="mx-auto w-full max-w-5xl px-5 pb-8 text-xs text-muted sm:px-8">{t('app.footer')}</footer>
     </div>
   );
 }

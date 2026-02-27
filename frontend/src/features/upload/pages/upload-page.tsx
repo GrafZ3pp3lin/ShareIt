@@ -111,7 +111,7 @@ export function UploadPage() {
   };
 
   return (
-    <div class="grid items-center gap-7 lg:grid-cols-2">
+    <div class="grid gap-7 lg:grid-cols-2">
       <UploadHero
         title={t('upload.heroTitle')}
         description={t('upload.heroDescription')}
@@ -149,6 +149,8 @@ export function UploadPage() {
           <Show when={mode() === 'file'}>
             <UploadFileFields
               filesCount={files().length}
+              dropzoneLabel={t('upload.dropzoneLabel')}
+              chooseFilesLabel={t('upload.chooseFiles')}
               filesSelectedLabel={t('upload.filesSelected', { count: files().length })}
               onFilesChange={setFiles}
             />

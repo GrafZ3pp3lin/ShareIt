@@ -1,22 +1,21 @@
-import { UserManager, type UserManagerSettings } from 'oidc-client-ts';
+import { UserManager, type UserManagerSettings } from "oidc-client-ts";
+import { getRuntimeConfig } from "../config/runtime-config";
 
 let manager: UserManager | null | undefined;
 
 export const getOidcSettings = (): UserManagerSettings | null => {
-  const authority = import.meta.env.VITE_OIDC_AUTHORITY;
-  const clientId = import.meta.env.VITE_OIDC_CLIENT_ID;
-  const redirectUri = import.meta.env.VITE_OIDC_REDIRECT_URI;
-  if (!authority || !clientId || !redirectUri) {
+  const config = getRuntimeConfig();
+  if (!config.authAuthority || !config.authClientId) {
     return null;
   }
 
   return {
-    authority,
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope: 'openid profile email',
-    post_logout_redirect_uri: import.meta.env.VITE_OIDC_POST_LOGOUT_REDIRECT_URI ?? window.location.origin,
+    authority: config.authAuthority,
+    client_id: config.authClientId,
+    scope: config.authScope,
+    redirect_uri: config.authRedirectUri ?? `${window.location.origin}/auth/callback`,
+    post_logout_redirect_uri: config.authPostLogoutRedirectUri ?? window.location.origin,
+    response_type: "code",
   };
 };
 

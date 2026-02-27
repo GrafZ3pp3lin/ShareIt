@@ -1,8 +1,9 @@
 import { Show } from 'solid-js';
-import { Button, getButtonClass } from '../../../shared/components/button';
+import { Button } from '../../../shared/components/button';
 import { NoticeBox } from '../../../shared/components/notice-box';
 import { PillBadge } from '../../../shared/components/pill-badge';
 import type { UploadResult } from './upload-types';
+import { LinkButton } from '../../../shared/components/link-button';
 
 type UploadResultPanelProps = {
   result: UploadResult;
@@ -20,9 +21,9 @@ export function UploadResultPanel(props: UploadResultPanelProps) {
       <NoticeBox>
         <div class="text-ink">{props.shareLinkLabel}</div>
         <div class="mt-2 flex flex-wrap gap-2">
-          <a href={props.result.link} class={getButtonClass('ghost')} target="_blank" rel="noreferrer">
+          <LinkButton href={props.result.link} variant='ghost' target="_blank" rel="noreferrer">
             {props.result.link}
-          </a>
+          </LinkButton>
           <Button variant="secondary" type="button" onClick={() => props.onCopyLink(props.result.link)}>
             {props.copyLinkLabel}
           </Button>

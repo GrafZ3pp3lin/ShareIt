@@ -13,7 +13,14 @@ In the project directory, you can run:
 ### `npm run dev`
 
 Runs the app in the development mode.<br>
-Open [http://localhost:5173](http://localhost:5173) to view it in the browser.
+Open [https://localhost:3001](https://localhost:3001) to view it in the browser.
+
+The dev server uses `vite-plugin-mkcert` to generate a trusted local certificate.
+If this is your first run, install mkcert roots once:
+
+```bash
+npx mkcert -install
+```
 
 ### `npm run build`
 
