@@ -2,9 +2,6 @@ import { Link, Outlet } from '@tanstack/solid-router';
 import { Show } from 'solid-js';
 import { useAuth } from '../features/auth/auth-context';
 import { useI18n } from '../i18n';
-import { Button } from '../shared/components/button';
-import { LinkButton } from '../shared/components/link-button';
-import { PillBadge } from '../shared/components/pill-badge';
 
 export function AppLayout() {
   const auth = useAuth();
@@ -24,31 +21,31 @@ export function AppLayout() {
             <span>{t('app.brand')}</span>
           </Link>
           <nav class="flex flex-wrap items-center gap-2">
-            <LinkButton variant="ghost" to="/">
+            <Link class="btn btn-ghost" to="/">
               {t('app.nav.upload')}
-            </LinkButton>
+            </Link>
             <Show
               when={auth.isEnabled}
               fallback={
-                <PillBadge as="span" title={t('app.nav.oidcNotConfigured')}>
+                <span class="pill-badge" title={t('app.nav.oidcNotConfigured')}>
                   {t('app.nav.loginUnavailable')}
-                </PillBadge>
+                </span>
               }
             >
               <Show
                 when={auth.isAuthenticated}
                 fallback={
-                  <Button variant="secondary" type="button" onClick={auth.login}>
+                  <button class="btn btn-secondary" type="button" onClick={auth.login}>
                     {t('app.nav.login')}
-                  </Button>
+                  </button>
                 }
               >
-                <LinkButton variant="secondary" to="/account">
+                <Link class="btn btn-secondary" to="/account">
                   {t('app.nav.myUploads')}
-                </LinkButton>
-                <Button variant="ghost" onClick={auth.logout}>
+                </Link>
+                <button class="btn btn-ghost" type="button" onClick={auth.logout}>
                   {t('app.nav.logout')}
-                </Button>
+                </button>
               </Show>
             </Show>
           </nav>

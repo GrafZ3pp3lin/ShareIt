@@ -1,7 +1,5 @@
 import { Show } from 'solid-js';
 import { useI18n } from '../../../i18n';
-import { NoticeBox } from '../../../shared/components/notice-box';
-import { SurfaceCard } from '../../../shared/components/surface-card';
 import { useAuth } from '../../auth/auth-context';
 
 export function AccountPage() {
@@ -9,12 +7,12 @@ export function AccountPage() {
   const { t } = useI18n();
 
   return (
-    <SurfaceCard class="grid gap-3">
+    <div class="surface-card grid gap-3">
       <h2 class="text-lg font-semibold text-ink">{t('account.title')}</h2>
-      <Show when={auth.isAuthenticated} fallback={<NoticeBox>{t('account.loginPrompt')}</NoticeBox>}>
+      <Show when={auth.isAuthenticated} fallback={<div class="notice-box">{t('account.loginPrompt')}</div>}>
         <p class="text-sm text-muted">{t('account.description')}</p>
-        <NoticeBox>{t('account.notWired')}</NoticeBox>
+        <div class="notice-box">{t('account.notWired')}</div>
       </Show>
-    </SurfaceCard>
+    </div>
   );
 }

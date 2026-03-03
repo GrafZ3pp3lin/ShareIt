@@ -4,7 +4,7 @@ import { AuthProvider } from '../features/auth/auth-context';
 import { I18nProvider } from '../i18n';
 import { configureApiClient } from '../shared/api/client';
 import { router } from './router';
-import { SolidQueryDevtools } from '@tanstack/solid-query-devtools'
+import { SolidQueryDevtools } from '@tanstack/solid-query-devtools';
 
 const queryClient = new QueryClient({
   defaultOptions: {

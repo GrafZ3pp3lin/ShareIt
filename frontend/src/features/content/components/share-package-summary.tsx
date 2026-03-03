@@ -1,7 +1,4 @@
 import { Show } from 'solid-js';
-import { NoticeBox } from '../../../shared/components/notice-box';
-import { PillBadge } from '../../../shared/components/pill-badge';
-import { SurfaceCard } from '../../../shared/components/surface-card';
 
 type SharePackageSummaryProps = {
   title: string;
@@ -13,22 +10,22 @@ type SharePackageSummaryProps = {
 
 export function SharePackageSummary(props: SharePackageSummaryProps) {
   return (
-    <SurfaceCard class="grid gap-3">
+    <div class="surface-card grid gap-3">
       <h2 class="text-lg font-semibold text-ink">{props.title}</h2>
       <Show when={props.loadingLabel}>
         <div>{props.loadingLabel}</div>
       </Show>
       <Show when={props.loadError}>
-        <NoticeBox>{props.loadError}</NoticeBox>
+        <div class="notice-box">{props.loadError}</div>
       </Show>
       <Show when={props.packageLabel}>
         <div class="grid gap-3">
-          <PillBadge>{props.packageLabel}</PillBadge>
+          <div class="pill-badge">{props.packageLabel}</div>
           <Show when={props.itemsLabel}>
             <div class="text-sm text-muted">{props.itemsLabel}</div>
           </Show>
         </div>
       </Show>
-    </SurfaceCard>
+    </div>
   );
 }

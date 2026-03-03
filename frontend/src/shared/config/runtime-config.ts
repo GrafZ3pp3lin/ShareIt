@@ -17,12 +17,12 @@ export type RuntimeConfig = {
 };
 
 type ViteEnvKey =
-  | "VITE_API_BASE_URL"
-  | "VITE_OIDC_AUTHORITY"
-  | "VITE_OIDC_CLIENT_ID"
-  | "VITE_OIDC_REDIRECT_URI"
-  | "VITE_OIDC_POST_LOGOUT_REDIRECT_URI"
-  | "VITE_OIDC_SCOPE";
+  | 'VITE_API_BASE_URL'
+  | 'VITE_OIDC_AUTHORITY'
+  | 'VITE_OIDC_CLIENT_ID'
+  | 'VITE_OIDC_REDIRECT_URI'
+  | 'VITE_OIDC_POST_LOGOUT_REDIRECT_URI'
+  | 'VITE_OIDC_SCOPE';
 
 const normalize = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -34,7 +34,7 @@ const normalize = (value: string | undefined): string | undefined => {
 };
 
 const readRuntimeEnv = (): RuntimeEnv => {
-  if (typeof window === "undefined" || !window.env) {
+  if (typeof window === 'undefined' || !window.env) {
     return {};
   }
 
@@ -53,12 +53,15 @@ const createRuntimeConfig = (): RuntimeConfig => {
   const runtimeEnv = readRuntimeEnv();
 
   return {
-    apiBaseUrl: readConfigValue(runtimeEnv.ApiBaseUrl, "VITE_API_BASE_URL"),
-    authAuthority: readConfigValue(runtimeEnv.AuthAuthority, "VITE_OIDC_AUTHORITY"),
-    authClientId: readConfigValue(runtimeEnv.AuthClientId, "VITE_OIDC_CLIENT_ID"),
-    authRedirectUri: readConfigValue(runtimeEnv.AuthRedirectUri, "VITE_OIDC_REDIRECT_URI"),
-    authPostLogoutRedirectUri: readConfigValue(runtimeEnv.AuthPostLogoutRedirectUri, "VITE_OIDC_POST_LOGOUT_REDIRECT_URI"),
-    authScope: readConfigValue(runtimeEnv.AuthScope, "VITE_OIDC_SCOPE"),
+    apiBaseUrl: readConfigValue(runtimeEnv.ApiBaseUrl, 'VITE_API_BASE_URL'),
+    authAuthority: readConfigValue(runtimeEnv.AuthAuthority, 'VITE_OIDC_AUTHORITY'),
+    authClientId: readConfigValue(runtimeEnv.AuthClientId, 'VITE_OIDC_CLIENT_ID'),
+    authRedirectUri: readConfigValue(runtimeEnv.AuthRedirectUri, 'VITE_OIDC_REDIRECT_URI'),
+    authPostLogoutRedirectUri: readConfigValue(
+      runtimeEnv.AuthPostLogoutRedirectUri,
+      'VITE_OIDC_POST_LOGOUT_REDIRECT_URI'
+    ),
+    authScope: readConfigValue(runtimeEnv.AuthScope, 'VITE_OIDC_SCOPE'),
   };
 };
 

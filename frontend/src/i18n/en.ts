@@ -15,10 +15,6 @@ export const dict = {
     heroTitle: 'Share documents or encrypted notes in seconds.',
     heroDescription: 'Upload a file or paste text, optionally encrypt it in the browser, and get a shareable link.',
     encryptionPill: 'Client-side AES-GCM encryption supported for text',
-    tabs: {
-      text: 'Text',
-      files: 'Files',
-    },
     placeholders: {
       title: 'Title (optional)',
       description: 'Description (optional)',
@@ -38,10 +34,9 @@ export const dict = {
     copyPassphrase: 'Copy passphrase',
     errors: {
       createPackage: 'Failed to create package.',
-      missingText: 'Add some text before uploading.',
+      missingContent: 'Add text or select at least one file before uploading.',
       encryptFailed: 'Unable to encrypt the text.',
       addTextFailed: 'Failed to add text.',
-      missingFiles: 'Select at least one file to upload.',
       uploadFilesFailed: 'Failed to upload files.',
     },
   },

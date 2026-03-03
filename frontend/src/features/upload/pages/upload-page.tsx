@@ -1,21 +1,16 @@
 import { useMutation } from '@tanstack/solid-query';
-import { Show, createSignal } from 'solid-js';
-import { UploadFileFields, UploadMetadataFields, UploadTextFields } from '../components/upload-form-fields';
+import { Show, createMemo, createSignal } from 'solid-js';
+import { UploadContentField, UploadMetadataFields } from '../components/upload-form-fields';
 import { UploadHero } from '../components/upload-hero';
-import { UploadModeTabs } from '../components/upload-mode-tabs';
 import { UploadResultPanel } from '../components/upload-result-panel';
-import type { UploadMode, UploadResult } from '../components/upload-types';
+import type { UploadResult } from '../components/upload-types';
 import { addTextContent, createContentPackage, uploadFiles } from '../../../shared/api/content';
 import { getErrorMessage } from '../../../shared/api/error-message';
-import { Button } from '../../../shared/components/button';
-import { NoticeBox } from '../../../shared/components/notice-box';
-import { SurfaceCard } from '../../../shared/components/surface-card';
 import { encryptText, generatePassphrase } from '../../../shared/crypto/crypto';
 import { useI18n } from '../../../i18n';
 
 export function UploadPage() {
   const { t } = useI18n();
-  const [mode, setMode] = createSignal<UploadMode>('text');
   const [title, setTitle] = createSignal('');
   const [description, setDescription] = createSignal('');
   const [text, setText] = createSignal('');
@@ -23,6 +18,8 @@ export function UploadPage() {
   const [encrypt, setEncrypt] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
   const [result, setResult] = createSignal<UploadResult | null>(null);
+  const hasText = createMemo(() => text().trim().length > 0);
+  const hasFiles = createMemo(() => files().length > 0);
 
   const resetStatus = () => {
     setError(null);
@@ -33,6 +30,10 @@ export function UploadPage() {
 
   const submitMutation = useMutation(() => ({
     mutationFn: async (): Promise<SubmitResult> => {
+      if (!hasText() && !hasFiles()) {
+        return { error: t('upload.errors.missingContent') };
+      }
+
       const packageResult = await createContentPackage({
         Title: title() || null,
         Description: description() || null,
@@ -46,11 +47,8 @@ export function UploadPage() {
 
       let passphrase: string | undefined;
 
-      if (mode() === 'text') {
-        if (!text().trim()) {
-          return { error: t('upload.errors.missingText') };
-        }
-        let payload = text();
+      if (hasText()) {
+        let payload = text().trim();
         if (encrypt()) {
           passphrase = generatePassphrase();
           try {
@@ -69,11 +67,11 @@ export function UploadPage() {
           };
         }
       } else {
-        const selected = files();
-        if (!selected.length) {
-          return { error: t('upload.errors.missingFiles') };
-        }
+        passphrase = undefined;
+      }
 
+      if (hasFiles()) {
+        const selected = files();
         const uploadResult = await uploadFiles(packageResult.data.Id, selected);
         if (!uploadResult.data) {
           return {
@@ -117,15 +115,8 @@ export function UploadPage() {
         description={t('upload.heroDescription')}
         encryptionPill={t('upload.encryptionPill')}
       />
-      <SurfaceCard>
+      <div class="surface-card">
         <form class="grid gap-3" onSubmit={handleSubmit}>
-          <UploadModeTabs
-            mode={mode()}
-            onModeChange={setMode}
-            textLabel={t('upload.tabs.text')}
-            filesLabel={t('upload.tabs.files')}
-          />
-
           <UploadMetadataFields
             title={title()}
             description={description()}
@@ -135,33 +126,28 @@ export function UploadPage() {
             onDescriptionInput={setDescription}
           />
 
-          <Show when={mode() === 'text'}>
-            <UploadTextFields
-              text={text()}
-              encrypt={encrypt()}
-              textPlaceholder={t('upload.placeholders.text')}
-              encryptLabel={t('upload.encryptLabel')}
-              onTextInput={setText}
-              onEncryptChange={setEncrypt}
-            />
-          </Show>
+          <UploadContentField
+            text={text()}
+            encrypt={encrypt()}
+            textPlaceholder={t('upload.placeholders.text')}
+            encryptLabel={t('upload.encryptLabel')}
+            filesCount={files().length}
+            dropzoneLabel={t('upload.dropzoneLabel')}
+            chooseFilesLabel={t('upload.chooseFiles')}
+            filesSelectedLabel={t('upload.filesSelected', { count: files().length })}
+            hasText={hasText()}
+            hasFiles={hasFiles()}
+            onTextInput={setText}
+            onEncryptChange={setEncrypt}
+            onFilesChange={setFiles}
+          />
 
-          <Show when={mode() === 'file'}>
-            <UploadFileFields
-              filesCount={files().length}
-              dropzoneLabel={t('upload.dropzoneLabel')}
-              chooseFilesLabel={t('upload.chooseFiles')}
-              filesSelectedLabel={t('upload.filesSelected', { count: files().length })}
-              onFilesChange={setFiles}
-            />
-          </Show>
-
-          <Button type="submit" disabled={submitMutation.isPending}>
+          <button class="btn btn-primary" type="submit" disabled={submitMutation.isPending}>
             {submitMutation.isPending ? t('upload.submit.uploading') : t('upload.submit.create')}
-          </Button>
+          </button>
 
           <Show when={error()}>
-            <NoticeBox>{error()}</NoticeBox>
+            <div class="notice-box">{error()}</div>
           </Show>
 
           <Show when={result()}>
@@ -178,7 +164,7 @@ export function UploadPage() {
             )}
           </Show>
         </form>
-      </SurfaceCard>
+      </div>
     </div>
   );
 }

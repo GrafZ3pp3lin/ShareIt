@@ -33,9 +33,4 @@ const accountRoute = createRoute({
   component: AccountPage,
 });
 
-export const routeTree = rootRoute.addChildren([
-  indexRoute,
-  authCallbackRoute,
-  shareRoute,
-  accountRoute,
-]);
+export const routeTree = rootRoute.addChildren([indexRoute, authCallbackRoute, shareRoute, accountRoute]);

@@ -1,4 +1,4 @@
-import type { RuntimeEnv } from "./runtime-config";
+import type { RuntimeEnv } from './runtime-config';
 
 export {};
 

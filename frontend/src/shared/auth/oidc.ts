@@ -1,5 +1,5 @@
-import { UserManager, type UserManagerSettings } from "oidc-client-ts";
-import { getRuntimeConfig } from "../config/runtime-config";
+import { UserManager, type UserManagerSettings } from 'oidc-client-ts';
+import { getRuntimeConfig } from '../config/runtime-config';
 
 let manager: UserManager | null | undefined;
 
@@ -15,7 +15,7 @@ export const getOidcSettings = (): UserManagerSettings | null => {
     scope: config.authScope,
     redirect_uri: config.authRedirectUri ?? `${window.location.origin}/auth/callback`,
     post_logout_redirect_uri: config.authPostLogoutRedirectUri ?? window.location.origin,
-    response_type: "code",
+    response_type: 'code',
   };
 };
 

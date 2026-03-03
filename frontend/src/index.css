@@ -1,5 +1,5 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap");
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
 
 @theme {
   --color-ink: #121212;
@@ -17,9 +17,60 @@
   --shadow-tab: 0 2px 8px rgba(0, 0, 0, 0.07);
 }
 
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2 text-sm font-semibold tracking-wide transition duration-150;
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/25 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none;
+}
+
+@utility btn-primary {
+  @apply bg-brand text-white shadow-button hover:bg-brand-hover;
+}
+
+@utility btn-secondary {
+  @apply border-border-soft bg-white text-ink shadow-button-soft hover:shadow-button-soft-hover;
+}
+
+@utility btn-ghost {
+  @apply bg-transparent text-muted hover:bg-panel-soft hover:text-ink;
+}
+
+@utility text-field {
+  @apply w-full rounded-xl border border-border-soft bg-white px-3 py-2 text-sm;
+}
+
+@utility surface-card {
+  @apply rounded-2xl border border-border-soft bg-white p-5 shadow-card;
+}
+
+@utility notice-box {
+  @apply rounded-xl border border-dashed border-border-soft bg-white px-3 py-3 text-sm text-muted;
+}
+
+@utility pill-badge {
+  @apply inline-flex items-center gap-2 rounded-full border border-border-soft bg-panel-soft px-3 py-1 text-xs font-medium text-muted;
+}
+
+@utility content-textarea-field {
+  @apply min-h-35 w-full rounded-xl border border-border-soft bg-panel-soft/45 p-3 text-sm text-ink placeholder:text-muted/80 transition resize-y;
+  @apply focus:border-ink/30 focus:bg-white focus:outline-none;
+}
+
+@utility content-textarea-field-active {
+  @apply border-ink/30 bg-white;
+}
+
+@utility content-dropzone-field {
+  @apply grid min-h-28 place-items-center rounded-xl border border-dashed border-border-soft bg-panel-soft/75 p-4 text-center text-sm text-muted transition;
+  @apply hover:border-ink/30;
+}
+
+@utility content-dropzone-field-active {
+  @apply border-ink/30 bg-white;
+}
+
 @layer base {
   :root {
-    font-family: "IBM Plex Mono", "Courier New", monospace;
+    font-family: 'IBM Plex Mono', 'Courier New', monospace;
     line-height: 1.5;
     font-weight: 400;
     color: #121212;

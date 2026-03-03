@@ -1,9 +1,5 @@
 import { Show } from 'solid-js';
 import type { ContentItemInPackage } from '../../../client';
-import { Button } from '../../../shared/components/button';
-import { NoticeBox } from '../../../shared/components/notice-box';
-import { SurfaceCard } from '../../../shared/components/surface-card';
-import { TextField } from '../../../shared/components/text-field';
 
 type ShareItemCardProps = {
   item: ContentItemInPackage;
@@ -30,7 +26,7 @@ type ShareItemCardProps = {
 
 export function ShareItemCard(props: ShareItemCardProps) {
   return (
-    <SurfaceCard class="grid gap-3">
+    <div class="surface-card grid gap-3">
       <div class="text-base font-semibold text-ink">{props.title}</div>
 
       <Show when={props.item.Text}>
@@ -42,19 +38,20 @@ export function ShareItemCard(props: ShareItemCardProps) {
             </pre>
           }
         >
-          <NoticeBox>{props.encryptedNoticeLabel}</NoticeBox>
+          <div class="notice-box">{props.encryptedNoticeLabel}</div>
           <div class="grid gap-3">
-            <TextField
+            <input
+              class="text-field"
               type="password"
               placeholder={props.passphrasePlaceholder}
               value={props.passphraseValue}
               onInput={(event) => props.onPassphraseInput(event.currentTarget.value)}
             />
-            <Button variant="secondary" type="button" onClick={props.onDecrypt} disabled={props.isDecrypting}>
+            <button class="btn btn-secondary" type="button" onClick={props.onDecrypt} disabled={props.isDecrypting}>
               {props.isDecrypting ? props.decryptingLabel : props.decryptLabel}
-            </Button>
+            </button>
             <Show when={props.decryptError}>
-              <NoticeBox>{props.decryptError}</NoticeBox>
+              <div class="notice-box">{props.decryptError}</div>
             </Show>
             <Show when={props.decryptedText}>
               <pre class="whitespace-pre-wrap rounded-xl border border-dashed border-border-soft bg-white px-3 py-3 text-sm text-muted">
@@ -69,18 +66,18 @@ export function ShareItemCard(props: ShareItemCardProps) {
         <div class="grid gap-3">
           <div class="text-sm text-muted">{props.mimeType}</div>
           <Show when={props.canDownload}>
-            <Button variant="secondary" type="button" onClick={props.onDownload}>
+            <button class="btn btn-secondary" type="button" onClick={props.onDownload}>
               {props.downloadLabel}
-            </Button>
+            </button>
           </Show>
           <Show when={props.downloadError}>
-            <NoticeBox>{props.downloadError}</NoticeBox>
+            <div class="notice-box">{props.downloadError}</div>
           </Show>
           <Show when={!props.canDownload}>
-            <NoticeBox>{props.noDownloadTokenLabel}</NoticeBox>
+            <div class="notice-box">{props.noDownloadTokenLabel}</div>
           </Show>
         </div>
       </Show>
-    </SurfaceCard>
+    </div>
   );
 }

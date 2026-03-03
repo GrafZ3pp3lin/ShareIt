@@ -1,7 +1,6 @@
 import { useNavigate } from '@tanstack/solid-router';
 import { createEffect } from 'solid-js';
 import { useI18n } from '../../../i18n';
-import { SurfaceCard } from '../../../shared/components/surface-card';
 import { useAuth } from '../auth-context';
 
 export function AuthCallbackPage() {
@@ -21,5 +20,5 @@ export function AuthCallbackPage() {
     void handle();
   });
 
-  return <SurfaceCard>{auth.isEnabled ? t('auth.finishingSignIn') : t('auth.oidcNotConfigured')}</SurfaceCard>;
+  return <div class="surface-card">{auth.isEnabled ? t('auth.finishingSignIn') : t('auth.oidcNotConfigured')}</div>;
 }

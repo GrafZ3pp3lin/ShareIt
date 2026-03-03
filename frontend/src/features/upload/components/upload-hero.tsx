@@ -1,5 +1,3 @@
-import { PillBadge } from '../../../shared/components/pill-badge';
-
 type UploadHeroProps = {
   title: string;
   description: string;
@@ -13,7 +11,7 @@ export function UploadHero(props: UploadHeroProps) {
         <h1 class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl lg:text-5xl">{props.title}</h1>
         <p class="max-w-xl text-sm text-muted sm:text-base">{props.description}</p>
       </div>
-      <PillBadge>{props.encryptionPill}</PillBadge>
+      <div class="pill-badge">{props.encryptionPill}</div>
     </div>
   );
 }
