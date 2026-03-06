@@ -109,13 +109,15 @@ export function UploadPage() {
   };
 
   return (
-    <div class="grid gap-7 lg:grid-cols-2">
-      <UploadHero
-        title={t('upload.heroTitle')}
-        description={t('upload.heroDescription')}
-        encryptionPill={t('upload.encryptionPill')}
-      />
-      <div class="surface-card">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start lg:gap-8">
+      <section class="lg:sticky lg:top-28">
+        <UploadHero
+          title={t('upload.heroTitle')}
+          description={t('upload.heroDescription')}
+          encryptionPill={t('upload.encryptionPill')}
+        />
+      </section>
+      <section class="surface-card">
         <form class="grid gap-3" onSubmit={handleSubmit}>
           <UploadMetadataFields
             title={title()}
@@ -164,7 +166,7 @@ export function UploadPage() {
             )}
           </Show>
         </form>
-      </div>
+      </section>
     </div>
   );
 }

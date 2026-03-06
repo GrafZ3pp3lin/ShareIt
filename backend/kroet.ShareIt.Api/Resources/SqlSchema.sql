@@ -21,9 +21,7 @@ CREATE INDEX IF NOT EXISTS idx_packages_download_limit ON content_packages(curre
     WHERE max_download_count IS NOT NULL;
 
 -- Index for cleanup queries (finding expired or limit-reached packages)
-CREATE INDEX IF NOT EXISTS idx_packages_for_cleanup ON content_packages(id)
-    WHERE (max_download_count IS NOT NULL AND current_download_count >= max_download_count)
-        OR (expires_at IS NOT NULL AND expires_at < NOW());
+CREATE INDEX IF NOT EXISTS idx_packages_for_cleanup ON content_packages(expires_at, current_download_count, max_download_count);
 
 
 -- Table for external content metadata
@@ -65,6 +63,4 @@ CREATE TABLE IF NOT EXISTS download_tokens (
 CREATE INDEX IF NOT EXISTS idx_download_tokens_token ON download_tokens(token) WHERE NOT is_used;
 CREATE INDEX IF NOT EXISTS idx_download_tokens_expires_at ON download_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_download_tokens_content_id ON download_tokens(content_id);
-CREATE INDEX IF NOT EXISTS idx_download_tokens_cleanup ON download_tokens(id) 
-    WHERE expires_at < NOW() OR (is_used = true);
-
+CREATE INDEX IF NOT EXISTS idx_download_tokens_cleanup ON download_tokens(expires_at, is_used, used_at);

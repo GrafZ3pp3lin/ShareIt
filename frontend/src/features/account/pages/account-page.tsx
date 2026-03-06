@@ -7,12 +7,14 @@ export function AccountPage() {
   const { t } = useI18n();
 
   return (
-    <div class="surface-card grid gap-3">
-      <h2 class="text-lg font-semibold text-ink">{t('account.title')}</h2>
-      <Show when={auth.isAuthenticated} fallback={<div class="notice-box">{t('account.loginPrompt')}</div>}>
-        <p class="text-sm text-muted">{t('account.description')}</p>
-        <div class="notice-box">{t('account.notWired')}</div>
-      </Show>
-    </div>
+    <section class="mx-auto w-full max-w-3xl">
+      <div class="surface-card grid gap-3">
+        <h2 class="text-lg font-semibold text-ink">{t('account.title')}</h2>
+        <Show when={auth.isAuthenticated} fallback={<div class="notice-box">{t('account.loginPrompt')}</div>}>
+          <p class="text-sm text-muted">{t('account.description')}</p>
+          <div class="notice-box">{t('account.notWired')}</div>
+        </Show>
+      </div>
+    </section>
   );
 }

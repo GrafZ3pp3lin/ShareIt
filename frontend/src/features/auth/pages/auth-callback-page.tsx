@@ -20,5 +20,9 @@ export function AuthCallbackPage() {
     void handle();
   });
 
-  return <div class="surface-card">{auth.isEnabled ? t('auth.finishingSignIn') : t('auth.oidcNotConfigured')}</div>;
+  return (
+    <section class="mx-auto w-full max-w-2xl">
+      <div class="surface-card">{auth.isEnabled ? t('auth.finishingSignIn') : t('auth.oidcNotConfigured')}</div>
+    </section>
+  );
 }

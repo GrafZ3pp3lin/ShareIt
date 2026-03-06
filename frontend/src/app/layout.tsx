@@ -9,8 +9,8 @@ export function AppLayout() {
 
   return (
     <div class="min-h-screen flex flex-col">
-      <header class="fixed inset-x-0 top-0 z-50 border-b border-border-soft/80 bg-white/80 backdrop-blur-sm">
-        <div class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-5 py-5 sm:px-8">
+      <header class="border-b border-border-soft/80 bg-white/90 sm:sticky sm:top-0 sm:z-50 sm:backdrop-blur-sm">
+        <div class="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-4 sm:px-8 sm:py-5 lg:flex-row lg:items-center lg:justify-between">
           <Link class="flex items-center gap-3 text-sm font-semibold tracking-[0.2em] uppercase" to="/">
             <span
               class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border-soft bg-white text-xs font-semibold"
@@ -20,8 +20,8 @@ export function AppLayout() {
             </span>
             <span>{t('app.brand')}</span>
           </Link>
-          <nav class="flex flex-wrap items-center gap-2">
-            <Link class="btn btn-ghost" to="/">
+          <nav class="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
+            <Link class="btn btn-ghost w-full sm:w-auto" to="/">
               {t('app.nav.upload')}
             </Link>
             <Show
@@ -35,15 +35,15 @@ export function AppLayout() {
               <Show
                 when={auth.isAuthenticated}
                 fallback={
-                  <button class="btn btn-secondary" type="button" onClick={auth.login}>
+                  <button class="btn btn-secondary w-full sm:w-auto" type="button" onClick={auth.login}>
                     {t('app.nav.login')}
                   </button>
                 }
               >
-                <Link class="btn btn-secondary" to="/account">
+                <Link class="btn btn-secondary w-full sm:w-auto" to="/account">
                   {t('app.nav.myUploads')}
                 </Link>
-                <button class="btn btn-ghost" type="button" onClick={auth.logout}>
+                <button class="btn btn-ghost w-full sm:w-auto" type="button" onClick={auth.logout}>
                   {t('app.nav.logout')}
                 </button>
               </Show>
@@ -51,10 +51,10 @@ export function AppLayout() {
           </nav>
         </div>
       </header>
-      <main class="mx-auto w-full max-w-5xl flex-1 px-5 pt-28 pb-8 sm:px-8 sm:pt-30 sm:pb-10">
+      <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-8 sm:py-10">
         <Outlet />
       </main>
-      <footer class="mx-auto w-full max-w-5xl px-5 pb-8 text-xs text-muted sm:px-8">{t('app.footer')}</footer>
+      <footer class="mx-auto w-full max-w-5xl px-4 pb-6 text-xs text-muted sm:px-8 sm:pb-8">{t('app.footer')}</footer>
     </div>
   );
 }

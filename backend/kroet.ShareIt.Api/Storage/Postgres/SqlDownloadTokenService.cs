@@ -12,6 +12,11 @@ namespace kroet.ShareIt.Api.Storage.Postgres;
 /// </summary>
 public class SqlDownloadTokenService : IDownloadTokenService
 {
+    static SqlDownloadTokenService()
+    {
+        DefaultTypeMap.MatchNamesWithUnderscores = true;
+    }
+
     private readonly SqlStorageSettings _settings;
     private readonly DownloadSettings _downloadSettings;
     private readonly TimeProvider _timeProvider;

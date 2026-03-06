@@ -3,5 +3,6 @@
   <Project Path="kroet.Permission.Test/kroet.Permission.Test.csproj" />
   <Project Path="kroet.Permissions/kroet.Permissions.csproj" />
   <Project Path="kroet.ShareIt.Api.Test/kroet.ShareIt.Api.Test.csproj" />
+  <Project Path="kroet.ShareIt.Api.IntegrationTest/kroet.ShareIt.Api.IntegrationTest.csproj" />
   <Project Path="kroet.ShareIt.Api/kroet.ShareIt.Api.csproj" />
 </Solution>

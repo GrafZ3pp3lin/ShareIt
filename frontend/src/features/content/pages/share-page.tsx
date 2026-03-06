@@ -80,14 +80,16 @@ export function SharePage() {
   };
 
   return (
-    <div class="grid gap-3">
-      <SharePackageSummary
-        title={t('share.title')}
-        loadingLabel={packageQuery.isLoading ? t('share.loading') : ''}
-        loadError={packageError() ? getErrorMessage(packageError(), t('share.loadFailed')) : undefined}
-        packageLabel={packageData() ? t('share.packageLabel', { id: packageData()!.Package.Id }) : undefined}
-        itemsLabel={packageData() ? t('share.itemsLabel', { count: packageData()!.Package.ItemCount }) : undefined}
-      />
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:items-start lg:gap-6">
+      <section class="lg:sticky lg:top-28">
+        <SharePackageSummary
+          title={t('share.title')}
+          loadingLabel={packageQuery.isLoading ? t('share.loading') : ''}
+          loadError={packageError() ? getErrorMessage(packageError(), t('share.loadFailed')) : undefined}
+          packageLabel={packageData() ? t('share.packageLabel', { id: packageData()!.Package.Id }) : undefined}
+          itemsLabel={packageData() ? t('share.itemsLabel', { count: packageData()!.Package.ItemCount }) : undefined}
+        />
+      </section>
 
       <Show when={packageData()?.Items?.length}>
         <div class="grid gap-3">

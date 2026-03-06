@@ -10,6 +10,11 @@ namespace kroet.ShareIt.Api.Storage.Postgres;
 /// </summary>
 public class SqlContentStorageHandler : IContentStorageHandler
 {
+    static SqlContentStorageHandler()
+    {
+        DefaultTypeMap.MatchNamesWithUnderscores = true;
+    }
+
     private readonly SqlStorageSettings _settings;
     private readonly ILogger<SqlContentStorageHandler> _logger;
 
@@ -573,4 +578,3 @@ public class SqlContentStorageHandler : IContentStorageHandler
         public string Url { get; init; } = string.Empty;
     }
 }
-
