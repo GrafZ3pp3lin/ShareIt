@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseEncryptedTextEnvelope } from './envelope';
-import { decryptText, encryptText, generatePassphrase } from './crypto';
+import { parseEncryptedTextEnvelope } from './envelope.ts';
+import { decryptText, encryptText, generatePassphrase } from './crypto.ts';
 
 describe('generatePassphrase', () => {
   it('returns a URL-safe base64 passphrase', () => {

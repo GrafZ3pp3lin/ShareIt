@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseEncryptedTextEnvelope } from './envelope';
+import { parseEncryptedTextEnvelope } from './envelope.ts';
 
 describe('parseEncryptedTextEnvelope', () => {
   it('parses a valid envelope', () => {
@@ -10,7 +10,7 @@ describe('parseEncryptedTextEnvelope', () => {
       iter: 100000,
       salt: 'salt',
       iv: 'iv',
-      ct: 'ciphertext',
+      ct: 'ciphertext'
     });
 
     expect(parseEncryptedTextEnvelope(value)).toEqual({
@@ -19,7 +19,7 @@ describe('parseEncryptedTextEnvelope', () => {
       iter: 100000,
       salt: 'salt',
       iv: 'iv',
-      ct: 'ciphertext',
+      ct: 'ciphertext'
     });
   });
 
@@ -36,7 +36,7 @@ describe('parseEncryptedTextEnvelope', () => {
           iter: '100000',
           salt: 'salt',
           iv: 'iv',
-          ct: 'ciphertext',
+          ct: 'ciphertext'
         })
       )
     ).toBeNull();
@@ -49,7 +49,7 @@ describe('parseEncryptedTextEnvelope', () => {
           iter: 100000,
           salt: 'salt',
           iv: 'iv',
-          ct: 'ciphertext',
+          ct: 'ciphertext'
         })
       )
     ).toBeNull();

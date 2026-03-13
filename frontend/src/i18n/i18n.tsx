@@ -1,10 +1,10 @@
 import { createContext, createMemo, createSignal, useContext } from 'solid-js';
 import type { JSX, ParentProps } from 'solid-js';
 import * as i18n from '@solid-primitives/i18n';
-import { dict as enDict } from './en';
+import { dict as enDict } from './en.ts';
 
 const dictionaries = {
-  en: enDict,
+  en: enDict
 };
 
 export type Locale = keyof typeof dictionaries;

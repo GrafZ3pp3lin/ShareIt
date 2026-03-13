@@ -1,7 +1,7 @@
 import { Link, Outlet } from '@tanstack/solid-router';
 import { Show } from 'solid-js';
-import { useAuth } from '../features/auth/auth-context';
-import { useI18n } from '../i18n';
+import { useAuth } from '../features/auth/auth-context.tsx';
+import { useI18n } from '../i18n/i18n.tsx';
 
 export function AppLayout() {
   const auth = useAuth();

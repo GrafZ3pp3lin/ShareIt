@@ -1,4 +1,4 @@
-import { parseEncryptedTextEnvelope, type EncryptedTextEnvelope } from './envelope';
+import { parseEncryptedTextEnvelope, type EncryptedTextEnvelope } from './envelope.ts';
 
 const PBKDF2_ITERATIONS = 150000;
 const textEncoder = new TextEncoder();
@@ -28,14 +28,14 @@ const toArrayBuffer = (bytes: Uint8Array) =>
 
 const deriveKey = async (passphrase: string, salt: Uint8Array, iterations: number) => {
   const keyMaterial = await crypto.subtle.importKey('raw', textEncoder.encode(passphrase), 'PBKDF2', false, [
-    'deriveKey',
+    'deriveKey'
   ]);
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
       salt: toArrayBuffer(salt),
       iterations,
-      hash: 'SHA-256',
+      hash: 'SHA-256'
     },
     keyMaterial,
     { name: 'AES-GCM', length: 256 },
@@ -61,7 +61,7 @@ export const encryptText = async (plainText: string, passphrase: string) => {
     iter: PBKDF2_ITERATIONS,
     salt: toBase64Url(salt),
     iv: toBase64Url(iv),
-    ct: toBase64Url(new Uint8Array(cipherBuffer)),
+    ct: toBase64Url(new Uint8Array(cipherBuffer))
   };
 
   return JSON.stringify(envelope);

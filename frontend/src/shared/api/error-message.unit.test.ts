@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getErrorMessage } from './error-message';
+import { getErrorMessage } from './error-message.ts';
 
 describe('getErrorMessage', () => {
   it('returns the fallback for nullish values', () => {

@@ -1,7 +1,7 @@
-import { client } from '../../client/client.gen';
-import { getRuntimeConfig } from '../config/runtime-config';
-import { getAuthToken } from '../auth/oidc';
-import { getGuestId } from './guest';
+import { client } from '../../client/client.gen.ts';
+import { getRuntimeConfig } from '../config/runtime-config.ts';
+import { getAuthToken } from '../auth/oidc.ts';
+import { getGuestId } from './guest.ts';
 
 let isConfigured = false;
 
@@ -15,7 +15,7 @@ export const configureApiClient = () => {
   client.setConfig({
     baseUrl,
     responseStyle: 'fields',
-    throwOnError: false,
+    throwOnError: false
   });
 
   client.interceptors.request.use(async (request) => {

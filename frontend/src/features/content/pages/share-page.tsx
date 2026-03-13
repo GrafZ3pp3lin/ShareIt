@@ -2,13 +2,13 @@ import { useQuery } from '@tanstack/solid-query';
 import { useParams } from '@tanstack/solid-router';
 import { For, Show, createSignal } from 'solid-js';
 import type { ContentItemInPackage } from '../../../client';
-import { getPackageDetails, downloadContent } from '../../../shared/api/content';
-import { getErrorMessage } from '../../../shared/api/error-message';
-import { decryptText } from '../../../shared/crypto/crypto';
-import { parseEncryptedTextEnvelope } from '../../../shared/crypto/envelope';
-import { useI18n } from '../../../i18n';
-import { ShareItemCard } from '../components/share-item-card';
-import { SharePackageSummary } from '../components/share-package-summary';
+import { getPackageDetails, downloadContent } from '../../../shared/api/content.ts';
+import { getErrorMessage } from '../../../shared/api/error-message.ts';
+import { decryptText } from '../../../shared/crypto/crypto.ts';
+import { parseEncryptedTextEnvelope } from '../../../shared/crypto/envelope.ts';
+import { ShareItemCard } from '../components/share-item-card.tsx';
+import { useI18n } from '../../../i18n/i18n.tsx';
+import { SharePackageSummary } from '../components/share-package-summary.tsx';
 
 export function SharePage() {
   const { t } = useI18n();
@@ -23,7 +23,7 @@ export function SharePage() {
   const packageQuery = useQuery(() => ({
     queryKey: ['package', packageId()],
     queryFn: () => getPackageDetails(packageId()),
-    enabled: Boolean(packageId()),
+    enabled: Boolean(packageId())
   }));
 
   const packageData = () => packageQuery.data?.data;
@@ -38,7 +38,7 @@ export function SharePage() {
     if (!passphrase) {
       setErrors((current) => ({
         ...current,
-        [item.Id]: t('share.enterPassphrase'),
+        [item.Id]: t('share.enterPassphrase')
       }));
       return;
     }
@@ -50,7 +50,7 @@ export function SharePage() {
     } catch {
       setErrors((current) => ({
         ...current,
-        [item.Id]: t('share.invalidPassphrase'),
+        [item.Id]: t('share.invalidPassphrase')
       }));
     } finally {
       setDecrypting((current) => ({ ...current, [item.Id]: false }));
@@ -65,7 +65,7 @@ export function SharePage() {
     if (!result.data) {
       setDownloadErrors((current) => ({
         ...current,
-        [item.Id]: getErrorMessage(result.error, t('share.downloadFailed')),
+        [item.Id]: getErrorMessage(result.error, t('share.downloadFailed'))
       }));
       return;
     }

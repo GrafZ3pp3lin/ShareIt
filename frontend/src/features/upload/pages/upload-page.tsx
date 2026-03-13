@@ -1,13 +1,13 @@
 import { useMutation } from '@tanstack/solid-query';
 import { Show, createMemo, createSignal } from 'solid-js';
-import { UploadContentField, UploadMetadataFields } from '../components/upload-form-fields';
-import { UploadHero } from '../components/upload-hero';
-import { UploadResultPanel } from '../components/upload-result-panel';
-import type { UploadResult } from '../components/upload-types';
-import { addTextContent, createContentPackage, uploadFiles } from '../../../shared/api/content';
-import { getErrorMessage } from '../../../shared/api/error-message';
-import { encryptText, generatePassphrase } from '../../../shared/crypto/crypto';
-import { useI18n } from '../../../i18n';
+import { UploadContentField, UploadMetadataFields } from '../components/upload-form-fields.tsx';
+import { UploadHero } from '../components/upload-hero.tsx';
+import { UploadResultPanel } from '../components/upload-result-panel.tsx';
+import type { UploadResult } from '../components/upload-types.ts';
+import { addTextContent, createContentPackage, uploadFiles } from '../../../shared/api/content.ts';
+import { getErrorMessage } from '../../../shared/api/error-message.ts';
+import { encryptText, generatePassphrase } from '../../../shared/crypto/crypto.ts';
+import { useI18n } from '../../../i18n/i18n.tsx';
 
 export function UploadPage() {
   const { t } = useI18n();
@@ -36,12 +36,12 @@ export function UploadPage() {
 
       const packageResult = await createContentPackage({
         Title: title() || null,
-        Description: description() || null,
+        Description: description() || null
       });
 
       if (!packageResult.data) {
         return {
-          error: getErrorMessage(packageResult.error, t('upload.errors.createPackage')),
+          error: getErrorMessage(packageResult.error, t('upload.errors.createPackage'))
         };
       }
 
@@ -55,7 +55,7 @@ export function UploadPage() {
             payload = await encryptText(payload, passphrase);
           } catch (err) {
             return {
-              error: getErrorMessage(err, t('upload.errors.encryptFailed')),
+              error: getErrorMessage(err, t('upload.errors.encryptFailed'))
             };
           }
         }
@@ -63,7 +63,7 @@ export function UploadPage() {
         const addTextResult = await addTextContent(packageResult.data.Id, payload);
         if (!addTextResult.data) {
           return {
-            error: getErrorMessage(addTextResult.error, t('upload.errors.addTextFailed')),
+            error: getErrorMessage(addTextResult.error, t('upload.errors.addTextFailed'))
           };
         }
       } else {
@@ -75,14 +75,14 @@ export function UploadPage() {
         const uploadResult = await uploadFiles(packageResult.data.Id, selected);
         if (!uploadResult.data) {
           return {
-            error: getErrorMessage(uploadResult.error, t('upload.errors.uploadFilesFailed')),
+            error: getErrorMessage(uploadResult.error, t('upload.errors.uploadFilesFailed'))
           };
         }
       }
 
       const link = `${window.location.origin}/s/${packageResult.data.Id}`;
       return { link, passphrase };
-    },
+    }
   }));
 
   const handleSubmit = (event: Event) => {
@@ -96,7 +96,7 @@ export function UploadPage() {
           return;
         }
         setResult(value);
-      },
+      }
     });
   };
 

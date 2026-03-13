@@ -1,6 +1,6 @@
 import type { User } from 'oidc-client-ts';
 import { createContext, createEffect, createMemo, createSignal, onCleanup, useContext } from 'solid-js';
-import { getOidcSettings, getUserManager } from '../../shared/auth/oidc';
+import { getOidcSettings, getUserManager } from '../../shared/auth/oidc.ts';
 
 type AuthContextValue = {
   isEnabled: boolean;
@@ -63,7 +63,7 @@ export function AuthProvider(props: { children: any }) {
       }
       await manager.signinRedirectCallback();
       await loadUser();
-    },
+    }
   }));
 
   return <AuthContext.Provider value={value()}>{props.children}</AuthContext.Provider>;

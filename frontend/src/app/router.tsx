@@ -1,9 +1,9 @@
 import { createRouter } from '@tanstack/solid-router';
-import { routeTree } from '../shared/routes/route-tree';
+import { routeTree } from '../shared/routes/route-tree.tsx';
 
 export const router = createRouter({
   routeTree,
-  defaultPreload: 'intent',
+  defaultPreload: 'intent'
 });
 
 declare module '@tanstack/solid-router' {

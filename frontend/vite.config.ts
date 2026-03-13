@@ -11,9 +11,10 @@ export default defineConfig({
     port: 3001,
   },
   plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' }), mkcert()],
-  esbuild: {
-    jsx: 'preserve',
-    jsxImportSource: 'solid-js',
+  oxc: {
+    jsx: {
+      importSource: 'solid-js',
+    },
   },
   define: {
     // solid-testing-library relies on "process" which is not shimmed by default
@@ -24,18 +25,14 @@ export default defineConfig({
     projects: [
       {
         test: {
-          include: [
-            'tests/unit/**/*.{test,spec}.{ts,tsx}',
-            'tests/**/*.unit.{test,spec}.{ts,tsx}',
-            'src/**/*.unit.{test,spec}.{ts,tsx}',
-          ],
+          include: ['src/**/*.unit.{test,spec}.{ts,tsx}'],
           name: 'unit',
           environment: 'node',
         },
       },
       {
         test: {
-          include: ['tests/**/*.browser.{test,spec}.{ts,tsx}', 'src/**/*.browser.{test,spec}.{ts,tsx}'],
+          include: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
           name: 'components',
           environment: 'jsdom',
           setupFiles: './src/tests/vitest-setup.ts',

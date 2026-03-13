@@ -33,7 +33,7 @@ export function ShareItemCard(props: ShareItemCardProps) {
         <Show
           when={props.isEncryptedText}
           fallback={
-            <pre class="overflow-x-auto whitespace-pre-wrap break-words rounded-xl border border-dashed border-border-soft bg-white px-3 py-3 text-sm text-muted">
+            <pre class="overflow-x-auto whitespace-pre-wrap wrap-break-word rounded-xl border border-dashed border-border-soft bg-white px-3 py-3 text-sm text-muted">
               {props.rawText}
             </pre>
           }
@@ -54,7 +54,7 @@ export function ShareItemCard(props: ShareItemCardProps) {
               <div class="notice-box">{props.decryptError}</div>
             </Show>
             <Show when={props.decryptedText}>
-              <pre class="overflow-x-auto whitespace-pre-wrap break-words rounded-xl border border-dashed border-border-soft bg-white px-3 py-3 text-sm text-muted">
+              <pre class="overflow-x-auto whitespace-pre-wrap wrap-break-word rounded-xl border border-dashed border-border-soft bg-white px-3 py-3 text-sm text-muted">
                 {props.decryptedText}
               </pre>
             </Show>

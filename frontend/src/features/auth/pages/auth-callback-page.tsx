@@ -1,7 +1,7 @@
 import { useNavigate } from '@tanstack/solid-router';
 import { createEffect } from 'solid-js';
-import { useI18n } from '../../../i18n';
-import { useAuth } from '../auth-context';
+import { useI18n } from '../../../i18n/i18n.tsx';
+import { useAuth } from '../auth-context.tsx';
 
 export function AuthCallbackPage() {
   const auth = useAuth();

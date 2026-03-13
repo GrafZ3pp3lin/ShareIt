@@ -1,11 +1,14 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "ignorePatterns": ["dist/**", "src/client/**"],
-  "plugins": [],
+  "plugins": ["import"],
   "categories": {
     "correctness": "warn"
   },
   "env": {
     "builtin": true
+  },
+  "rules": {
+    "import/extensions": ["error", "always", { "ignorePackages": true }]
   }
 }
