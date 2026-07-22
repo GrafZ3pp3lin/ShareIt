@@ -17,7 +17,7 @@ import type {
   GetPackageResponses,
   UploadFileToPackageData,
   UploadFileToPackageErrors,
-  UploadFileToPackageResponses,
+  UploadFileToPackageResponses
 } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<
@@ -46,8 +46,8 @@ export const createPackage = <ThrowOnError extends boolean = false>(
     ...options,
     headers: {
       'Content-Type': null,
-      ...options.headers,
-    },
+      ...options.headers
+    }
   });
 
 export const uploadFileToPackage = <ThrowOnError extends boolean = false>(
@@ -59,8 +59,8 @@ export const uploadFileToPackage = <ThrowOnError extends boolean = false>(
     ...options,
     headers: {
       'Content-Type': null,
-      ...options.headers,
-    },
+      ...options.headers
+    }
   });
 
 export const addTextToPackage = <ThrowOnError extends boolean = false>(
@@ -71,14 +71,14 @@ export const addTextToPackage = <ThrowOnError extends boolean = false>(
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...options.headers,
-    },
+      ...options.headers
+    }
   });
 
 export const getPackage = <ThrowOnError extends boolean = false>(options: Options<GetPackageData, ThrowOnError>) =>
   (options.client ?? client).get<GetPackageResponses, GetPackageErrors, ThrowOnError>({
     url: '/api/v1/content/package/{packageId}',
-    ...options,
+    ...options
   });
 
 export const downloadContentWithToken = <ThrowOnError extends boolean = false>(
@@ -86,5 +86,5 @@ export const downloadContentWithToken = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<DownloadContentWithTokenResponses, DownloadContentWithTokenErrors, ThrowOnError>({
     url: '/api/v1/content/package/{packageId}/content/{contentId}/download',
-    ...options,
+    ...options
   });

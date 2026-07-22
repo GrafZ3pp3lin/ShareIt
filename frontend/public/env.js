@@ -4,5 +4,5 @@ window.env = {
   AuthClientId: '',
   AuthRedirectUri: '',
   AuthPostLogoutRedirectUri: '',
-  AuthScope: 'openid profile email roles',
+  AuthScope: 'openid profile email roles'
 };

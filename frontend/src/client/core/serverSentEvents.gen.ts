@@ -117,7 +117,7 @@ export const createSseClient = <TData = unknown>({
           ...options,
           body: options.serializedBody,
           headers,
-          signal,
+          signal
         };
         let request = new Request(url, requestInit);
         if (onRequest) {
@@ -204,7 +204,7 @@ export const createSseClient = <TData = unknown>({
                 data,
                 event: eventName,
                 id: lastEventId,
-                retry: retryDelay,
+                retry: retryDelay
               });
 
               if (dataLines.length) {

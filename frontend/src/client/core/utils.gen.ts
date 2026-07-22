@@ -5,7 +5,7 @@ import {
   type ArraySeparatorStyle,
   serializeArrayParam,
   serializeObjectParam,
-  serializePrimitiveParam,
+  serializePrimitiveParam
 } from './pathSerializer.gen';
 
 export interface PathSerializer {
@@ -56,7 +56,7 @@ export const defaultPathSerializer = ({ path, url: _url }: PathSerializer) => {
             name,
             style,
             value: value as Record<string, unknown>,
-            valueOnly: true,
+            valueOnly: true
           })
         );
         continue;
@@ -67,7 +67,7 @@ export const defaultPathSerializer = ({ path, url: _url }: PathSerializer) => {
           match,
           `;${serializePrimitiveParam({
             name,
-            value: value as string,
+            value: value as string
           })}`
         );
         continue;
@@ -85,7 +85,7 @@ export const getUrl = ({
   path,
   query,
   querySerializer,
-  url: _url,
+  url: _url
 }: {
   baseUrl?: string;
   path?: Record<string, unknown>;

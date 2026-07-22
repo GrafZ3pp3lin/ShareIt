@@ -11,5 +11,5 @@ type ReactLike = {
 
 (globalThis as typeof globalThis & { React?: ReactLike }).React = {
   createElement: h,
-  Fragment: (props) => props.children,
+  Fragment: (props) => props.children
 };

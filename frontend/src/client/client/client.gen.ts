@@ -11,7 +11,7 @@ import {
   getParseAs,
   mergeConfigs,
   mergeHeaders,
-  setAuthParams,
+  setAuthParams
 } from './utils.gen';
 
 type ReqInit = Omit<RequestInit, 'body' | 'headers'> & {
@@ -37,13 +37,13 @@ export const createClient = (config: Config = {}): Client => {
       ...options,
       fetch: options.fetch ?? _config.fetch ?? globalThis.fetch,
       headers: mergeHeaders(_config.headers, options.headers),
-      serializedBody: undefined,
+      serializedBody: undefined
     };
 
     if (opts.security) {
       await setAuthParams({
         ...opts,
-        security: opts.security,
+        security: opts.security
       });
     }
 
@@ -71,7 +71,7 @@ export const createClient = (config: Config = {}): Client => {
     const requestInit: ReqInit = {
       redirect: 'follow',
       ...opts,
-      body: getValidRequestBody(opts),
+      body: getValidRequestBody(opts)
     };
 
     let request = new Request(url, requestInit);
@@ -111,7 +111,7 @@ export const createClient = (config: Config = {}): Client => {
         : {
             error: finalError,
             request,
-            response: undefined as any,
+            response: undefined as any
           };
     }
 
@@ -123,7 +123,7 @@ export const createClient = (config: Config = {}): Client => {
 
     const result = {
       request,
-      response,
+      response
     };
 
     if (response.ok) {
@@ -153,7 +153,7 @@ export const createClient = (config: Config = {}): Client => {
           ? emptyData
           : {
               data: emptyData,
-              ...result,
+              ...result
             };
       }
 
@@ -177,7 +177,7 @@ export const createClient = (config: Config = {}): Client => {
             ? response.body
             : {
                 data: response.body,
-                ...result,
+                ...result
               };
       }
 
@@ -195,7 +195,7 @@ export const createClient = (config: Config = {}): Client => {
         ? data
         : {
             data,
-            ...result,
+            ...result
           };
     }
 
@@ -228,7 +228,7 @@ export const createClient = (config: Config = {}): Client => {
       ? undefined
       : {
           error: finalError,
-          ...result,
+          ...result
         };
   };
 
@@ -251,7 +251,7 @@ export const createClient = (config: Config = {}): Client => {
         return request;
       },
       serializedBody: getValidRequestBody(opts) as BodyInit | null | undefined,
-      url,
+      url
     });
   };
 
@@ -278,8 +278,8 @@ export const createClient = (config: Config = {}): Client => {
       patch: makeSseFn('PATCH'),
       post: makeSseFn('POST'),
       put: makeSseFn('PUT'),
-      trace: makeSseFn('TRACE'),
+      trace: makeSseFn('TRACE')
     },
-    trace: makeMethodFn('TRACE'),
+    trace: makeMethodFn('TRACE')
   } as Client;
 };

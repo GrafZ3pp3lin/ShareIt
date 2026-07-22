@@ -69,7 +69,7 @@ export const serializeArrayParam = ({
   explode,
   name,
   style,
-  value,
+  value
 }: SerializeOptions<ArraySeparatorStyle> & {
   value: unknown[];
 }) => {
@@ -99,7 +99,7 @@ export const serializeArrayParam = ({
       return serializePrimitiveParam({
         allowReserved,
         name,
-        value: v as string,
+        value: v as string
       });
     })
     .join(separator);
@@ -126,7 +126,7 @@ export const serializeObjectParam = ({
   name,
   style,
   value,
-  valueOnly,
+  valueOnly
 }: SerializeOptions<ObjectSeparatorStyle> & {
   value: Record<string, unknown> | Date;
   valueOnly?: boolean;
@@ -159,7 +159,7 @@ export const serializeObjectParam = ({
       serializePrimitiveParam({
         allowReserved,
         name: style === 'deepObject' ? `${name}[${key}]` : key,
-        value: v as string,
+        value: v as string
       })
     )
     .join(separator);

@@ -8,17 +8,17 @@ import mkcert from 'vite-plugin-mkcert';
 export default defineConfig({
   server: {
     host: 'localhost',
-    port: 3001,
+    port: 3001
   },
   plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' }), mkcert()],
   oxc: {
     jsx: {
-      importSource: 'solid-js',
-    },
+      importSource: 'solid-js'
+    }
   },
   define: {
     // solid-testing-library relies on "process" which is not shimmed by default
-    'process.env.STL_SKIP_AUTO_CLEANUP': 'false',
+    'process.env.STL_SKIP_AUTO_CLEANUP': 'false'
   },
   test: {
     globals: true,
@@ -27,17 +27,17 @@ export default defineConfig({
         test: {
           include: ['src/**/*.unit.{test,spec}.{ts,tsx}'],
           name: 'unit',
-          environment: 'node',
-        },
+          environment: 'node'
+        }
       },
       {
         test: {
           include: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
           name: 'components',
           environment: 'jsdom',
-          setupFiles: './src/tests/vitest-setup.ts',
-        },
-      },
-    ],
-  },
+          setupFiles: './src/tests/vitest-setup.ts'
+        }
+      }
+    ]
+  }
 });

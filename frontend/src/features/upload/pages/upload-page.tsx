@@ -1,30 +1,29 @@
 import { useMutation } from '@tanstack/solid-query';
 import { Show, createMemo, createSignal } from 'solid-js';
-import { UploadContentField, UploadMetadataFields } from '../components/upload-form-fields.tsx';
-import { UploadHero } from '../components/upload-hero.tsx';
+import { UploadFilePanel, UploadMetadataFields, UploadTextPanel } from '../components/upload-form-fields.tsx';
 import { UploadResultPanel } from '../components/upload-result-panel.tsx';
 import type { UploadResult } from '../components/upload-types.ts';
+import { DEFAULT_EXPIRY_INDEX, EXPIRY_OPTIONS, cycleExpiryIndex } from '../upload-expiry.ts';
 import { addTextContent, createContentPackage, uploadFiles } from '../../../shared/api/content.ts';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
 import { encryptText, generatePassphrase } from '../../../shared/crypto/crypto.ts';
+import { TerminalWindow } from '../../../shared/components/terminal-window.tsx';
 import { useI18n } from '../../../i18n/i18n.tsx';
 
 export function UploadPage() {
   const { t } = useI18n();
+  const [stage, setStage] = createSignal<'form' | 'result'>('form');
   const [title, setTitle] = createSignal('');
   const [description, setDescription] = createSignal('');
   const [text, setText] = createSignal('');
   const [files, setFiles] = createSignal<File[]>([]);
   const [encrypt, setEncrypt] = createSignal(true);
+  const [expiryIndex, setExpiryIndex] = createSignal(DEFAULT_EXPIRY_INDEX);
   const [error, setError] = createSignal<string | null>(null);
   const [result, setResult] = createSignal<UploadResult | null>(null);
   const hasText = createMemo(() => text().trim().length > 0);
   const hasFiles = createMemo(() => files().length > 0);
-
-  const resetStatus = () => {
-    setError(null);
-    setResult(null);
-  };
+  const expiry = createMemo(() => EXPIRY_OPTIONS[expiryIndex()]);
 
   type SubmitResult = UploadResult | { error: string };
 
@@ -36,7 +35,8 @@ export function UploadPage() {
 
       const packageResult = await createContentPackage({
         Title: title() || null,
-        Description: description() || null
+        Description: description() || null,
+        TimeToLiveHours: expiry().hours
       });
 
       if (!packageResult.data) {
@@ -46,6 +46,7 @@ export function UploadPage() {
       }
 
       let passphrase: string | undefined;
+      const willEncrypt = hasText() && encrypt();
 
       if (hasText()) {
         let payload = text().trim();
@@ -66,8 +67,6 @@ export function UploadPage() {
             error: getErrorMessage(addTextResult.error, t('upload.errors.addTextFailed'))
           };
         }
-      } else {
-        passphrase = undefined;
       }
 
       if (hasFiles()) {
@@ -81,13 +80,14 @@ export function UploadPage() {
       }
 
       const link = `${window.location.origin}/s/${packageResult.data.Id}`;
-      return { link, passphrase };
+      return { link, passphrase, expiryLabel: expiry().label, encrypted: willEncrypt };
     }
   }));
 
   const handleSubmit = (event: Event) => {
     event.preventDefault();
-    resetStatus();
+    setError(null);
+    setResult(null);
 
     submitMutation.mutate(undefined, {
       onSuccess: (value) => {
@@ -96,8 +96,20 @@ export function UploadPage() {
           return;
         }
         setResult(value);
+        setStage('result');
       }
     });
+  };
+
+  const resetForm = () => {
+    setTitle('');
+    setDescription('');
+    setText('');
+    setFiles([]);
+    setError(null);
+    setResult(null);
+    submitMutation.reset();
+    setStage('form');
   };
 
   const copyToClipboard = async (value: string) => {
@@ -108,65 +120,100 @@ export function UploadPage() {
     }
   };
 
+  const resultCaption = createMemo(() => {
+    const value = result();
+    if (!value) {
+      return '';
+    }
+    return t(value.encrypted ? 'upload.result.captionWithPassword' : 'upload.result.captionPlain', {
+      expiry: value.expiryLabel
+    });
+  });
+
   return (
-    <div class="grid gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start lg:gap-8">
-      <section class="lg:sticky lg:top-28">
-        <UploadHero
-          title={t('upload.heroTitle')}
-          description={t('upload.heroDescription')}
-          encryptionPill={t('upload.encryptionPill')}
-        />
-      </section>
-      <section class="surface-card">
-        <form class="grid gap-3" onSubmit={handleSubmit}>
-          <UploadMetadataFields
-            title={title()}
-            description={description()}
-            titlePlaceholder={t('upload.placeholders.title')}
-            descriptionPlaceholder={t('upload.placeholders.description')}
-            onTitleInput={setTitle}
-            onDescriptionInput={setDescription}
-          />
+    <div class="mx-auto w-full max-w-2xl">
+      <TerminalWindow label={t('upload.windowLabel')}>
+        <Show when={stage() === 'form'}>
+          <form class="grid gap-5" onSubmit={handleSubmit}>
+            <details>
+              <summary class="cursor-pointer font-mono text-xs text-muted transition hover:text-ink">
+                {t('upload.details.toggle')}
+              </summary>
+              <div class="mt-3 grid gap-3">
+                <UploadMetadataFields
+                  title={title()}
+                  description={description()}
+                  titlePlaceholder={t('upload.placeholders.title')}
+                  descriptionPlaceholder={t('upload.placeholders.description')}
+                  onTitleInput={setTitle}
+                  onDescriptionInput={setDescription}
+                />
+              </div>
+            </details>
 
-          <UploadContentField
-            text={text()}
-            encrypt={encrypt()}
-            textPlaceholder={t('upload.placeholders.text')}
-            encryptLabel={t('upload.encryptLabel')}
-            filesCount={files().length}
-            dropzoneLabel={t('upload.dropzoneLabel')}
-            chooseFilesLabel={t('upload.chooseFiles')}
-            filesSelectedLabel={t('upload.filesSelected', { count: files().length })}
-            hasText={hasText()}
-            hasFiles={hasFiles()}
-            onTextInput={setText}
-            onEncryptChange={setEncrypt}
-            onFilesChange={setFiles}
-          />
-
-          <button class="btn btn-primary" type="submit" disabled={submitMutation.isPending}>
-            {submitMutation.isPending ? t('upload.submit.uploading') : t('upload.submit.create')}
-          </button>
-
-          <Show when={error()}>
-            <div class="notice-box">{error()}</div>
-          </Show>
-
-          <Show when={result()}>
-            {(value) => (
-              <UploadResultPanel
-                result={value()}
-                shareLinkLabel={t('upload.shareLink')}
-                copyLinkLabel={t('upload.copyLink')}
-                passphraseLabel={t('upload.passphraseLabel')}
-                copyPassphraseLabel={t('upload.copyPassphrase')}
-                onCopyLink={copyToClipboard}
-                onCopyPassphrase={copyToClipboard}
+            <div class="grid gap-4 sm:grid-cols-2 min-h-42">
+              <UploadFilePanel
+                label={t('upload.panels.fileLabel')}
+                promptLabel={t('upload.filePanel.prompt')}
+                selectedLabel={t('upload.filePanel.selected', { count: files().length })}
+                filesCount={files().length}
+                onFilesChange={setFiles}
               />
-            )}
-          </Show>
-        </form>
-      </section>
+              <UploadTextPanel
+                label={t('upload.panels.textLabel')}
+                placeholder={t('upload.placeholders.text')}
+                text={text()}
+                hasText={hasText()}
+                onTextInput={setText}
+              />
+            </div>
+
+            <div class="grid gap-2">
+              <div class="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  class="pill-badge cursor-pointer"
+                  onClick={() => setExpiryIndex(cycleExpiryIndex)}
+                >
+                  <span>{t('upload.expiry.label')}:</span>
+                  <span class="text-ink">{expiry().label}</span>
+                </button>
+                <button type="button" class="pill-badge cursor-pointer" onClick={() => setEncrypt((value) => !value)}>
+                  <span>{t('upload.password.label')}:</span>
+                  <span class="text-ink">{encrypt() ? t('upload.password.on') : t('upload.password.off')}</span>
+                </button>
+              </div>
+              <p class="text-xs text-muted">{t('upload.password.caption')}</p>
+            </div>
+
+            <button class="btn btn-primary" type="submit" disabled={submitMutation.isPending}>
+              {submitMutation.isPending ? t('upload.submit.uploading') : t('upload.submitCommand')}
+            </button>
+
+            <Show when={error()}>
+              <div class="notice-box">{error()}</div>
+            </Show>
+          </form>
+        </Show>
+
+        <Show when={stage() === 'result' ? result() : null}>
+          {(value) => (
+            <UploadResultPanel
+              result={value()}
+              headingLabel={t('upload.result.heading')}
+              caption={resultCaption()}
+              copyLabel={t('upload.result.copy')}
+              copiedLabel={t('upload.result.copied')}
+              passphraseLabel={t('upload.passphraseLabel')}
+              copyPassphraseLabel={t('upload.copyPassphrase')}
+              anotherLabel={t('upload.result.another')}
+              onCopyLink={copyToClipboard}
+              onCopyPassphrase={copyToClipboard}
+              onReset={resetForm}
+            />
+          )}
+        </Show>
+      </TerminalWindow>
     </div>
   );
 }

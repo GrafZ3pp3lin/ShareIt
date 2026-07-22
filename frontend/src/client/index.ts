@@ -6,7 +6,7 @@ export {
   downloadContentWithToken,
   getPackage,
   type Options,
-  uploadFileToPackage,
+  uploadFileToPackage
 } from './sdk.gen';
 export type {
   AddTextToPackageData,
@@ -46,5 +46,5 @@ export type {
   UploadFileToPackageError,
   UploadFileToPackageErrors,
   UploadFileToPackageResponse,
-  UploadFileToPackageResponses,
+  UploadFileToPackageResponses
 } from './types.gen';

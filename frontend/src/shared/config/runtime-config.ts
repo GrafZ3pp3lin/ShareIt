@@ -61,7 +61,7 @@ const createRuntimeConfig = (): RuntimeConfig => {
       runtimeEnv.AuthPostLogoutRedirectUri,
       'VITE_OIDC_POST_LOGOUT_REDIRECT_URI'
     ),
-    authScope: readConfigValue(runtimeEnv.AuthScope, 'VITE_OIDC_SCOPE'),
+    authScope: readConfigValue(runtimeEnv.AuthScope, 'VITE_OIDC_SCOPE')
   };
 };
 

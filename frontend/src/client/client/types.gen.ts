@@ -54,7 +54,7 @@ export interface RequestOptions<
   TData = unknown,
   TResponseStyle extends ResponseStyle = 'fields',
   ThrowOnError extends boolean = boolean,
-  Url extends string = string,
+  Url extends string = string
 >
   extends
     Config<{
@@ -83,7 +83,7 @@ export interface RequestOptions<
 export interface ResolvedRequestOptions<
   TResponseStyle extends ResponseStyle = 'fields',
   ThrowOnError extends boolean = boolean,
-  Url extends string = string,
+  Url extends string = string
 > extends RequestOptions<unknown, TResponseStyle, ThrowOnError, Url> {
   serializedBody?: string;
 }
@@ -92,7 +92,7 @@ export type RequestResult<
   TData = unknown,
   TError = unknown,
   ThrowOnError extends boolean = boolean,
-  TResponseStyle extends ResponseStyle = 'fields',
+  TResponseStyle extends ResponseStyle = 'fields'
 > = ThrowOnError extends true
   ? Promise<
       TResponseStyle extends 'data'
@@ -133,7 +133,7 @@ type MethodFn = <
   TData = unknown,
   TError = unknown,
   ThrowOnError extends boolean = false,
-  TResponseStyle extends ResponseStyle = 'fields',
+  TResponseStyle extends ResponseStyle = 'fields'
 >(
   options: Omit<RequestOptions<TData, TResponseStyle, ThrowOnError>, 'method'>
 ) => RequestResult<TData, TError, ThrowOnError, TResponseStyle>;
@@ -142,7 +142,7 @@ type SseFn = <
   TData = unknown,
   TError = unknown,
   ThrowOnError extends boolean = false,
-  TResponseStyle extends ResponseStyle = 'fields',
+  TResponseStyle extends ResponseStyle = 'fields'
 >(
   options: Omit<RequestOptions<TData, TResponseStyle, ThrowOnError>, 'method'>
 ) => Promise<ServerSentEventsResult<TData, TError>>;
@@ -151,7 +151,7 @@ type RequestFn = <
   TData = unknown,
   TError = unknown,
   ThrowOnError extends boolean = false,
-  TResponseStyle extends ResponseStyle = 'fields',
+  TResponseStyle extends ResponseStyle = 'fields'
 >(
   options: Omit<RequestOptions<TData, TResponseStyle, ThrowOnError>, 'method'> &
     Pick<Required<RequestOptions<TData, TResponseStyle, ThrowOnError>>, 'method'>
@@ -163,7 +163,7 @@ type BuildUrlFn = <
     path?: Record<string, unknown>;
     query?: Record<string, unknown>;
     url: string;
-  },
+  }
 >(
   options: TData & Options<TData>
 ) => string;
@@ -198,6 +198,6 @@ export type Options<
   TData extends TDataShape = TDataShape,
   ThrowOnError extends boolean = boolean,
   TResponse = unknown,
-  TResponseStyle extends ResponseStyle = 'fields',
+  TResponseStyle extends ResponseStyle = 'fields'
 > = OmitKeys<RequestOptions<TResponse, TResponseStyle, ThrowOnError>, 'body' | 'path' | 'query' | 'url'> &
   ([TData] extends [never] ? unknown : Omit<TData, 'url'>);

@@ -1,20 +1,34 @@
 import { Show } from 'solid-js';
-import { useI18n } from '../../../i18n/i18n.tsx';
+import { DashboardStage } from '../components/dashboard-stage.tsx';
+import { LoginStage } from '../components/login-stage.tsx';
 import { useAuth } from '../../auth/auth-context.tsx';
+import { TerminalWindow } from '../../../shared/components/terminal-window.tsx';
+import { useI18n } from '../../../i18n/i18n.tsx';
 
 export function AccountPage() {
   const auth = useAuth();
   const { t } = useI18n();
 
   return (
-    <section class="mx-auto w-full max-w-3xl">
-      <div class="surface-card grid gap-3">
-        <h2 class="text-lg font-semibold text-ink">{t('account.title')}</h2>
-        <Show when={auth.isAuthenticated} fallback={<div class="notice-box">{t('account.loginPrompt')}</div>}>
-          <p class="text-sm text-muted">{t('account.description')}</p>
-          <div class="notice-box">{t('account.notWired')}</div>
+    <div class="mx-auto w-full max-w-2xl">
+      <TerminalWindow label={t('account.windowLabel')}>
+        <Show
+          when={auth.isAuthenticated}
+          fallback={
+            <LoginStage
+              enabled={auth.isEnabled}
+              heading={t('account.login.heading')}
+              body={t('account.login.body')}
+              ctaLabel={t('account.login.cta')}
+              continueLabel={t('account.login.continueWithoutAccount')}
+              disabledNotice={t('auth.oidcNotConfiguredLong')}
+              onLogin={auth.login}
+            />
+          }
+        >
+          <DashboardStage emptyLabel={t('account.dashboard.empty')} notWiredLabel={t('account.notWired')} />
         </Show>
-      </div>
-    </section>
+      </TerminalWindow>
+    </div>
   );
 }

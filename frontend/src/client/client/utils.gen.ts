@@ -27,7 +27,7 @@ export const createQuerySerializer = <T = unknown>({ parameters = {}, ...args }:
             name,
             style: 'form',
             value,
-            ...options.array,
+            ...options.array
           });
           if (serializedArray) search.push(serializedArray);
         } else if (typeof value === 'object') {
@@ -37,14 +37,14 @@ export const createQuerySerializer = <T = unknown>({ parameters = {}, ...args }:
             name,
             style: 'deepObject',
             value: value as Record<string, unknown>,
-            ...options.object,
+            ...options.object
           });
           if (serializedObject) search.push(serializedObject);
         } else {
           const serializedPrimitive = serializePrimitiveParam({
             allowReserved: options.allowReserved,
             name,
-            value: value as string,
+            value: value as string
           });
           if (serializedPrimitive) search.push(serializedPrimitive);
         }
@@ -152,7 +152,7 @@ export const buildUrl: Client['buildUrl'] = (options) =>
       typeof options.querySerializer === 'function'
         ? options.querySerializer
         : createQuerySerializer(options.querySerializer),
-    url: options.url,
+    url: options.url
   });
 
 export const mergeConfigs = (a: Config, b: Config): Config => {
@@ -259,23 +259,23 @@ export interface Middleware<Req, Res, Err, Options> {
 export const createInterceptors = <Req, Res, Err, Options>(): Middleware<Req, Res, Err, Options> => ({
   error: new Interceptors<ErrInterceptor<Err, Res, Req, Options>>(),
   request: new Interceptors<ReqInterceptor<Req, Options>>(),
-  response: new Interceptors<ResInterceptor<Res, Req, Options>>(),
+  response: new Interceptors<ResInterceptor<Res, Req, Options>>()
 });
 
 const defaultQuerySerializer = createQuerySerializer({
   allowReserved: false,
   array: {
     explode: true,
-    style: 'form',
+    style: 'form'
   },
   object: {
     explode: true,
-    style: 'deepObject',
-  },
+    style: 'deepObject'
+  }
 });
 
 const defaultHeaders = {
-  'Content-Type': 'application/json',
+  'Content-Type': 'application/json'
 };
 
 export const createConfig = <T extends ClientOptions = ClientOptions>(
@@ -285,5 +285,5 @@ export const createConfig = <T extends ClientOptions = ClientOptions>(
   headers: defaultHeaders,
   parseAs: 'auto',
   querySerializer: defaultQuerySerializer,
-  ...override,
+  ...override
 });
