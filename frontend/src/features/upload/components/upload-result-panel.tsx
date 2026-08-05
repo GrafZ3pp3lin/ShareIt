@@ -41,9 +41,7 @@ export function UploadResultPanel(props: UploadResultPanelProps) {
       </div>
 
       <div class="flex items-center gap-3 rounded-lg border border-border-soft bg-panel-soft/45 px-3 py-2.5">
-        <span class="flex-1 overflow-hidden text-sm text-ink text-ellipsis whitespace-nowrap">
-          {props.result.link}
-        </span>
+        <span class="flex-1 overflow-hidden text-sm text-ink text-ellipsis whitespace-nowrap">{props.result.link}</span>
         <button type="button" class="shrink-0 text-xs font-semibold text-brand" onClick={copyLink}>
           {copiedLink() ? props.copiedLabel : props.copyLabel}
         </button>

@@ -13,14 +13,14 @@ In the project directory, you can run:
 ### `npm run dev`
 
 Runs the app in the development mode.<br>
-Open [https://localhost:3001](https://localhost:3001) to view it in the browser.
+Open [http://localhost:3001](http://localhost:3001) to view it in the browser.
 
-The dev server uses `vite-plugin-mkcert` to generate a trusted local certificate.
-If this is your first run, install mkcert roots once:
+No TLS setup is needed. `http://localhost` counts as a secure context, so the client-side
+encryption (`crypto.subtle`) and copy-to-clipboard both work over plain http.
 
-```bash
-npx mkcert -install
-```
+Note this only holds for `localhost`. To reach the dev server from another device (say a phone
+on the same network), you would have to serve it over https — outside a secure context
+`crypto.subtle` is `undefined` and encryption breaks.
 
 ### `npm run build`
 

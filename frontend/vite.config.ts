@@ -3,14 +3,17 @@ import { defineConfig } from 'vite';
 import solid from 'vite-plugin-solid';
 import tailwindcss from '@tailwindcss/vite';
 import Icons from 'unplugin-icons/vite';
-import mkcert from 'vite-plugin-mkcert';
 
 export default defineConfig({
+  // Plain http is deliberate: http://localhost is a "potentially trustworthy origin" per the
+  // Secure Contexts spec, so crypto.subtle (shared/crypto) and navigator.clipboard both work
+  // without TLS. Serving the dev server on a non-localhost origin (e.g. a LAN IP for phone
+  // testing) would need https, since crypto.subtle is undefined outside a secure context.
   server: {
     host: 'localhost',
     port: 3001
   },
-  plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' }), mkcert()],
+  plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' })],
   oxc: {
     jsx: {
       importSource: 'solid-js'

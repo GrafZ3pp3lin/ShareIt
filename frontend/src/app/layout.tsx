@@ -36,7 +36,11 @@ export function AppLayout() {
           </div>
           <div class="flex items-center gap-3">
             <Show when={auth.isAuthenticated}>
-              <button type="button" class="font-mono text-sm text-muted transition hover:text-ink" onClick={auth.logout}>
+              <button
+                type="button"
+                class="font-mono text-sm text-muted transition hover:text-ink"
+                onClick={auth.logout}
+              >
                 {t('app.nav.logout')}
               </button>
             </Show>

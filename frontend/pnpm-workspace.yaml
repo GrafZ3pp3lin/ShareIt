@@ -1,50 +1,30 @@
-minimumReleaseAgeExclude:
-  - '@oxfmt/binding-android-arm-eabi@0.60.0'
-  - '@oxfmt/binding-android-arm64@0.60.0'
-  - '@oxfmt/binding-darwin-arm64@0.60.0'
-  - '@oxfmt/binding-darwin-x64@0.60.0'
-  - '@oxfmt/binding-freebsd-x64@0.60.0'
-  - '@oxfmt/binding-linux-arm-gnueabihf@0.60.0'
-  - '@oxfmt/binding-linux-arm-musleabihf@0.60.0'
-  - '@oxfmt/binding-linux-arm64-gnu@0.60.0'
-  - '@oxfmt/binding-linux-arm64-musl@0.60.0'
-  - '@oxfmt/binding-linux-ppc64-gnu@0.60.0'
-  - '@oxfmt/binding-linux-riscv64-gnu@0.60.0'
-  - '@oxfmt/binding-linux-riscv64-musl@0.60.0'
-  - '@oxfmt/binding-linux-s390x-gnu@0.60.0'
-  - '@oxfmt/binding-linux-x64-gnu@0.60.0'
-  - '@oxfmt/binding-linux-x64-musl@0.60.0'
-  - '@oxfmt/binding-openharmony-arm64@0.60.0'
-  - '@oxfmt/binding-win32-arm64-msvc@0.60.0'
-  - '@oxfmt/binding-win32-ia32-msvc@0.60.0'
-  - '@oxfmt/binding-win32-x64-msvc@0.60.0'
-  - '@oxlint-tsgolint/darwin-arm64@7.0.2001'
-  - '@oxlint-tsgolint/darwin-x64@7.0.2001'
-  - '@oxlint-tsgolint/linux-arm64@7.0.2001'
-  - '@oxlint-tsgolint/linux-x64@7.0.2001'
-  - '@oxlint-tsgolint/win32-arm64@7.0.2001'
-  - '@oxlint-tsgolint/win32-x64@7.0.2001'
-  - '@oxlint/binding-android-arm-eabi@1.75.0'
-  - '@oxlint/binding-android-arm64@1.75.0'
-  - '@oxlint/binding-darwin-arm64@1.75.0'
-  - '@oxlint/binding-darwin-x64@1.75.0'
-  - '@oxlint/binding-freebsd-x64@1.75.0'
-  - '@oxlint/binding-linux-arm-gnueabihf@1.75.0'
-  - '@oxlint/binding-linux-arm-musleabihf@1.75.0'
-  - '@oxlint/binding-linux-arm64-gnu@1.75.0'
-  - '@oxlint/binding-linux-arm64-musl@1.75.0'
-  - '@oxlint/binding-linux-ppc64-gnu@1.75.0'
-  - '@oxlint/binding-linux-riscv64-gnu@1.75.0'
-  - '@oxlint/binding-linux-riscv64-musl@1.75.0'
-  - '@oxlint/binding-linux-s390x-gnu@1.75.0'
-  - '@oxlint/binding-linux-x64-gnu@1.75.0'
-  - '@oxlint/binding-linux-x64-musl@1.75.0'
-  - '@oxlint/binding-openharmony-arm64@1.75.0'
-  - '@oxlint/binding-win32-arm64-msvc@1.75.0'
-  - '@oxlint/binding-win32-ia32-msvc@1.75.0'
-  - '@oxlint/binding-win32-x64-msvc@1.75.0'
-  - '@tanstack/query-core@5.101.4'
-  - '@tanstack/solid-query@5.101.4'
-  - oxfmt@0.60.0
-  - oxlint-tsgolint@7.0.2001
-  - oxlint@1.75.0
+# Supply-chain hardening for dependency resolution.
+#
+# The threat model is a hijacked maintainer account publishing a malicious version of a
+# package we already trust. Those releases get yanked fast (usually within hours), so the
+# cheapest effective defence is refusing to install anything brand new.
+
+# Never resolve a version published less than 2 days ago. Value is in MINUTES (2 * 24 * 60).
+# pnpm picks the newest version that satisfies the range AND is old enough, so `pnpm update`
+# stays useful -- it just lands you a release or two behind the bleeding edge.
+minimumReleaseAge: 2880
+
+# Escape hatch for a release younger than the window -- typically an urgent security fix.
+# Add exact `name@version` specs; pnpm also appends here automatically if you confirm a
+# too-new package interactively.
+#
+# Treat entries as temporary. Once a version ages past the window its entry is redundant,
+# and a stale list silently exempts those packages from the gate forever. Prune when updating.
+minimumReleaseAgeExclude: []
+
+# Fail if a package's publish trust evidence gets *weaker* than what was recorded before
+# (e.g. it had a trusted publisher with provenance, and the new release has neither).
+# That downgrade is a strong account-hijack signal.
+trustPolicy: no-downgrade
+
+# ...but only judge recent releases. Anything published longer ago than this is exempt.
+# Value is in MINUTES (14 * 24 * 60). Required here: old transitive pins predate npm
+# provenance altogether, so a modern signed release makes them look "downgraded" -- e.g.
+# semver@6.3.1 (published 2023) fails the check with no such window. A real hijack shows up
+# in a fresh release, which this still catches.
+trustPolicyIgnoreAfter: 20160
