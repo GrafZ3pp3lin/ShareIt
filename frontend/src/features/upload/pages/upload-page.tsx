@@ -156,7 +156,7 @@ export function UploadPage() {
                 label={t('upload.panels.fileLabel')}
                 promptLabel={t('upload.filePanel.prompt')}
                 selectedLabel={t('upload.filePanel.selected', { count: files().length })}
-                filesCount={files().length}
+                files={files()}
                 onFilesChange={setFiles}
               />
               <UploadTextPanel

@@ -9,16 +9,16 @@ ShareIt frontend: a SolidJS SPA for uploading and sharing content packages (file
 ## Commands
 
 ```bash
-npm run dev              # vite dev server on http://localhost:3001 (plain http; localhost is a secure context, so crypto.subtle works)
-npm run build             # tsc -b && vite build -> dist/
-npm run test              # vitest (watch mode)
-npm run test:ui           # vitest with UI
-npm run lint              # oxlint
-npm run lint:fix          # oxlint --fix
-npm run fmt               # oxfmt (write)
-npm run fmt:check         # oxfmt (check only)
-npm run knip              # unused exports/deps/files
-npm run generate:open-api # regenerate src/client from a *running* backend at http://localhost:5155/openapi/v1.json
+pnpm dev              # vite dev server on http://localhost:3001 (plain http; localhost is a secure context, so crypto.subtle works)
+pnpm build             # tsc -b && vite build -> dist/
+pnpm test              # vitest (watch mode)
+pnpm test:ui           # vitest with UI
+pnpm lint              # oxlint
+pnpm lint:fix          # oxlint --fix
+pnpm format            # oxfmt (write)
+pnpm format:check      # oxfmt (check only)
+pnpm knip              # unused exports/deps/files
+pnpm generate:open-api # regenerate src/client from a *running* backend at http://localhost:5155/openapi/v1.json
 ```
 
 Run a single test file: `npx vitest run src/shared/crypto/crypto.unit.test.ts`.

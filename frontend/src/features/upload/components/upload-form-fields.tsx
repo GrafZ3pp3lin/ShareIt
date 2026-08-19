@@ -1,6 +1,5 @@
-import { FileUpload } from '@ark-ui/solid/file-upload';
 import { clsx } from 'clsx/lite';
-import { Show } from 'solid-js';
+import { Show, onCleanup, onMount } from 'solid-js';
 import IconUpload from '~icons/lucide/upload';
 
 type UploadMetadataFieldsProps = {
@@ -16,7 +15,7 @@ type UploadFilePanelProps = {
   label: string;
   promptLabel: string;
   selectedLabel: string;
-  filesCount: number;
+  files: File[];
   onFilesChange: (files: File[]) => void;
 };
 
@@ -50,33 +49,77 @@ export function UploadMetadataFields(props: UploadMetadataFieldsProps) {
 }
 
 export function UploadFilePanel(props: UploadFilePanelProps) {
+  onMount(() => {
+    const preventDocumentDrop = (event: DragEvent) => event.preventDefault();
+    document.addEventListener('dragover', preventDocumentDrop);
+    document.addEventListener('drop', preventDocumentDrop);
+
+    onCleanup(() => {
+      document.removeEventListener('dragover', preventDocumentDrop);
+      document.removeEventListener('drop', preventDocumentDrop);
+    });
+  });
+
+  const appendFiles = (files: File[]) => {
+    const filesToAdd = files.filter((file, index) => {
+      const isAlreadySelected = props.files.some(
+        (selectedFile) =>
+          selectedFile.name === file.name && selectedFile.size === file.size && selectedFile.type === file.type
+      );
+      const isRepeatedInBatch = files
+        .slice(0, index)
+        .some(
+          (previousFile) =>
+            previousFile.name === file.name && previousFile.size === file.size && previousFile.type === file.type
+        );
+      return !isAlreadySelected && !isRepeatedInBatch;
+    });
+
+    if (filesToAdd.length > 0) {
+      props.onFilesChange([...props.files, ...filesToAdd]);
+    }
+  };
+
   return (
     <div class="flex flex-col">
       <div class="mb-3.5 font-mono text-xs text-muted">{props.label}</div>
-      <FileUpload.Root
-        maxFiles={Infinity}
-        onFileChange={(details) => props.onFilesChange(details.acceptedFiles)}
-        class="flex-1"
+      <label
+        class={clsx(
+          'grid h-full min-h-28 flex-1 cursor-pointer place-items-center rounded-xl border border-dashed border-border-soft bg-panel-soft/75 p-4 py-8 text-center text-sm text-muted transition hover:border-ink/30 focus-within:ring-2 focus-within:ring-ink/25',
+          props.files.length > 0 && 'border-ink/30 bg-panel'
+        )}
+        onDragOver={(event) => {
+          event.preventDefault();
+          if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'copy';
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          appendFiles(Array.from(event.dataTransfer?.files ?? []));
+        }}
       >
-        <FileUpload.HiddenInput />
-        <FileUpload.Dropzone
-          class={clsx(
-            'grid h-full min-h-28 place-items-center rounded-xl border border-dashed border-border-soft bg-panel-soft/75 p-4 py-8 text-center text-sm text-muted transition hover:border-ink/30',
-            props.filesCount > 0 && 'border-ink/30 bg-panel'
-          )}
-        >
-          <div class="flex flex-col items-center gap-3">
-            <div class="flex h-8 w-8 items-center justify-center rounded-md bg-panel-soft">
-              <IconUpload class="h-4 w-4 text-muted" />
-            </div>
-            <div class="text-sm font-medium text-ink">
-              <Show when={props.filesCount > 0} fallback={props.promptLabel}>
-                {props.selectedLabel}
-              </Show>
-            </div>
+        <input
+          class="sr-only"
+          type="file"
+          multiple
+          aria-label={props.label}
+          onChange={(event) => {
+            appendFiles(Array.from(event.currentTarget.files ?? []));
+            event.currentTarget.value = '';
+          }}
+        />
+        <div class="flex flex-col items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-panel-soft">
+            <IconUpload class="h-4 w-4 text-muted" />
           </div>
-        </FileUpload.Dropzone>
-      </FileUpload.Root>
+          <div class="text-sm font-medium text-ink">
+            <Show when={props.files.length > 0} fallback={props.promptLabel}>
+              {props.selectedLabel}
+            </Show>
+          </div>
+        </div>
+      </label>
     </div>
   );
 }

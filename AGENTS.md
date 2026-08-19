@@ -5,7 +5,7 @@
 
 ### Frontend (SolidJS + Vite)
 - Tailwind CSS is the primary styling system; prefer utility classes over custom CSS when possible.
-- UI primitives come from `@ark-ui/solid` (see https://ark-ui.com/llms.txt).
+- Prefer native browser elements for UI primitives where possible.
 
 ## Code Style Guidelines
 

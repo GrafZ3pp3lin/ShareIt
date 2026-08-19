@@ -1,30 +1,44 @@
-# Supply-chain hardening for dependency resolution.
-#
-# The threat model is a hijacked maintainer account publishing a malicious version of a
-# package we already trust. Those releases get yanked fast (usually within hours), so the
-# cheapest effective defence is refusing to install anything brand new.
+# --- Supply chain -------------------------------------------------------------
 
-# Never resolve a version published less than 2 days ago. Value is in MINUTES (2 * 24 * 60).
-# pnpm picks the newest version that satisfies the range AND is old enough, so `pnpm update`
-# stays useful -- it just lands you a release or two behind the bleeding edge.
-minimumReleaseAge: 2880
+# Never resolve a version published less than a day ago. Hijacked-token releases
+# are typically yanked within hours, so a quarantine window is the cheapest
+# protection available. Unit is minutes.
+minimumReleaseAge: 2160
 
-# Escape hatch for a release younger than the window -- typically an urgent security fix.
-# Add exact `name@version` specs; pnpm also appends here automatically if you confirm a
-# too-new package interactively.
-#
-# Treat entries as temporary. Once a version ages past the window its entry is redundant,
-# and a stale list silently exempts those packages from the gate forever. Prune when updating.
+# An immature version is not quietly swapped for an older one: pnpm asks in a
+# terminal and fails without one. Implied by setting minimumReleaseAge
+# explicitly, written out because it is the half that actually bites. It stays
+# CI-safe because a fresh version can only enter the lockfile locally, at the
+# prompt — CI runs --frozen-lockfile and just re-verifies what was committed.
+minimumReleaseAgeStrict: true
+
+# A version whose publish time pnpm cannot determine counts as immature rather
+# than being waved through with a warning (that pass is the pnpm default).
+minimumReleaseAgeIgnoreMissingTime: false
+
+# Escape hatch for the age gate. `pkg` pins nothing and `pkg@version` pins one
+# release; a glob like `@scope/*` is allowed only without a version. pnpm appends
+# here when an immature version is approved at the prompt — prune entries once
+# the version they name has aged past the cutoff, or the hole stays open.
 minimumReleaseAgeExclude: []
 
-# Fail if a package's publish trust evidence gets *weaker* than what was recorded before
-# (e.g. it had a trusted publisher with provenance, and the new release has neither).
-# That downgrade is a strong account-hijack signal.
+# Reject a version published with weaker credentials than earlier versions of
+# the same package had — a package that shipped via npm trusted publishing or
+# provenance suddenly releasing from a plain token. That downgrade is the
+# signature of a stolen maintainer credential.
 trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 43200
 
-# ...but only judge recent releases. Anything published longer ago than this is exempt.
-# Value is in MINUTES (14 * 24 * 60). Required here: old transitive pins predate npm
-# provenance altogether, so a modern signed release makes them look "downgraded" -- e.g.
-# semver@6.3.1 (published 2023) fails the check with no such window. A real hijack shows up
-# in a fresh release, which this still catches.
-trustPolicyIgnoreAfter: 20160
+# --- Dependency build scripts -------------------------------------------------
+
+# postinstall & friends run only for the packages listed here. Everything else
+# is skipped, so a compromised transitive dependency gets no code execution.
+allowBuilds:
+  esbuild: true
+
+# Fail the install when a dependency wants to build and is not listed above,
+# instead of quietly skipping it and leaving a half-working tree. (pnpm default)
+strictDepBuilds: true
+
+# Never the blanket "run every dependency's install scripts" mode. (pnpm default)
+dangerouslyAllowAllBuilds: false
