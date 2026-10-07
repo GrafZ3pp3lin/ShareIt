@@ -48,7 +48,7 @@ export async function downloadContent(packageId: string, contentId: string, toke
     parseAs: 'blob'
   });
   if (result.data instanceof Blob) {
-    return result as ApiResult<Blob>;
+    return { data: result.data, error: undefined, request: result.request, response: result.response };
   }
   return {
     error: result.error ?? new Error('Download did not return a blob')

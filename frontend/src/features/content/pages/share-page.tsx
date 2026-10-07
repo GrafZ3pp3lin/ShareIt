@@ -121,7 +121,7 @@ export function SharePage() {
                   passphraseValue={passphrases()[item.Id] ?? ''}
                   onPassphraseInput={(value) => setPassphrase(item.Id, value)}
                   onDecrypt={() => void decryptItem(item)}
-                  isDecrypting={Boolean(decrypting()[item.Id])}
+                  isDecrypting={decrypting()[item.Id] ?? false}
                 />
               );
             }}

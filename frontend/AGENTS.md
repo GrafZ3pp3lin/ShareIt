@@ -22,12 +22,14 @@ pnpm generate:open-api # regenerate src/client from a *running* backend at http:
 ```
 
 Run a single test file: `npx vitest run src/shared/crypto/crypto.unit.test.ts`.
+
+oxlint runs with type-aware linting enabled (`.oxlintrc.json` → `options.typeAware`, powered by `oxlint-tsgolint`) plus the `typescript` plugin. Type-aware rules like `no-floating-promises` and `no-misused-promises` need that package — don't remove it from devDependencies.
 Run a single project: `npx vitest run --project unit` or `--project components`.
 
 There are two Vitest projects (`vite.config.ts`):
 
 - `unit`: files named `*.unit.test.ts(x)`, `environment: 'node'` — pure logic (crypto, error mapping).
-- `components`: files named `*.browser.test.tsx`, `environment: 'jsdom'`, setup file `src/tests/vitest-setup.ts` — Solid component tests via `@solidjs/testing-library`.
+- `components`: files named `*.browser.test.tsx`, `environment: 'happy-dom'`, setup file `src/tests/vitest-setup.ts` — Solid component tests via `@solidjs/testing-library`.
 
 Tests are co-located next to the source file, not in a `__tests__` dir.
 

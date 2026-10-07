@@ -1,5 +1,4 @@
-/// <reference types="vitest/config" />
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import solid from 'vite-plugin-solid';
 import tailwindcss from '@tailwindcss/vite';
 import Icons from 'unplugin-icons/vite';
@@ -37,7 +36,7 @@ export default defineConfig({
         test: {
           include: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
           name: 'components',
-          environment: 'jsdom',
+          environment: 'happy-dom',
           setupFiles: './src/tests/vitest-setup.ts'
         }
       }

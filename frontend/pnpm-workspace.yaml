@@ -3,7 +3,7 @@
 # Never resolve a version published less than a day ago. Hijacked-token releases
 # are typically yanked within hours, so a quarantine window is the cheapest
 # protection available. Unit is minutes.
-minimumReleaseAge: 2160
+minimumReleaseAge: 1440
 
 # An immature version is not quietly swapped for an older one: pnpm asks in a
 # terminal and fails without one. Implied by setting minimumReleaseAge

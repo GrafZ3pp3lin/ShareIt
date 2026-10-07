@@ -1,14 +1,21 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "ignorePatterns": ["dist/**", "src/client/**"],
-  "plugins": ["import"],
+  "plugins": ["import", "typescript"],
+  "options": {
+    "typeAware": true
+  },
   "categories": {
-    "correctness": "warn"
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
   },
   "env": {
     "builtin": true
   },
   "rules": {
-    "import/extensions": ["error", "always", { "ignorePackages": true }]
+    "import/extensions": ["error", "always", { "ignorePackages": true }],
+    "import/no-unassigned-import": "off",
+    "typescript/no-misused-promises": ["warn", { "checksVoidReturn": false }]
   }
 }

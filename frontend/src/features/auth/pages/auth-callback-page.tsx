@@ -14,7 +14,7 @@ export function AuthCallbackPage() {
     }
     const handle = async () => {
       await auth.handleCallback();
-      navigate({ to: '/' });
+      void navigate({ to: '/' });
     };
 
     void handle();

@@ -23,10 +23,9 @@ const fromBase64Url = (value: string) => {
   return bytes;
 };
 
-const toArrayBuffer = (bytes: Uint8Array) =>
-  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+const toArrayBuffer = (bytes: Uint8Array<ArrayBuffer>): ArrayBuffer => bytes.slice().buffer;
 
-const deriveKey = async (passphrase: string, salt: Uint8Array, iterations: number) => {
+const deriveKey = async (passphrase: string, salt: Uint8Array<ArrayBuffer>, iterations: number) => {
   const keyMaterial = await crypto.subtle.importKey('raw', textEncoder.encode(passphrase), 'PBKDF2', false, [
     'deriveKey'
   ]);
