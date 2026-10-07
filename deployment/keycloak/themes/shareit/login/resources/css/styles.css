@@ -202,7 +202,14 @@ body.login-pf-page {
   border-radius: 0.625rem;
   padding-block: 0.5rem;
   padding-inline: 0.75rem;
+  /* The theme draws its own focus ring; the native outline would double it up */
+  outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* PatternFly draws a second underline via an ::after pseudo-element — remove it */
+.pf-v5-c-form-control::after {
+  border: 0;
 }
 
 .pf-v5-c-form-control::placeholder {
@@ -224,6 +231,11 @@ body.login-pf-page {
   box-shadow: 0 0 0 3px var(--kc-danger-border);
 }
 
+/* The real <input> lives inside the form-control span — drop its native focus outline */
+.pf-v5-c-form-control input {
+  outline: none;
+}
+
 /* Locale switcher renders as a native <select> inside a form-control wrapper */
 .pf-v5-c-form-control select {
   width: 100%;
@@ -233,9 +245,45 @@ body.login-pf-page {
   border: 0;
 }
 
-/* Password visibility toggle: blend into the field instead of a gray box */
+/* Password fields with a visibility toggle: the input-group itself is the field,
+   so the toggle button sits inside the field's border instead of next to it */
 .pf-v5-c-input-group {
+  background-color: var(--kc-field-bg);
+  border: 1px solid var(--kc-border-strong);
+  border-radius: 0.625rem;
+  padding-inline-end: 0.25rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pf-v5-c-input-group:hover {
+  border-color: var(--kc-accent);
+}
+
+.pf-v5-c-input-group:focus-within {
+  border-color: var(--kc-accent);
+  box-shadow: 0 0 0 3px var(--kc-ring);
+}
+
+.pf-v5-c-input-group:has(.pf-v5-c-form-control[aria-invalid='true']) {
+  border-color: var(--kc-danger);
+  box-shadow: 0 0 0 3px var(--kc-danger-border);
+}
+
+/* The nested form-control must not draw its own field chrome or focus ring */
+.pf-v5-c-input-group .pf-v5-c-form-control {
   background-color: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.pf-v5-c-input-group .pf-v5-c-form-control:hover {
+  border-color: transparent;
+}
+
+.pf-v5-c-input-group .pf-v5-c-form-control:focus,
+.pf-v5-c-input-group .pf-v5-c-form-control:focus-within {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .pf-v5-c-input-group .pf-v5-c-button.pf-m-control,
@@ -244,10 +292,28 @@ body.login-pf-page {
   color: var(--kc-text-muted);
 }
 
+/* PatternFly styles buttons with an ::after border — remove it on input-group toggles */
+.pf-v5-c-input-group .pf-v5-c-button::after {
+  border: 0;
+}
+
+/* PatternFly's dark theme adds a divider between input-group items — remove it */
+.pf-v5-c-input-group > * + * {
+  border-inline-start: 0;
+}
+
 .pf-v5-c-input-group .pf-v5-c-button.pf-m-control:hover,
 .pf-v5-c-input-group .pf-v5-c-button:hover {
   background-color: transparent;
   color: var(--kc-text);
+}
+
+/* Login footer (from footer.ftl) */
+.pf-v5-c-login__main-footer .shareit-footer {
+  font-family: var(--pf-v5-global--FontFamily--sans-serif);
+  color: var(--kc-text-muted);
+  text-align: center;
+  font-size: 0.8125rem;
 }
 
 /* ------------------------------------------------------------------ */
