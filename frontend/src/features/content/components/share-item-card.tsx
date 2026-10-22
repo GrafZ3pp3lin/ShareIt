@@ -5,6 +5,7 @@ type ShareItemCardProps = {
   item: ContentItemInPackage;
   title: string;
   encryptedNoticeLabel: string;
+  encryptedFileNoticeLabel: string;
   passphrasePlaceholder: string;
   decryptLabel: string;
   decryptingLabel: string;
@@ -18,6 +19,7 @@ type ShareItemCardProps = {
   downloadError?: string;
   noDownloadTokenLabel: string;
   isEncryptedText: boolean;
+  isEncryptedFile?: boolean;
   passphraseValue: string;
   onPassphraseInput: (value: string) => void;
   onDecrypt: () => void;
@@ -64,7 +66,18 @@ export function ShareItemCard(props: ShareItemCardProps) {
 
       <Show when={!props.item.Text}>
         <div class="grid gap-3">
-          <div class="text-sm text-muted">{props.mimeType}</div>
+          <Show when={props.isEncryptedFile} fallback={<div class="text-sm text-muted">{props.mimeType}</div>}>
+            <div class="notice-box">{props.encryptedFileNoticeLabel}</div>
+          </Show>
+          <Show when={props.isEncryptedFile}>
+            <input
+              class="text-field"
+              type="password"
+              placeholder={props.passphrasePlaceholder}
+              value={props.passphraseValue}
+              onInput={(event) => props.onPassphraseInput(event.currentTarget.value)}
+            />
+          </Show>
           <Show when={props.canDownload}>
             <button class="btn btn-secondary" type="button" onClick={props.onDownload}>
               {props.downloadLabel}

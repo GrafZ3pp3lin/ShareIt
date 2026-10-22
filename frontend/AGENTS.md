@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-ShareIt frontend: a SolidJS SPA for uploading and sharing content packages (files/text), with optional OIDC login (guests get an auto-generated ID) and optional client-side encryption of pasted text.
+ShareIt frontend: a SolidJS SPA for uploading and sharing content packages (files/text), with optional OIDC login (guests get an auto-generated ID) and optional client-side encryption of pasted text and files (one passphrase per package).
 
 ## Commands
 
@@ -62,9 +62,13 @@ Features consume cross-cutting concerns from `src/shared/*` (`api`, `auth`, `cry
 
 The app never calls generated SDK functions directly except through `src/shared/api/`:
 
-- `client.ts` — `configureApiClient()` sets the real `baseUrl` from `getRuntimeConfig().apiBaseUrl` (overriding the generated client's hardcoded dev default) and registers a request interceptor that attaches either an OIDC `Authorization` bearer token (`getAuthToken()`) or, if not authenticated, a persisted guest ID header (`X-Guest-ID`, from `localStorage` key `shareit-guest-id`) — i.e. uploads work anonymously.
-- `content.ts` — thin app-level wrappers around generated SDK calls (`createContentPackage`, `addTextContent`, `uploadFiles`, `getPackageDetails`, `downloadContent`).
+- `client.ts` — `configureApiClient()` sets the real `baseUrl` from `getRuntimeConfig().apiBaseUrl` (overriding the generated client's hardcoded dev default) and registers a request interceptor that attaches either an OIDC `Authorization` bearer token (`getAuthToken()`) or, if not authenticated, a persisted guest ID header (`X-Guest-ID`, from `localStorage` key `shareit-guest-id`) — i.e. uploads work anonymously. `getAuthHeaders()` exposes the same identity headers for the XHR-based uploader.
+- `content.ts` — thin app-level wrappers around generated SDK calls (`createContentPackage`, `getPackageDetails`, `downloadContent`), the upload-limits query (`getUploadLimits`), and `uploadFile()` — an XHR-based single-file uploader with real progress reporting and `AbortSignal` cancellation.
 - `error-message.ts` — `getErrorMessage()` normalizes error shapes (string, `Error`, RFC7807 `ProblemDetails`, generic `{message}`) into a display string.
+
+### Upload flow (two-step hybrid)
+
+`upload-page.tsx` submits in two steps: (1) `POST /package` creates the package with metadata and the encrypted text inline (`Texts`), then (2) each file is encrypted client-side and uploaded individually (`POST /package/{id}/upload`) with per-file progress and cancel support. Per-file size limits come from the backend `GET /package/limits` endpoint (anonymous vs authenticated), applied client-side before upload and enforced server-side.
 
 ### Auth (OIDC)
 
@@ -87,10 +91,11 @@ The app is a static SPA that must be reconfigured without rebuilding per environ
 
 ### Client-side crypto
 
-`src/shared/crypto/` implements optional AES-GCM encryption for **pasted text only** (not files — `uploadFiles` always sends raw `File[]` unencrypted).
+`src/shared/crypto/` implements optional AES-GCM encryption for **both pasted text and files** (one passphrase per package, generated client-side and shown once).
 
-- `crypto.ts`: `generatePassphrase()` (random, shown once to the user), `deriveKey()` (PBKDF2-SHA256, 150k iterations), `encryptText()`/`decryptText()`.
+- `crypto.ts`: `generatePassphrase()` (random, shown once to the user), `deriveKey()` (PBKDF2-SHA256, 150k iterations), `encryptText()`/`decryptText()` for text, and `encryptFile()`/`decryptFile()` for files.
 - `envelope.ts`: `EncryptedTextEnvelope` JSON shape (`{v, alg, iter, salt, iv, ct}`) and `parseEncryptedTextEnvelope()` — the encrypted envelope's JSON serialization is literally what gets uploaded as "text content", and its presence/shape is how `share-page.tsx` detects an item needs a passphrase to decrypt.
+- Files use a **binary** envelope (avoids the ~33% base64 JSON bloat): magic `SIE1` + salt + IV + PBKDF2 iterations + AES-GCM ciphertext. Encrypted files are uploaded with MIME type `application/x-shareit-encrypted` (`ENCRYPTED_FILE_MIME_TYPE`), which is how the share page detects a file needs decryption; the magic header is also sniffed after download.
 
 ### i18n
 

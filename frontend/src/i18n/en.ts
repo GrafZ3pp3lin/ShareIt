@@ -21,7 +21,8 @@ export const dict = {
     },
     filePanel: {
       prompt: 'Drop file or browse',
-      selected: '{{ count }} file(s) selected'
+      selected: '{{ count }} file(s) selected',
+      limit: 'limit {{ limit }}/file'
     },
     placeholders: {
       title: 'Title (optional)',
@@ -38,11 +39,14 @@ export const dict = {
       label: 'password',
       on: 'on',
       off: 'off',
-      caption: 'Encrypts pasted text client-side before upload. Files are not encrypted.'
+      caption: 'Encrypts pasted text and files client-side before upload. The passphrase is shown once.'
     },
     submitCommand: 'upload --get-link',
     submit: {
-      uploading: 'Uploading...'
+      uploading: 'Uploading...',
+      encrypting: 'Encrypting {{ current }}/{{ total }}: {{ fileName }}',
+      uploadingFile: 'Uploading {{ current }}/{{ total }}: {{ fileName }} · {{ percent }}%',
+      cancel: 'Cancel'
     },
     result: {
       heading: 'link ready',
@@ -58,8 +62,11 @@ export const dict = {
       createPackage: 'Failed to create package.',
       missingContent: 'Add text or select at least one file before uploading.',
       encryptFailed: 'Unable to encrypt the text.',
+      encryptFileFailed: 'Unable to encrypt the files.',
       addTextFailed: 'Failed to add text.',
-      uploadFilesFailed: 'Failed to upload files.'
+      uploadFilesFailed: 'Failed to upload files.',
+      fileTooLarge: 'Skipped: {{ names }} exceed the {{ limit }} per-file limit.',
+      canceled: 'Upload canceled.'
     }
   },
   share: {
@@ -71,6 +78,7 @@ export const dict = {
     textEntry: 'Text entry',
     content: 'Content',
     encryptedNotice: 'This text is encrypted. Enter the passphrase to reveal it.',
+    encryptedFileNotice: 'This file is encrypted. Enter the passphrase, then download to decrypt it.',
     passphrasePlaceholder: 'Passphrase',
     decrypting: 'Decrypting...',
     decrypt: 'Decrypt',
