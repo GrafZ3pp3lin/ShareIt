@@ -1,9 +1,14 @@
 using Asp.Versioning;
 using kroet.Permissions;
+using kroet.ShareIt.Api;
+using kroet.ShareIt.Api.Authentication;
 using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Services.Cleanup;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage.Extensions;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Serilog;
 
 // The initial "bootstrap" logger is able to log errors during start-up. It's completely replaced by the
@@ -25,7 +30,7 @@ try
     });
     
     builder.Services.AddCors();
-    
+
     // Blob Storage configuration
     builder.Services.AddBlobStorage(configuration);
     
@@ -44,7 +49,38 @@ try
     // Background cleanup service
     builder.Services.AddCleanupService();
     
-    builder.Services.AddAuthentication();
+    // Authentication:
+    // - JWT bearer validation is only enabled when Auth:Authority is configured,
+    //   so auth stays fully optional per environment.
+    // - A plain challenge/forbid scheme answers denied anonymous requests with
+    //   401/403 instead of throwing (no interactive sign-in exists server-side).
+    var authAuthority = configuration["Auth:Authority"];
+    builder.Services.AddAuthentication(options =>
+        {
+            options.DefaultChallengeScheme = ApiChallengeHandler.SchemeName;
+            if (!string.IsNullOrEmpty(authAuthority))
+            {
+                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            }
+        })
+        .AddScheme<AuthenticationSchemeOptions, ApiChallengeHandler>(ApiChallengeHandler.SchemeName, _ => { });
+
+    if (!string.IsNullOrEmpty(authAuthority))
+    {
+        builder.Services.AddAuthentication().AddJwtBearer(options =>
+        {
+            options.Authority = authAuthority;
+            // The SPA uses authorization-code + PKCE; access tokens carry the
+            // client id as audience. Audience validation is skipped until an
+            // explicit API audience is configured.
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateAudience = false
+            };
+        });
+    }
+
     builder.Services.AddAuthorization();
     builder.Services.AddPermissionAuthorization();
 
@@ -81,10 +117,17 @@ try
     var v1ApiEndpoints = app.MapGroup("/api")
         .WithApiVersionSet(versionSet)
         .MapToApiVersion(new ApiVersion(1, 0));
-    
-    // Map content management endpoints
-    v1ApiEndpoints.MapGroup("/v1/content")
-        .MapContentEndpoints();
+
+    var v1ContentEndpoints = v1ApiEndpoints.MapGroup("/v1/content");
+
+    // Map content endpoints
+    v1ContentEndpoints.MapContentEndpoints();
+
+    // Map content management endpoints (authenticated users only)
+    v1ContentEndpoints.MapContentManagementEndpoints();
+
+    // Register permission grants
+    app.MapPermissions();
 
     await app.InitializePackageStorageAsync();
 
