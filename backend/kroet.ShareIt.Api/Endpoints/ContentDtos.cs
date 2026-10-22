@@ -57,6 +57,22 @@ public class CreateTextRequest
 }
 
 /// <summary>
+/// Response describing the per-file upload size limits.
+/// </summary>
+public class UploadLimitsResponse
+{
+    /// <summary>
+    /// Maximum size of a single uploaded file for anonymous (guest) users, in bytes.
+    /// </summary>
+    public required long AnonymousFileLimitBytes { get; init; }
+
+    /// <summary>
+    /// Maximum size of a single uploaded file for authenticated users, in bytes.
+    /// </summary>
+    public required long AuthenticatedFileLimitBytes { get; init; }
+}
+
+/// <summary>
 /// Response for a content package.
 /// </summary>
 public class ContentPackageResponse

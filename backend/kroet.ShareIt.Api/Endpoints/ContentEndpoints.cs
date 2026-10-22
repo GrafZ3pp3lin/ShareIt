@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using System.Text;
 using kroet.Permission.AspNetCore;
+using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Services.Storage;
@@ -8,6 +9,7 @@ using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.User;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace kroet.ShareIt.Api.Content;
 
@@ -23,14 +25,26 @@ public static class ContentEndpoints
     {
         var packageGroup = group.MapGroup("/package");
 
+        // Upload limits endpoint (placed before the parameterized routes)
+        packageGroup
+            .MapGet("/limits", GetUploadLimits)
+            .RequirePermission("Read.Limits")
+            .Produces<UploadLimitsResponse>()
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .WithName("GetUploadLimits")
+            .WithTags("Content", "Package");
+
         // Package endpoints
         packageGroup
             .MapPost("", CreatePackageAsync)
             .Accepts<CreatePackageRequest>("multipart/form-data")
             .RequirePermission("Create.Package")
+            .DisableAntiforgery()
             .Produces<ContentPackageResponse>(StatusCodes.Status201Created)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)
             .WithName("CreatePackage")
             .WithTags("Content", "Package");
 
@@ -38,10 +52,13 @@ public static class ContentEndpoints
             .MapPost("/{packageId:guid}/upload", UploadFilesToPackageAsync)
             .Accepts<IFormFileCollection>("multipart/form-data")
             .RequirePermission("Upload.File")
+            .DisableAntiforgery()
             .Produces<ContentPackageResponse>()
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)
             .WithName("UploadFileToPackage")
             .WithTags("Content", "Package");
 
@@ -90,6 +107,7 @@ public static class ContentEndpoints
         [FromServices] IStorageHandler storageHandler,
         [FromServices] TimeProvider timeProvider,
         [FromServices] LinkGenerator linkGenerator,
+        [FromServices] IOptions<UploadSettings> uploadOptions,
         HttpContext httpContext,
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
@@ -112,6 +130,18 @@ public static class ContentEndpoints
                 Detail = "Only authenticated users can create private packages",
                 Status = StatusCodes.Status401Unauthorized
             });
+        }
+
+        // Validate upload sizes before anything is stored
+        var settings = uploadOptions.Value;
+        var fileLimitBytes = FileLimitBytes(userIdentity, settings);
+        if (request.Files is { Count: > 0 })
+        {
+            var oversized = request.Files.FirstOrDefault(file => file.Length > fileLimitBytes);
+            if (oversized is not null)
+            {
+                return FileTooLargeProblem(oversized.FileName, fileLimitBytes);
+            }
         }
 
         var now = timeProvider.GetUtcNow();
@@ -149,7 +179,7 @@ public static class ContentEndpoints
                     CreatedAt = now,
                     Size = file.Length,
                     UserId = userIdentity.Id,
-                    FileName = file.FileName,
+                    FileName = SanitizeFileName(file.FileName),
                     MimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
                 };
 
@@ -204,6 +234,7 @@ public static class ContentEndpoints
         [FromServices] IContentStorageHandler contentStorageHandler,
         [FromServices] IStorageHandler storageHandler,
         [FromServices] TimeProvider timeProvider,
+        [FromServices] IOptions<UploadSettings> uploadOptions,
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
     {
@@ -243,6 +274,15 @@ public static class ContentEndpoints
             });
         }
 
+        // Validate upload sizes before anything is stored
+        var settings = uploadOptions.Value;
+        var fileLimitBytes = FileLimitBytes(userIdentity, settings);
+        var oversized = files.FirstOrDefault(file => file.Length > fileLimitBytes);
+        if (oversized is not null)
+        {
+            return FileTooLargeProblem(oversized.FileName, fileLimitBytes);
+        }
+
         var now = timeProvider.GetUtcNow();
         // Upload each file and add to package
         foreach (var file in files)
@@ -260,7 +300,7 @@ public static class ContentEndpoints
                 CreatedAt = now,
                 Size = file.Length,
                 UserId = userIdentity.Id,
-                FileName = file.FileName,
+                FileName = SanitizeFileName(file.FileName),
                 MimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
             };
 
@@ -559,5 +599,58 @@ public static class ContentEndpoints
                 Title = "Content not found", Detail = $"Content with ID {contentId} was not found", Status = StatusCodes.Status404NotFound
             });
         }
+    }
+
+    /// <summary>
+    /// Returns the upload size limits for anonymous and authenticated users.
+    /// </summary>
+    private static Ok<UploadLimitsResponse> GetUploadLimits(
+        [FromServices] IOptions<UploadSettings> uploadOptions)
+    {
+        var settings = uploadOptions.Value;
+
+        return TypedResults.Ok(new UploadLimitsResponse
+        {
+            AnonymousFileLimitBytes = settings.AnonymousFileLimitMb * 1024L * 1024L,
+            AuthenticatedFileLimitBytes = settings.AuthenticatedFileLimitMb * 1024L * 1024L
+        });
+    }
+
+    /// <summary>
+    /// Resolves the per-file upload limit for the given identity.
+    /// </summary>
+    private static long FileLimitBytes(UserIdentity userIdentity, UploadSettings settings)
+    {
+        return userIdentity.IsGuest
+            ? settings.AnonymousFileLimitMb * 1024L * 1024L
+            : settings.AuthenticatedFileLimitMb * 1024L * 1024L;
+    }
+
+    private static ProblemHttpResult FileTooLargeProblem(string? fileName, long fileLimitBytes)
+    {
+        return TypedResults.Problem(new ProblemDetails
+        {
+            Title = "File too large",
+            Detail = $"File '{fileName}' exceeds the upload limit of {fileLimitBytes / (1024d * 1024d):0.#} MB.",
+            Status = StatusCodes.Status413PayloadTooLarge
+        });
+    }
+
+    /// <summary>
+    /// Strips any path information, control characters and excessive length from a
+    /// client-supplied file name before it is persisted or used in response headers.
+    /// </summary>
+    private static string SanitizeFileName(string? fileName)
+    {
+        var name = Path.GetFileName((fileName ?? string.Empty).Replace('\\', '/')).Trim();
+        var sanitized = new string(name.Where(c => !char.IsControl(c)).ToArray()).Trim();
+
+        if (string.IsNullOrEmpty(sanitized))
+        {
+            return "file";
+        }
+
+        const int maxFileNameLength = 200;
+        return sanitized.Length <= maxFileNameLength ? sanitized : sanitized[^maxFileNameLength..];
     }
 }

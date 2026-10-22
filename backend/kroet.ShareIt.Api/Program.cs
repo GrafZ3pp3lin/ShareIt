@@ -2,12 +2,14 @@ using Asp.Versioning;
 using kroet.Permissions;
 using kroet.ShareIt.Api;
 using kroet.ShareIt.Api.Authentication;
+using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Services.Cleanup;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage.Extensions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 
@@ -30,6 +32,24 @@ try
     });
     
     builder.Services.AddCors();
+
+    // Upload size limits (also enforced per-file in the content endpoints)
+    builder.Services.AddOptions<UploadSettings>()
+        .BindConfiguration(UploadSettings.SectionName)
+        .ValidateWithFluentValidator<UploadSettings, UploadSettingsValidator>()
+        .ValidateOnStart();
+
+    var uploadSettings = configuration.GetSection(UploadSettings.SectionName).Get<UploadSettings>() ?? new UploadSettings();
+    var maxRequestBodySizeBytes = uploadSettings.MaxRequestBodySizeMb * 1024L * 1024L;
+    builder.WebHost.ConfigureKestrel(options =>
+    {
+        options.Limits.MaxRequestBodySize = maxRequestBodySizeBytes;
+    });
+    builder.Services.Configure<FormOptions>(options =>
+    {
+        options.MultipartBodyLengthLimit = maxRequestBodySizeBytes;
+        options.ValueLengthLimit = 1024 * 1024;
+    });
 
     // Blob Storage configuration
     builder.Services.AddBlobStorage(configuration);

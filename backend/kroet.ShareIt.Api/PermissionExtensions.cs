@@ -16,6 +16,7 @@ public static class PermissionExtensions
                 
                 manager.RegisterPermission("Create.Package", ForEveryone);
                 manager.RegisterPermission("Read.Package", ForEveryone);
+                manager.RegisterPermission("Read.Limits", ForEveryone);
                 manager.RegisterPermission("Delete.Package", ForAuthenticatedUsers);
             });
 
