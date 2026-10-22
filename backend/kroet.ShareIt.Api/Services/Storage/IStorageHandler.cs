@@ -2,7 +2,7 @@
 
 /// <summary>
 /// High-level storage handler that manages content storage with automatic routing
-/// to MongoDB (embedded) or Blob Storage based on size.
+/// to the content store (embedded) or Blob Storage based on size.
 /// </summary>
 public interface IStorageHandler
 {

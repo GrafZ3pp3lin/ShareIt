@@ -120,7 +120,7 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
         {
             // Check if object exists first
             var exists = await ExistsAsync(blobId, cancellationToken);
-            
+
             if (!exists)
             {
                 _logger.LogDebug("Object {ObjectKey} not found for deletion", blobId);
@@ -198,4 +198,3 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
         _s3Client.Dispose();
     }
 }
-

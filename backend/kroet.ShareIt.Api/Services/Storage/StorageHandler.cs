@@ -5,7 +5,7 @@ namespace kroet.ShareIt.Api.Services.Storage;
 
 /// <summary>
 /// Main storage handler that routes content to appropriate storage based on size.
-/// Small content is embedded in MongoDB, large content goes to blob storage.
+/// Small content is embedded in the content store, large content goes to blob storage.
 /// </summary>
 public class StorageHandler : IStorageHandler
 {

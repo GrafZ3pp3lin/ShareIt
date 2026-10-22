@@ -1,7 +1,7 @@
 ﻿namespace kroet.ShareIt.Api.Models;
 
 /// <summary>
-/// MongoDB document for storing temporary download tokens.
+/// Document for storing temporary download tokens.
 /// </summary>
 public sealed class DownloadToken
 {

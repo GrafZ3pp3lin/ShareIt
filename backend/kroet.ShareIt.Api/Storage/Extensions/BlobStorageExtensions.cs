@@ -1,6 +1,5 @@
 ﻿using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Storage.InMemory;
-using kroet.ShareIt.Api.Storage.Mongo;
 using kroet.ShareIt.Api.Storage.S3;
 
 namespace kroet.ShareIt.Api.Storage.Extensions;
@@ -18,10 +17,6 @@ public static class BlobStorageExtensions
             {
                 services.AddS3BlobStorage();
             }
-            else if (configuration.GetSection(MongoBlobStorageSettings.SectionName).Exists())
-            {
-                services.AddMongoBlobStorage();
-            }
             else if (configuration.GetSection(InMemoryBlobStorageSettings.SectionName).Exists())
             {
                 services.AddInMemoryBlobStorage();
@@ -30,23 +25,6 @@ public static class BlobStorageExtensions
             {
                 throw new InvalidOperationException("No valid blob storage configuration found.");
             }
-
-            return services;
-        }
-
-        /// <summary>
-        /// Adds blob storage services to the service collection.
-        /// </summary>
-        private IServiceCollection AddMongoBlobStorage()
-        {
-            // MongoDB configuration
-            services
-                .AddOptions<MongoBlobStorageSettings>()
-                .BindConfiguration(MongoBlobStorageSettings.SectionName)
-                .ValidateWithFluentValidator<MongoBlobStorageSettings, MongoBlobStorageSettingsValidator>()
-                .ValidateOnStart();
-
-            services.AddSingleton<IBlobStorageHandler, MongoBlobStorageHandler>();
 
             return services;
         }
