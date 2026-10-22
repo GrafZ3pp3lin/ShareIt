@@ -83,3 +83,64 @@ export const decryptText = async (payload: string, passphrase: string) => {
   );
   return textDecoder.decode(plainBuffer);
 };
+
+// Binary envelope for files: magic "SIE1" (4 bytes) + salt (16) + IV (12) +
+// PBKDF2 iterations (4, big-endian) + AES-GCM ciphertext with auth tag (16).
+const FILE_ENVELOPE_MAGIC = new Uint8Array([0x53, 0x49, 0x45, 0x31]);
+const FILE_ENVELOPE_HEADER_LENGTH = 4 + 16 + 12 + 4;
+const FILE_ENVELOPE_TAG_LENGTH = 16;
+
+export const ENCRYPTED_FILE_MIME_TYPE = 'application/x-shareit-encrypted';
+export const ENCRYPTED_FILE_OVERHEAD_BYTES = FILE_ENVELOPE_HEADER_LENGTH + FILE_ENVELOPE_TAG_LENGTH;
+
+export const isEncryptedFileEnvelope = (bytes: Uint8Array) =>
+  bytes.length >= FILE_ENVELOPE_HEADER_LENGTH && FILE_ENVELOPE_MAGIC.every((byte, index) => bytes[index] === byte);
+
+export const isEncryptedBlob = async (blob: Blob) =>
+  isEncryptedFileEnvelope(new Uint8Array(await blob.slice(0, FILE_ENVELOPE_HEADER_LENGTH + 1).arrayBuffer()));
+
+export const encryptFile = async (file: File, passphrase: string) => {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(passphrase, salt, PBKDF2_ITERATIONS);
+  const plain = new Uint8Array(await file.arrayBuffer());
+  const cipherBuffer = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: toArrayBuffer(iv) },
+    key,
+    toArrayBuffer(plain)
+  );
+
+  const cipher = new Uint8Array(cipherBuffer);
+  const header = new Uint8Array(FILE_ENVELOPE_HEADER_LENGTH);
+  header.set(FILE_ENVELOPE_MAGIC, 0);
+  header.set(salt, 4);
+  header.set(iv, 20);
+  new DataView(header.buffer).setUint32(32, PBKDF2_ITERATIONS, false);
+
+  const envelope = new Uint8Array(header.length + cipher.length);
+  envelope.set(header, 0);
+  envelope.set(cipher, header.length);
+
+  return new File([envelope], file.name, { type: ENCRYPTED_FILE_MIME_TYPE });
+};
+
+export const decryptFile = async (encryptedBlob: Blob, passphrase: string) => {
+  const bytes = new Uint8Array(await encryptedBlob.arrayBuffer());
+  if (!isEncryptedFileEnvelope(bytes)) {
+    throw new Error('Payload is not encrypted');
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const iterations = view.getUint32(32, false);
+  const salt = bytes.slice(4, 20);
+  const iv = bytes.slice(20, 32);
+  const cipher = bytes.slice(FILE_ENVELOPE_HEADER_LENGTH);
+
+  const key = await deriveKey(passphrase, salt, iterations);
+  const plainBuffer = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: toArrayBuffer(iv) },
+    key,
+    toArrayBuffer(cipher)
+  );
+  return new Blob([plainBuffer]);
+};
