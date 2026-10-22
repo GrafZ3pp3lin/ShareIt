@@ -76,7 +76,18 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 
     public Task<DownloadIncrementResult> IncrementPackageAccessCountAsync(Guid packageId, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        var index = _packages.FindIndex(p => p.Id == packageId);
+        if (index < 0)
+        {
+            return Task.FromResult(new DownloadIncrementResult(false, 0, null, false));
+        }
+
+        var package = _packages[index];
+        var newCount = package.CurrentDownloadCount + 1;
+        _packages[index] = package with { CurrentDownloadCount = newCount };
+
+        var limitReached = package.MaxDownloadCount.HasValue && newCount >= package.MaxDownloadCount.Value;
+        return Task.FromResult(new DownloadIncrementResult(true, newCount, package.MaxDownloadCount, limitReached));
     }
 
     public Task<int> DeletePackagesAsync(IEnumerable<Guid> packageIds, CancellationToken cancellationToken = default)

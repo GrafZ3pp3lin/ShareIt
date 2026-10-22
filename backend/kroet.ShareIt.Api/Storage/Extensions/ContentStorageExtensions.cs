@@ -22,7 +22,7 @@ public static class ContentStorageExtensions
             {
                 services.AddSqlContentStorage();
             }
-            if (configuration.GetSection(InMemoryContentStorageSettings.SectionName).Exists())
+            else if (configuration.GetSection(InMemoryContentStorageSettings.SectionName).Exists())
             {
                 services.AddInMemoryContentStorage();
             }

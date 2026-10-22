@@ -7,6 +7,10 @@
 - Tailwind CSS is the primary styling system; prefer utility classes over custom CSS when possible.
 - Prefer native browser elements for UI primitives where possible.
 
+### Backend (.NET)
+- Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`). They select the in-memory storage implementations purely via configuration and authenticate via the `X-Test-User` header (see `Infrastructure/ShareItApiFactory.cs`); no S3/Postgres/identity provider is needed.
+- The Postgres integration tests additionally require a running Docker daemon (Testcontainers).
+
 ## Code Style Guidelines
 
 ### General

@@ -163,3 +163,7 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+// Declared public so the integration test project can boot the API
+// with WebApplicationFactory<Program>.
+public partial class Program { }
