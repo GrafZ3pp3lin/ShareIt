@@ -36,7 +36,7 @@ public static class ContentManagementEndpoints
     /// </summary>
     private static async Task<Results<NoContent, ProblemHttpResult>> DeletePackageAsync(
         [FromRoute] Guid packageId,
-        [FromRoute(Name = "X-Guest-ID")] Guid? guestId,
+        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler contentStorageHandler,
         [FromServices] IStorageHandler storageHandler,
         ClaimsPrincipal claimsPrincipal,
