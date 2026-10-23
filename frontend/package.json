@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "pnpm@12.10.1+sha512.ba40a37eb1a370d60fea8c4cf1d364c13bcccef518e98ad2bcee954f539d38da37458e58261a3fa55e06523450ea0ffff9f497b135be41f2c15c1642bacace6c",
+  "packageManager": "pnpm@12.15.0+sha512.b3951d6d6ff4a9f13dc7cf56cd28d2b8eb37dbcc9c68e52e1e1191873ea9f82a017287ab50baadc5ccc494f036c67c0e47eb13608c2fa36f47711b61ea128e61",
   "scripts": {
     "dev": "vite",
     "test": "vitest",
@@ -19,32 +19,32 @@
   },
   "dependencies": {
     "@solid-primitives/i18n": "2.2.1",
-    "@tanstack/solid-query": "5.104.1",
-    "@tanstack/solid-router": "1.170.38",
+    "@tanstack/solid-query": "5.104.5",
+    "@tanstack/solid-router": "1.170.43",
     "clsx": "2.1.1",
     "oidc-client-ts": "3.5.0",
-    "solid-js": "1.9.15"
+    "solid-js": "1.9.17"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",
-    "@iconify-json/lucide": "1.2.140",
+    "@iconify-json/lucide": "1.2.147",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.3.3",
-    "@tanstack/solid-query-devtools": "5.104.1",
+    "@tanstack/solid-query-devtools": "5.104.5",
     "@testing-library/jest-dom": "7.0.1",
-    "@types/node": "26.6.4",
-    "@vitest/browser-playwright": "5.0.3",
-    "@vitest/ui": "5.0.3",
-    "happy-dom": "20.14.5",
-    "knip": "6.39.0",
-    "oxfmt": "0.72.0",
-    "oxlint": "1.87.0",
-    "oxlint-tsgolint": "7.0.2003",
+    "@types/node": "26.6.5",
+    "@vitest/browser-playwright": "5.0.5",
+    "@vitest/ui": "5.0.5",
+    "happy-dom": "21.0.4",
+    "knip": "6.42.1",
+    "oxfmt": "0.74.0",
+    "oxlint": "1.89.0",
+    "oxlint-tsgolint": "7.0.2005",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "unplugin-icons": "24.0.0",
-    "vite": "8.3.2",
+    "vite": "8.3.5",
     "vite-plugin-solid": "2.11.14",
-    "vitest": "5.0.3"
+    "vitest": "5.0.5"
   }
 }

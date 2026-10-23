@@ -20,7 +20,7 @@ minimumReleaseAgeIgnoreMissingTime: false
 # release; a glob like `@scope/*` is allowed only without a version. pnpm appends
 # here when an immature version is approved at the prompt — prune entries once
 # the version they name has aged past the cutoff, or the hole stays open.
-minimumReleaseAgeExclude: []
+minimumReleaseAgeExclude: [ '@oxlint-tsgolint/darwin-arm64@7.0.2005', '@oxlint-tsgolint/darwin-x64@7.0.2005', '@oxlint-tsgolint/linux-arm64@7.0.2005', '@oxlint-tsgolint/linux-x64@7.0.2005', '@oxlint-tsgolint/win32-arm64@7.0.2005', '@oxlint-tsgolint/win32-x64@7.0.2005', '@tanstack/router-core@1.171.39', '@tanstack/solid-router@1.170.43', oxlint-tsgolint@7.0.2005 ]
 
 # Reject a version published with weaker credentials than earlier versions of
 # the same package had — a package that shipped via npm trusted publishing or
@@ -42,3 +42,7 @@ strictDepBuilds: true
 
 # Never the blanket "run every dependency's install scripts" mode. (pnpm default)
 dangerouslyAllowAllBuilds: false
+
+permissions:
+  '@tanstack/solid-router':
+    skills: true
