@@ -45,7 +45,7 @@ public class StorageHandler : IStorageHandler
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to store content {ContentId} in blob storage", content.Id);
+            _logger.LogError(ex, "Failed to store content {ContentId} (blob and/or metadata)", content.Id);
             if (!string.IsNullOrEmpty(externalUrl))
             {
                 // Attempt to clean up the uploaded blob

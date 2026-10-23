@@ -146,6 +146,17 @@ public abstract class ShareItApiTestBase
         return await ReadJsonAsync<ContentPackageDetailsResponse>(response);
     }
 
+    /// <summary>
+    /// Fetches a content item via its download token.
+    /// </summary>
+    protected Task<HttpResponseMessage> SendDownloadAsync(string downloadUrl, string token, Guid guestId)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+        request.Headers.Add("X-File-Token", token);
+        request.Headers.Add("X-Guest-ID", guestId.ToString());
+        return Client.SendAsync(request);
+    }
+
     protected Task<HttpResponseMessage> DeletePackageAsync(Guid packageId, Guid? guestId = null, Guid? userId = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/content/packages/{packageId}");

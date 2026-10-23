@@ -296,11 +296,14 @@ public class SqlContentStorageHandler : IContentStorageHandler
         Guid packageId, 
         CancellationToken cancellationToken = default)
     {
-        // Using UPDATE...RETURNING for atomic increment with a single query
+        // Atomic claim of one access: the guarded UPDATE makes concurrent
+        // claims serialize on the package row, so the counter can never
+        // exceed the configured limit.
         const string incrementSql = """
                                     UPDATE content_packages
                                         SET current_download_count = current_download_count + 1
                                     WHERE id = @PackageId
+                                      AND (max_download_count IS NULL OR current_download_count < max_download_count)
                                     RETURNING current_download_count, max_download_count
                                     """;
 

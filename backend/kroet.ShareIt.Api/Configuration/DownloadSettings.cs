@@ -19,6 +19,14 @@ public sealed class DownloadSettings : ISettings
     /// </summary>
     public int UsedTokenRetentionHours { get; set; } = 24;
 
+    /// <summary>
+    /// Maximum size of a text blob (in kilobytes) that GET /package/{id} may
+    /// read fully into memory and inline into the JSON response. Larger text
+    /// items are served through a download token instead.
+    /// Default: 64 KB.
+    /// </summary>
+    public long InlineTextLimitKb { get; set; } = 64;
+
     public static string SectionName => "DownloadSettings";
 }
 
@@ -29,5 +37,7 @@ public sealed class DownloadSettingsValidator : AbstractValidator<DownloadSettin
         RuleFor(x => x.DefaultTokenExpirationMinutes).GreaterThan(0);
 
         RuleFor(x => x.UsedTokenRetentionHours).GreaterThanOrEqualTo(0);
+
+        RuleFor(x => x.InlineTextLimitKb).GreaterThanOrEqualTo(0);
     }
 }

@@ -83,6 +83,13 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
         }
 
         var package = _packages[index];
+
+        // Guarded claim: never consume accesses beyond the configured limit.
+        if (package.IsAccessLimitReached)
+        {
+            return Task.FromResult(new DownloadIncrementResult(false, package.CurrentDownloadCount, package.MaxDownloadCount, true));
+        }
+
         var newCount = package.CurrentDownloadCount + 1;
         _packages[index] = package with { CurrentDownloadCount = newCount };
 

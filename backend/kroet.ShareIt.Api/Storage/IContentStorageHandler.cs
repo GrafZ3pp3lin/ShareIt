@@ -63,11 +63,13 @@ public interface IContentStorageHandler
     Task<IReadOnlyList<ExternalContent>> GetContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Atomically increments the access count for a package.
+    /// Atomically claims one access for a package. Opening the link counts as
+    /// an access; the guarded update rejects the claim once the package's
+    /// access limit has been reached.
     /// </summary>
     /// <param name="packageId">The unique package identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The result of the increment operation.</returns>
+    /// <returns>The result of the claim operation.</returns>
     Task<DownloadIncrementResult> IncrementPackageAccessCountAsync(Guid packageId, CancellationToken cancellationToken = default);
     
     /// <summary>

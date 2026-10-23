@@ -156,6 +156,64 @@ public class ContentPackageDetailsResponse
 }
 
 /// <summary>
+/// Preview of a package for its authenticated owner: basic information only.
+/// Contains no content items, download tokens or inline text, and claiming a
+/// preview never consumes an access.
+/// </summary>
+public class ContentPackagePreviewResponse
+{
+    /// <summary>
+    /// Package ID.
+    /// </summary>
+    public required Guid Id { get; init; }
+
+    /// <summary>
+    /// Package title.
+    /// </summary>
+    public string? Title { get; init; }
+
+    /// <summary>
+    /// Package description.
+    /// </summary>
+    public string? Description { get; init; }
+
+    /// <summary>
+    /// When the package was created.
+    /// </summary>
+    public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// Optional expiration timestamp.
+    /// </summary>
+    public DateTimeOffset? ExpiresAt { get; init; }
+
+    /// <summary>
+    /// Number of content items in the package.
+    /// </summary>
+    public required int ItemCount { get; init; }
+
+    /// <summary>
+    /// Maximum number of accesses (link openings). Null means unlimited.
+    /// </summary>
+    public int? MaxDownloadCount { get; init; }
+
+    /// <summary>
+    /// Number of accesses consumed so far.
+    /// </summary>
+    public required int CurrentDownloadCount { get; init; }
+
+    /// <summary>
+    /// Remaining accesses. Null means unlimited.
+    /// </summary>
+    public int? RemainingDownloads { get; init; }
+
+    /// <summary>
+    /// Whether the package has expired.
+    /// </summary>
+    public required bool IsExpired { get; init; }
+}
+
+/// <summary>
 /// Represents a content item within a package.
 /// </summary>
 public class ContentItemInPackage
@@ -186,17 +244,18 @@ public class ContentItemInPackage
     public required long Size { get; init; }
 
     /// <summary>
-    /// Text content (for text items).
+    /// Text content (for text items small enough to inline; omitted for text
+    /// items exceeding <see cref="DownloadSettings.InlineTextLimitKb"/>).
     /// </summary>
     public string? Text { get; init; }
 
     /// <summary>
-    /// Download token (for files).
+    /// Download token (for files and oversized text items).
     /// </summary>
     public string? DownloadToken { get; init; }
 
     /// <summary>
-    /// Download URL (for files).
+    /// Download URL (for files and oversized text items).
     /// </summary>
     public string? DownloadUrl { get; init; }
 

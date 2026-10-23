@@ -24,7 +24,12 @@ export function SharePage() {
   const packageQuery = useQuery(() => ({
     queryKey: ['package', packageId()],
     queryFn: () => getPackageDetails(packageId()),
-    enabled: Boolean(packageId())
+    enabled: Boolean(packageId()),
+    // Opening the link consumes one of the package's accesses; never refetch
+    // in the background (e.g. on window focus) or the access would be burned
+    // without the user reloading the page.
+    refetchOnWindowFocus: false,
+    retry: false
   }));
 
   const packageData = () => packageQuery.data?.data;
@@ -96,6 +101,29 @@ export function SharePage() {
           [item.Id]: t('share.invalidPassphrase')
         }));
         return;
+      }
+    } else if (item.Type === 'text') {
+      // Oversized text items are delivered as blobs; an encrypted envelope
+      // must be decrypted with the passphrase before saving.
+      const text = await blob.text();
+      if (parseEncryptedTextEnvelope(text)) {
+        const value = passphrase();
+        if (!value) {
+          setDownloadErrors((current) => ({
+            ...current,
+            [item.Id]: t('share.enterPassphrase')
+          }));
+          return;
+        }
+        try {
+          blob = new Blob([await decryptText(text, value)], { type: 'text/plain;charset=utf-8' });
+        } catch {
+          setDownloadErrors((current) => ({
+            ...current,
+            [item.Id]: t('share.invalidPassphrase')
+          }));
+          return;
+        }
       }
     }
 

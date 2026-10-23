@@ -4,6 +4,7 @@ using kroet.ShareIt.Api;
 using kroet.ShareIt.Api.Authentication;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content;
+using kroet.ShareIt.Api.Services;
 using kroet.ShareIt.Api.Services.Cleanup;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage.Extensions;
@@ -32,6 +33,11 @@ try
     });
     
     builder.Services.AddCors();
+
+    // Map unhandled exceptions to RFC 7807 ProblemDetails (HTTP 500)
+    // instead of letting them escape as bare server responses.
+    builder.Services.AddProblemDetails();
+    builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
     // Upload size limits (also enforced per-file in the content endpoints)
     builder.Services.AddOptions<UploadSettings>()
@@ -123,6 +129,9 @@ try
         options.AllowAnyMethod();
         options.AllowAnyOrigin();
     });
+
+    // Must come after UseCors so problem responses still carry CORS headers.
+    app.UseExceptionHandler();
 
     if (app.Environment.IsDevelopment())
     {

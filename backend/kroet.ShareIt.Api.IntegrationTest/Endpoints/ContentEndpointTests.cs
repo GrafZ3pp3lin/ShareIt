@@ -116,17 +116,48 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task GetPackage_WhenAccessLimitReached_Returns410Gone()
+    public async Task GetPackage_ConsumesOneAccessPerView_SecondViewReturns410()
     {
+        // Opening the link consumes one access: with a limit of 1, the very
+        // first view wins and every further view — even the same viewer
+        // refreshing — is rejected.
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId, fileBytes: FileBytes, maxDownloadCount: 1);
 
-        var first = await GetPackageAsync(packageId, guestId: guestId);
-        Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
+        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var fileItem = details.Items.Single(item => item.Type == "file");
 
         var second = await GetPackageAsync(packageId, guestId: guestId);
         Assert.AreEqual(HttpStatusCode.Gone, second.StatusCode);
         var problem = await ReadProblemAsync(second);
+        Assert.AreEqual("Package access limit reached", problem.Title);
+
+        // The download token issued on the winning view still works.
+        var download = await SendDownloadAsync(fileItem.DownloadUrl!, fileItem.DownloadToken!, guestId);
+        var downloadBody = await download.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.OK, download.StatusCode, downloadBody);
+
+        // But the token is single-use.
+        var downloadAgain = await SendDownloadAsync(fileItem.DownloadUrl!, fileItem.DownloadToken!, guestId);
+        Assert.AreEqual(HttpStatusCode.BadRequest, downloadAgain.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task GetPackage_WithAccessLimit_AllowsExactlyMaxViews()
+    {
+        // Three distinct viewers may open the link; the fourth is rejected.
+        var packageId = await CreatePackageAsync(guestId: Guid.NewGuid(), fileBytes: FileBytes, maxDownloadCount: 3);
+
+        for (var access = 1; access <= 3; access++)
+        {
+            var response = await GetPackageAsync(packageId, guestId: Guid.NewGuid());
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
+        }
+
+        var fourth = await GetPackageAsync(packageId, guestId: Guid.NewGuid());
+        Assert.AreEqual(HttpStatusCode.Gone, fourth.StatusCode);
+        var problem = await ReadProblemAsync(fourth);
         Assert.AreEqual("Package access limit reached", problem.Title);
     }
 
@@ -321,13 +352,5 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
 
         var fileItem = details.Items.Single(item => item.Type == "file");
         return (packageId, fileItem);
-    }
-
-    private Task<HttpResponseMessage> SendDownloadAsync(string downloadUrl, string token, Guid guestId)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
-        request.Headers.Add("X-File-Token", token);
-        request.Headers.Add("X-Guest-ID", guestId.ToString());
-        return Client.SendAsync(request);
     }
 }
