@@ -2,19 +2,23 @@ import {
   createPackage,
   downloadContentWithToken,
   getPackage,
-  type ContentPackageDetailsResponse,
-  type ContentPackageResponse,
-  type CreatePackageRequest
-} from '../../client/index.ts';
-import { client } from '../../client/client.gen.ts';
+  getUploadLimits as getUploadLimitsGenerated
+} from '../../client/api.ts';
+import type {
+  ContentPackageDetailsResponse,
+  ContentPackageResponse,
+  CreatePackageRequest
+} from '../../client/model/index.ts';
+import { getAuthHeaders } from './fetch-client.ts';
 import { getRuntimeConfig } from '../config/runtime-config.ts';
-import { getAuthHeaders } from './client.ts';
+
 type ApiResult<T> = {
   data?: T;
   error?: unknown;
-  request?: Request;
   response?: Response;
 };
+
+const isSuccess = (status: number): boolean => status >= 200 && status < 300;
 
 export type UploadLimits = {
   AnonymousFileLimitBytes: number;
@@ -27,30 +31,17 @@ const isUploadLimits = (value: unknown): value is UploadLimits =>
   'AnonymousFileLimitBytes' in value &&
   'AuthenticatedFileLimitBytes' in value;
 
-export async function createContentPackage(request: CreatePackageRequest): Promise<ApiResult<ContentPackageResponse>> {
-  return createPackage({
-    body: request
-  });
-}
+const isContentPackageResponse = (value: unknown): value is ContentPackageResponse =>
+  typeof value === 'object' && value !== null && 'Id' in value;
 
-export async function getUploadLimits(): Promise<ApiResult<UploadLimits>> {
-  const result = await client.get({ url: '/api/v1/content/package/limits' });
-  if (isUploadLimits(result.data)) {
-    return { data: result.data, error: undefined, response: result.response };
-  }
-  return {
-    error: result.error ?? new Error('Unexpected upload limits response')
-  };
-}
+const isContentPackageDetailsResponse = (value: unknown): value is ContentPackageDetailsResponse =>
+  typeof value === 'object' && value !== null && 'Package' in value && 'Items' in value;
 
 export type UploadProgressCallback = (sentBytes: number, totalBytes: number) => void;
 
 export type UploadFileResult = ApiResult<ContentPackageResponse> & {
   canceled?: boolean;
 };
-
-const isContentPackageResponse = (value: unknown): value is ContentPackageResponse =>
-  typeof value === 'object' && value !== null && 'Id' in value;
 
 /**
  * Uploads a single file with real progress reporting via XHR (the fetch API
@@ -111,22 +102,41 @@ export async function uploadFile(
   });
 }
 
+export async function createContentPackage(request: CreatePackageRequest): Promise<ApiResult<ContentPackageResponse>> {
+  const result = await createPackage(request);
+  if (isSuccess(result.status) && isContentPackageResponse(result.data)) {
+    return { data: result.data };
+  }
+  return { error: result.data };
+}
+
+export async function getUploadLimits(): Promise<ApiResult<UploadLimits>> {
+  const result = await getUploadLimitsGenerated();
+  if (isUploadLimits(result.data)) {
+    return { data: result.data };
+  }
+  return {
+    error: !isSuccess(result.status) ? result.data : new Error('Unexpected upload limits response')
+  };
+}
+
 export async function getPackageDetails(packageId: string): Promise<ApiResult<ContentPackageDetailsResponse>> {
-  return getPackage({
-    path: { packageId }
-  });
+  const result = await getPackage(packageId);
+  if (isSuccess(result.status) && isContentPackageDetailsResponse(result.data)) {
+    return { data: result.data };
+  }
+  return { error: result.data };
 }
 
 export async function downloadContent(packageId: string, contentId: string, token: string): Promise<ApiResult<Blob>> {
-  const result = await downloadContentWithToken({
-    path: { packageId, contentId },
-    headers: { 'X-File-Token': token },
-    parseAs: 'blob'
+  const result = await downloadContentWithToken(packageId, contentId, {
+    headers: { 'X-File-Token': token }
   });
   if (result.data instanceof Blob) {
-    return { data: result.data, error: undefined, request: result.request, response: result.response };
+    return { data: result.data };
   }
-  return {
-    error: result.error ?? new Error('Download did not return a blob')
-  };
+  if (isSuccess(result.status)) {
+    return { error: new Error('Download did not return a blob') };
+  }
+  return { error: result.data };
 }

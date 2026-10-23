@@ -1,4 +1,4 @@
-import type { ProblemDetails } from '../../client';
+import type { ProblemDetails } from '../../client/model/problemDetails.ts';
 
 const isProblemDetails = (value: unknown): value is ProblemDetails => {
   if (!value || typeof value !== 'object') {

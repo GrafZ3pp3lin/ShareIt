@@ -1,5 +1,5 @@
 import { Show } from 'solid-js';
-import type { ContentItemInPackage } from '../../../client';
+import type { ContentItemInPackage } from '../../../client/model/index.ts';
 
 type ShareItemCardProps = {
   item: ContentItemInPackage;

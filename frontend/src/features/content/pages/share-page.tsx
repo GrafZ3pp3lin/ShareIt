@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/solid-query';
 import { useParams } from '@tanstack/solid-router';
 import { For, Show, createSignal } from 'solid-js';
-import type { ContentItemInPackage } from '../../../client';
+import type { ContentItemInPackage } from '../../../client/model/index.ts';
 import { getPackageDetails, downloadContent } from '../../../shared/api/content.ts';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
 import { decryptFile, decryptText, isEncryptedBlob, ENCRYPTED_FILE_MIME_TYPE } from '../../../shared/crypto/crypto.ts';
