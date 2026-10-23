@@ -12,14 +12,14 @@ export interface CreatePackageRequest {
   /** @nullable */
   Description?: string | null;
   /**
-     * @nullable
-     * @pattern ^-?(?:0|[1-9]\d*)$
-     */
+   * @nullable
+   * @pattern ^-?(?:0|[1-9]\d*)$
+   */
   MaxDownloadCount?: number | string | null;
   /**
-     * @nullable
-     * @pattern ^-?(?:0|[1-9]\d*)$
-     */
+   * @nullable
+   * @pattern ^-?(?:0|[1-9]\d*)$
+   */
   TimeToLiveHours?: number | string | null;
   /** @nullable */
   IsPrivate?: boolean | null;

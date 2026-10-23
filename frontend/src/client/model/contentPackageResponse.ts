@@ -17,14 +17,14 @@ export interface ContentPackageResponse {
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   ItemCount: number | string;
   /**
-     * @nullable
-     * @pattern ^-?(?:0|[1-9]\d*)$
-     */
+   * @nullable
+   * @pattern ^-?(?:0|[1-9]\d*)$
+   */
   MaxDownloadCount?: number | string | null;
   /**
-     * @nullable
-     * @pattern ^-?(?:0|[1-9]\d*)$
-     */
+   * @nullable
+   * @pattern ^-?(?:0|[1-9]\d*)$
+   */
   RemainingDownloads?: number | string | null;
   /** @nullable */
   ExpiresAt?: string | null;

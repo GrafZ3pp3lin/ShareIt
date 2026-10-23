@@ -16,9 +16,9 @@ export interface FileStreamHttpResult {
   EntityTag?: null | EntityTagHeaderValue;
   EnableRangeProcessing?: boolean;
   /**
-     * @nullable
-     * @pattern ^-?(?:0|[1-9]\d*)$
-     */
+   * @nullable
+   * @pattern ^-?(?:0|[1-9]\d*)$
+   */
   FileLength?: number | string | null;
   FileStream?: Stream | null;
 }
