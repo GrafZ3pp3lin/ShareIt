@@ -20,17 +20,18 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    environment: 'happy-dom',
     projects: [
       {
         test: {
-          include: ['src/**/*.unit.{test,spec}.{ts,tsx}'],
+          include: ['src/**/*.{test,spec}.ts'],
           name: 'unit',
           environment: 'node'
         }
       },
       {
         test: {
-          include: ['src/**/*.browser.{test,spec}.{ts,tsx}'],
+          include: ['src/**/*.{test,spec}.tsx'],
           name: 'components',
           environment: 'happy-dom',
           setupFiles: './src/tests/vitest-setup.ts'
