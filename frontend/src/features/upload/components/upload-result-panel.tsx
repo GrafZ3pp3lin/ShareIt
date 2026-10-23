@@ -12,6 +12,8 @@ type UploadResultPanelProps = {
   passphraseLabel: string;
   copyPassphraseLabel: string;
   anotherLabel: string;
+  /** Shown when the link points at a package whose file uploads did not all finish. */
+  partialLabel?: string;
   onCopyLink: (link: string) => void;
   onCopyPassphrase: (passphrase: string) => void;
   onReset: () => void;
@@ -68,6 +70,10 @@ export function UploadResultPanel(props: UploadResultPanelProps) {
             </div>
           </div>
         )}
+      </Show>
+
+      <Show when={props.result.incomplete}>
+        <div class="notice-box">{props.partialLabel}</div>
       </Show>
 
       <button type="button" class="btn btn-secondary" onClick={props.onReset}>

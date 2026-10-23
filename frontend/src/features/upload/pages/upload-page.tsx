@@ -27,6 +27,24 @@ type UploadProgress = {
 
 const formatMb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
 
+// State of a package created in step 1 whose files did not all upload, kept so
+// the same package can be retried (or its link shown as-is) on recovery.
+type PartialPackage = {
+  packageId: string;
+  nextIndex: number;
+  passphrase: string | undefined;
+  expiryLabel: string;
+  encrypted: boolean;
+};
+
+const toPartial = (
+  packageId: string,
+  nextIndex: number,
+  passphrase: string | undefined,
+  encrypted: boolean,
+  expiryLabel: string
+): PartialPackage => ({ packageId, nextIndex, passphrase, expiryLabel, encrypted });
+
 export function UploadPage() {
   const { t } = useI18n();
   const { isAuthenticated } = useAuth();
@@ -40,11 +58,14 @@ export function UploadPage() {
   const [error, setError] = createSignal<string | null>(null);
   const [result, setResult] = createSignal<UploadResult | null>(null);
   const [progress, setProgress] = createSignal<UploadProgress | null>(null);
+  // Step 2 failure after step 1 already created the package: kept so the same
+  // package can be retried (or its link shown as-is) instead of silently orphaning it.
+  const [partial, setPartial] = createSignal<PartialPackage | null>(null);
   const hasText = createMemo(() => text().trim().length > 0);
   const hasFiles = createMemo(() => files().length > 0);
   const expiry = createMemo(() => EXPIRY_OPTIONS[expiryIndex()]);
 
-  type SubmitResult = UploadResult | { error: string };
+  type SubmitResult = UploadResult | { error: string; partial?: PartialPackage };
 
   let abortController: AbortController | null = null;
 
@@ -63,6 +84,8 @@ export function UploadPage() {
   });
 
   const handleFilesChange = (incoming: File[]) => {
+    // Editing the selection invalidates any resumable partial upload.
+    setPartial(null);
     const rawLimit = fileLimitBytes();
     if (rawLimit == null) {
       setFiles(incoming);
@@ -85,28 +108,36 @@ export function UploadPage() {
     }
   };
 
+  const mutationSuccess = (value: SubmitResult) => {
+    if ('error' in value) {
+      setError(value.error);
+      setPartial(value.partial ?? null);
+      return;
+    }
+    setResult(value);
+    setStage('result');
+  };
+
   const submitMutation = useMutation(() => ({
-    mutationFn: async (): Promise<SubmitResult> => {
+    mutationFn: async (resume?: PartialPackage): Promise<SubmitResult> => {
       if (!hasText() && !hasFiles()) {
         return { error: t('upload.errors.missingContent') };
       }
 
-      const willEncrypt = encrypt();
+      const willEncrypt = resume ? resume.encrypted : encrypt();
       let passphrase: string | undefined;
       if (willEncrypt) {
-        passphrase = generatePassphrase();
+        passphrase = resume ? resume.passphrase : generatePassphrase();
       }
 
       let texts: string[] | undefined;
-      if (hasText()) {
+      if (hasText() && !resume) {
         let payload = text().trim();
         if (willEncrypt) {
           try {
             payload = await encryptText(payload, passphrase!);
           } catch (err) {
-            return {
-              error: getErrorMessage(err, t('upload.errors.encryptFailed'))
-            };
+            return { error: getErrorMessage(err, t('upload.errors.encryptFailed')) };
           }
         }
         texts = [payload];
@@ -114,24 +145,30 @@ export function UploadPage() {
 
       abortController = new AbortController();
 
-      // Step 1: create the package with metadata and text inline.
-      const packageResult = await createContentPackage({
-        Title: title() || null,
-        Description: description() || null,
-        TimeToLiveHours: expiry().hours,
-        Texts: texts
-      });
+      // Step 1: create the package with metadata and text inline. Skipped when
+      // resuming: the package from the failed attempt is reused as-is.
+      let packageId = resume?.packageId;
+      if (!packageId) {
+        const packageResult = await createContentPackage({
+          Title: title() || null,
+          Description: description() || null,
+          TimeToLiveHours: expiry().hours,
+          Texts: texts
+        });
 
-      if (!packageResult.data) {
-        return {
-          error: getErrorMessage(packageResult.error, t('upload.errors.createPackage'))
-        };
+        if (!packageResult.data) {
+          return {
+            error: getErrorMessage(packageResult.error, t('upload.errors.createPackage'))
+          };
+        }
+        packageId = packageResult.data.Id;
       }
-      const packageId = packageResult.data.Id;
 
       // Step 2: encrypt and upload each file individually, with progress.
+      // Fails soft: the failure is reported with the package state so the same
+      // package can be retried instead of leaving an unreachable orphan behind.
       const selected = files();
-      for (let index = 0; index < selected.length; index += 1) {
+      for (let index = resume?.nextIndex ?? 0; index < selected.length; index += 1) {
         let file = selected[index];
         setProgress({
           phase: 'encrypting',
@@ -148,7 +185,8 @@ export function UploadPage() {
             file = await encryptFile(file, passphrase!);
           } catch (err) {
             return {
-              error: getErrorMessage(err, t('upload.errors.encryptFileFailed'))
+              error: getErrorMessage(err, t('upload.errors.encryptFileFailed')),
+              partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
             };
           }
         }
@@ -173,11 +211,15 @@ export function UploadPage() {
         );
 
         if (uploadResult.canceled) {
-          return { error: t('upload.errors.canceled') };
+          return {
+            error: t('upload.errors.canceled'),
+            partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
+          };
         }
         if (!uploadResult.data) {
           return {
-            error: getErrorMessage(uploadResult.error, t('upload.errors.uploadFilesFailed'))
+            error: getErrorMessage(uploadResult.error, t('upload.errors.uploadFilesFailed')),
+            partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
           };
         }
       }
@@ -186,7 +228,7 @@ export function UploadPage() {
       abortController = null;
 
       const link = `${window.location.origin}/s/${packageId}`;
-      return { link, passphrase, expiryLabel: expiry().label, encrypted: willEncrypt };
+      return { link, passphrase, expiryLabel: resume?.expiryLabel ?? expiry().label, encrypted: willEncrypt };
     }
   }));
 
@@ -194,17 +236,30 @@ export function UploadPage() {
     event.preventDefault();
     setError(null);
     setResult(null);
+    // A pending partial upload makes the submit button retry into the same
+    // package; only then is it safe to resume, otherwise start a new package.
+    const resume = partial();
+    setPartial(null);
+    submitMutation.mutate(resume ?? undefined, { onSuccess: mutationSuccess });
+  };
 
-    submitMutation.mutate(undefined, {
-      onSuccess: (value) => {
-        if ('error' in value) {
-          setError(value.error);
-          return;
-        }
-        setResult(value);
-        setStage('result');
-      }
+  // Shows the share link for a package with unfinished file uploads: the text
+  // (and any files that did upload) is still worth sharing.
+  const showLinkAnyway = () => {
+    const resume = partial();
+    if (!resume) {
+      return;
+    }
+    setPartial(null);
+    setError(null);
+    setResult({
+      link: `${window.location.origin}/s/${resume.packageId}`,
+      passphrase: resume.passphrase,
+      expiryLabel: resume.expiryLabel,
+      encrypted: resume.encrypted,
+      incomplete: true
     });
+    setStage('result');
   };
 
   const handleCancel = () => {
@@ -219,6 +274,7 @@ export function UploadPage() {
     setError(null);
     setResult(null);
     setProgress(null);
+    setPartial(null);
     submitMutation.reset();
     setStage('form');
   };
@@ -276,8 +332,14 @@ export function UploadPage() {
                   description={description()}
                   titlePlaceholder={t('upload.placeholders.title')}
                   descriptionPlaceholder={t('upload.placeholders.description')}
-                  onTitleInput={setTitle}
-                  onDescriptionInput={setDescription}
+                  onTitleInput={(value) => {
+                    setPartial(null);
+                    setTitle(value);
+                  }}
+                  onDescriptionInput={(value) => {
+                    setPartial(null);
+                    setDescription(value);
+                  }}
                 />
               </div>
             </details>
@@ -295,7 +357,10 @@ export function UploadPage() {
                 placeholder={t('upload.placeholders.text')}
                 text={text()}
                 hasText={hasText()}
-                onTextInput={setText}
+                onTextInput={(value) => {
+                  setPartial(null);
+                  setText(value);
+                }}
               />
             </div>
 
@@ -304,12 +369,22 @@ export function UploadPage() {
                 <button
                   type="button"
                   class="pill-badge cursor-pointer"
-                  onClick={() => setExpiryIndex(cycleExpiryIndex)}
+                  onClick={() => {
+                    setPartial(null);
+                    setExpiryIndex(cycleExpiryIndex);
+                  }}
                 >
                   <span>{t('upload.expiry.label')}:</span>
                   <span class="text-ink">{expiry().label}</span>
                 </button>
-                <button type="button" class="pill-badge cursor-pointer" onClick={() => setEncrypt((value) => !value)}>
+                <button
+                  type="button"
+                  class="pill-badge cursor-pointer"
+                  onClick={() => {
+                    setPartial(null);
+                    setEncrypt((value) => !value);
+                  }}
+                >
                   <span>{t('upload.password.label')}:</span>
                   <span class="text-ink">{encrypt() ? t('upload.password.on') : t('upload.password.off')}</span>
                 </button>
@@ -323,7 +398,11 @@ export function UploadPage() {
             </div>
 
             <button class="btn btn-primary" type="submit" disabled={submitMutation.isPending}>
-              {submitMutation.isPending ? t('upload.submit.uploading') : t('upload.submitCommand')}
+              {submitMutation.isPending
+                ? t('upload.submit.uploading')
+                : partial()
+                  ? t('upload.recovery.retry')
+                  : t('upload.submitCommand')}
             </button>
 
             <Show when={progress()}>
@@ -336,7 +415,14 @@ export function UploadPage() {
             </Show>
 
             <Show when={error()}>
-              <div class="notice-box">{error()}</div>
+              <div class="grid gap-2">
+                <div class="notice-box">{error()}</div>
+                <Show when={partial()}>
+                  <button class="btn btn-secondary" type="button" onClick={showLinkAnyway}>
+                    {t('upload.recovery.showLink')}
+                  </button>
+                </Show>
+              </div>
             </Show>
           </form>
         </Show>
@@ -352,6 +438,7 @@ export function UploadPage() {
               passphraseLabel={t('upload.passphraseLabel')}
               copyPassphraseLabel={t('upload.copyPassphrase')}
               anotherLabel={t('upload.result.another')}
+              partialLabel={t('upload.result.partialNotice')}
               onCopyLink={copyToClipboard}
               onCopyPassphrase={copyToClipboard}
               onReset={resetForm}

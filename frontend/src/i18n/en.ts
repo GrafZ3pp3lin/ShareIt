@@ -54,7 +54,12 @@ export const dict = {
       copied: 'copied',
       captionPlain: 'expires {{ expiry }}',
       captionWithPassword: 'expires {{ expiry }} · password set',
+      partialNotice: 'Some files did not finish uploading — the link may be missing them.',
       another: 'Upload another'
+    },
+    recovery: {
+      retry: 'retry --files',
+      showLink: 'show link anyway'
     },
     passphraseLabel: 'Passphrase (shown once):',
     copyPassphrase: 'Copy passphrase',
