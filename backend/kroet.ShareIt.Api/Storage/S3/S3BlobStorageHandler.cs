@@ -53,8 +53,10 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
             // Ensure bucket exists
             await EnsureBucketExistsAsync(cancellationToken);
 
-            // Generate unique object key using GUID to avoid conflicts
-            var objectKey = $"{Guid.NewGuid()}/{fileName}";
+            // Generate a unique object key. The original file name is kept in the
+            // object metadata below, never in the key itself, so the key stays
+            // opaque and free of client-derived characters.
+            var objectKey = Guid.NewGuid().ToString();
 
             var putRequest = new PutObjectRequest
             {

@@ -11,7 +11,7 @@ public interface IBlobStorageHandler
     /// </summary>
     /// <param name="stream">The data stream to upload.</param>
     /// <param name="contentType">MIME type of the content.</param>
-    /// <param name="fileName">Original file name (used for metadata).</param>
+    /// <param name="fileName">Original file name (stored as object metadata, not part of the object key).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Unique blob identifier (e.g., blob name, key, or path).</returns>
     Task<string> UploadAsync(Stream stream, string contentType, string fileName, CancellationToken cancellationToken = default);

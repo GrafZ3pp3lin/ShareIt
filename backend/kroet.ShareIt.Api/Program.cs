@@ -94,17 +94,27 @@ try
 
     if (!string.IsNullOrEmpty(authAuthority))
     {
+        var authAudience = configuration["Auth:Audience"];
         builder.Services.AddAuthentication().AddJwtBearer(options =>
         {
             options.Authority = authAuthority;
+            options.Audience = authAudience;
             // The SPA uses authorization-code + PKCE; access tokens carry the
-            // client id as audience. Audience validation is skipped until an
-            // explicit API audience is configured.
+            // client id as audience. Audience validation is enforced as soon as
+            // an explicit API audience is configured (Auth:Audience).
             options.TokenValidationParameters = new TokenValidationParameters
             {
-                ValidateAudience = false
+                ValidateAudience = !string.IsNullOrEmpty(authAudience)
             };
         });
+
+        if (string.IsNullOrEmpty(authAudience))
+        {
+            Log.Warning(
+                "Auth:Authority is configured without Auth:Audience — audience validation is disabled. " +
+                "Tokens issued to any client of {Authority} are accepted; set Auth:Audience to restrict them to this API.",
+                authAuthority);
+        }
     }
 
     builder.Services.AddAuthorization();
@@ -123,11 +133,26 @@ try
     
     app.UseSerilogRequestLogging();
     
-    app.UseCors(options =>
+    var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+    app.UseCors(policy =>
     {
-        options.AllowAnyHeader();
-        options.AllowAnyMethod();
-        options.AllowAnyOrigin();
+        policy.AllowAnyHeader();
+        policy.AllowAnyMethod();
+        if (allowedOrigins.Length == 0)
+        {
+            // No origins configured — stay permissive, but call it out in production.
+            if (app.Environment.IsProduction())
+            {
+                Log.Warning("No CORS origins configured (Cors:AllowedOrigins) — falling back to AllowAnyOrigin.");
+            }
+
+            policy.AllowAnyOrigin();
+        }
+        else
+        {
+            policy.SetIsOriginAllowedToAllowWildcardSubdomains()
+                  .WithOrigins(allowedOrigins);
+        }
     });
 
     // Must come after UseCors so problem responses still carry CORS headers.
