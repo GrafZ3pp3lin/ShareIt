@@ -39,12 +39,12 @@ Tests are co-located next to the source file, not in a `__tests__` dir.
 
 ### Routing and app bootstrap
 
-Routing is code-based via TanStack Solid Router, not file-based.
+Routing is code-based via `@solidjs/router` (`createRouter`), not file-based.
 
-- `src/index.tsx` → `src/app.tsx` → `src/app/providers.tsx` (`AppProviders`), which nests, in order: `QueryClientProvider` (TanStack Solid Query) → `I18nProvider` → `AuthProvider` → `RouterProvider`. `configureApiClient()` is called once at module load here, before render, to point the generated API client at the runtime-configured base URL.
-- `src/app/router.tsx` creates the router from `routeTree` (`src/shared/routes/route-tree.tsx`) and does the TanStack `Register` module augmentation for typed navigation.
-- `src/shared/routes/route-tree.tsx` is the **single wiring point**: it builds `rootRoute` (component: `AppLayout`) and adds children for `/`, `/auth/callback`, `/s/$packageId`, `/account`, importing each page component from the corresponding `src/features/*/pages/*`. Features never self-register — this file is where a new route must be added.
-- `src/app/layout.tsx` (`AppLayout`) is the root route's component: header/nav (conditioned on `useAuth()` state) + `<Outlet/>` + footer.
+- `src/index.tsx` → `src/app.tsx` → `src/app/providers.tsx` (`AppProviders`), which nests, in order: `ThemeProvider` → `I18nProvider` → `AuthProvider` → `Router` (the `createRouter` instance is the provider component).
+- `src/app/router.tsx` creates the router from `routeTree` (`src/shared/routes/route-tree.tsx`).
+- `src/shared/routes/route-tree.tsx` is the **single wiring point**: it declares the route tree (`defineRoutes`) — a `path: '/'` root route whose component is `AppLayout`, with children for `/`, `/auth/callback`, `/s/:packageId`, `/account`, importing each page component from the corresponding `src/features/*/pages/*`. Features never self-register — this file is where a new route must be added.
+- `src/app/layout.tsx` (`AppLayout`) is the root route's component: header/nav (conditioned on `useAuth()` state) + `{props.children}` + footer. Links are plain `<a href>` elements; the router styles active state via `data-active` (see the `nav-tab` utility in `src/index.css`).
 
 ### Feature module convention
 

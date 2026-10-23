@@ -1,5 +1,5 @@
 import { clsx } from 'clsx/lite';
-import { Show, onCleanup, onMount } from 'solid-js';
+import { Show, onSettled } from 'solid-js';
 import IconUpload from '~icons/lucide/upload';
 
 type UploadMetadataFieldsProps = {
@@ -49,15 +49,15 @@ export function UploadMetadataFields(props: UploadMetadataFieldsProps) {
 }
 
 export function UploadFilePanel(props: UploadFilePanelProps) {
-  onMount(() => {
+  onSettled(() => {
     const preventDocumentDrop = (event: DragEvent) => event.preventDefault();
     document.addEventListener('dragover', preventDocumentDrop);
     document.addEventListener('drop', preventDocumentDrop);
 
-    onCleanup(() => {
+    return () => {
       document.removeEventListener('dragover', preventDocumentDrop);
       document.removeEventListener('drop', preventDocumentDrop);
-    });
+    };
   });
 
   const appendFiles = (files: File[]) => {

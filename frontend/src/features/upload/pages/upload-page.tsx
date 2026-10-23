@@ -1,10 +1,10 @@
-import { useMutation, useQuery } from '@tanstack/solid-query';
-import { Show, createMemo, createSignal } from 'solid-js';
+import { Show, createMemo, createSignal, onSettled } from 'solid-js';
 import { UploadFilePanel, UploadMetadataFields, UploadTextPanel } from '../components/upload-form-fields.tsx';
 import { UploadResultPanel } from '../components/upload-result-panel.tsx';
 import type { UploadResult } from '../components/upload-types.ts';
 import { DEFAULT_EXPIRY_INDEX, EXPIRY_OPTIONS, cycleExpiryIndex } from '../upload-expiry.ts';
 import { createContentPackage, getUploadLimits, uploadFile } from '../../../shared/api/content.ts';
+import type { UploadLimits } from '../../../shared/api/content.ts';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
 import {
   encryptFile,
@@ -69,18 +69,30 @@ export function UploadPage() {
 
   let abortController: AbortController | null = null;
 
-  const limitsQuery = useQuery(() => ({
-    queryKey: ['upload-limits'],
-    queryFn: getUploadLimits,
-    staleTime: Number.POSITIVE_INFINITY
-  }));
+  // File-size limits from the backend (anonymous vs authenticated differ).
+  // One explicit load per mount; a failure just leaves the limit unset.
+  const [limits, setLimits] = createSignal<UploadLimits | null>(null);
+  const [submitting, setSubmitting] = createSignal(false);
+
+  onSettled(() => {
+    void getUploadLimits().then(
+      (outcome) => {
+        if (outcome.data) {
+          setLimits(outcome.data);
+        }
+      },
+      () => {
+        // a failed limits load just leaves the limit unset
+      }
+    );
+  });
 
   const fileLimitBytes = createMemo(() => {
-    const limits = limitsQuery.data?.data;
-    if (!limits) {
+    const available = limits();
+    if (!available) {
       return null;
     }
-    return isAuthenticated ? limits.AuthenticatedFileLimitBytes : limits.AnonymousFileLimitBytes;
+    return isAuthenticated() ? available.AuthenticatedFileLimitBytes : available.AnonymousFileLimitBytes;
   });
 
   const handleFilesChange = (incoming: File[]) => {
@@ -108,7 +120,7 @@ export function UploadPage() {
     }
   };
 
-  const mutationSuccess = (value: SubmitResult) => {
+  const applyResult = (value: SubmitResult) => {
     if ('error' in value) {
       setError(value.error);
       setPartial(value.partial ?? null);
@@ -118,119 +130,131 @@ export function UploadPage() {
     setStage('result');
   };
 
-  const submitMutation = useMutation(() => ({
-    mutationFn: async (resume?: PartialPackage): Promise<SubmitResult> => {
-      if (!hasText() && !hasFiles()) {
-        return { error: t('upload.errors.missingContent') };
-      }
-
-      const willEncrypt = resume ? resume.encrypted : encrypt();
-      let passphrase: string | undefined;
-      if (willEncrypt) {
-        passphrase = resume ? resume.passphrase : generatePassphrase();
-      }
-
-      let texts: string[] | undefined;
-      if (hasText() && !resume) {
-        let payload = text().trim();
-        if (willEncrypt) {
-          try {
-            payload = await encryptText(payload, passphrase!);
-          } catch (err) {
-            return { error: getErrorMessage(err, t('upload.errors.encryptFailed')) };
-          }
-        }
-        texts = [payload];
-      }
-
-      abortController = new AbortController();
-
-      // Step 1: create the package with metadata and text inline. Skipped when
-      // resuming: the package from the failed attempt is reused as-is.
-      let packageId = resume?.packageId;
-      if (!packageId) {
-        const packageResult = await createContentPackage({
-          Title: title() || null,
-          Description: description() || null,
-          TimeToLiveHours: expiry().hours,
-          Texts: texts
-        });
-
-        if (!packageResult.data) {
-          return {
-            error: getErrorMessage(packageResult.error, t('upload.errors.createPackage'))
-          };
-        }
-        packageId = packageResult.data.Id;
-      }
-
-      // Step 2: encrypt and upload each file individually, with progress.
-      // Fails soft: the failure is reported with the package state so the same
-      // package can be retried instead of leaving an unreachable orphan behind.
-      const selected = files();
-      for (let index = resume?.nextIndex ?? 0; index < selected.length; index += 1) {
-        let file = selected[index];
-        setProgress({
-          phase: 'encrypting',
-          index,
-          total: selected.length,
-          fileName: file.name,
-          sentBytes: 0,
-          totalBytes: file.size
-        });
-
-        if (willEncrypt) {
-          try {
-            // oxlint-disable-next-line no-await-in-loop -- files are encrypted one at a time for progress/cancel
-            file = await encryptFile(file, passphrase!);
-          } catch (err) {
-            return {
-              error: getErrorMessage(err, t('upload.errors.encryptFileFailed')),
-              partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
-            };
-          }
-        }
-
-        setProgress({
-          phase: 'uploading',
-          index,
-          total: selected.length,
-          fileName: file.name,
-          sentBytes: 0,
-          totalBytes: file.size
-        });
-
-        // oxlint-disable-next-line no-await-in-loop -- files are uploaded one at a time for progress/cancel
-        const uploadResult = await uploadFile(
-          packageId,
-          file,
-          (sentBytes, totalBytes) => {
-            setProgress((current) => (current ? { ...current, phase: 'uploading', sentBytes, totalBytes } : current));
-          },
-          abortController.signal
-        );
-
-        if (uploadResult.canceled) {
-          return {
-            error: t('upload.errors.canceled'),
-            partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
-          };
-        }
-        if (!uploadResult.data) {
-          return {
-            error: getErrorMessage(uploadResult.error, t('upload.errors.uploadFilesFailed')),
-            partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
-          };
-        }
-      }
-
-      setProgress(null);
-      abortController = null;
-
-      const link = `${window.location.origin}/s/${packageId}`;
-      return { link, passphrase, expiryLabel: resume?.expiryLabel ?? expiry().label, encrypted: willEncrypt };
+  // The upload pipeline: validate, create the package (unless resuming a
+  // partial attempt), then encrypt and upload each file with progress.
+  const buildUploadResult = async (resume?: PartialPackage): Promise<SubmitResult> => {
+    if (!hasText() && !hasFiles()) {
+      return { error: t('upload.errors.missingContent') };
     }
-  }));
+
+    const willEncrypt = resume ? resume.encrypted : encrypt();
+    let passphrase: string | undefined;
+    if (willEncrypt) {
+      passphrase = resume ? resume.passphrase : generatePassphrase();
+    }
+
+    let texts: string[] | undefined;
+    if (hasText() && !resume) {
+      let payload = text().trim();
+      if (willEncrypt) {
+        try {
+          payload = await encryptText(payload, passphrase!);
+        } catch (err) {
+          return { error: getErrorMessage(err, t('upload.errors.encryptFailed')) };
+        }
+      }
+      texts = [payload];
+    }
+
+    abortController = new AbortController();
+
+    // Step 1: create the package with metadata and text inline. Skipped when
+    // resuming: the package from the failed attempt is reused as-is.
+    let packageId = resume?.packageId;
+    if (!packageId) {
+      const packageResult = await createContentPackage({
+        Title: title() || null,
+        Description: description() || null,
+        TimeToLiveHours: expiry().hours,
+        Texts: texts
+      });
+
+      if (!packageResult.data) {
+        return {
+          error: getErrorMessage(packageResult.error, t('upload.errors.createPackage'))
+        };
+      }
+      packageId = packageResult.data.Id;
+    }
+
+    // Step 2: encrypt and upload each file individually, with progress.
+    // Fails soft: the failure is reported with the package state so the same
+    // package can be retried instead of leaving an unreachable orphan behind.
+    const selected = files();
+    for (let index = resume?.nextIndex ?? 0; index < selected.length; index += 1) {
+      let file = selected[index];
+      setProgress({
+        phase: 'encrypting',
+        index,
+        total: selected.length,
+        fileName: file.name,
+        sentBytes: 0,
+        totalBytes: file.size
+      });
+
+      if (willEncrypt) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- files are encrypted one at a time for progress/cancel
+          file = await encryptFile(file, passphrase!);
+        } catch (err) {
+          return {
+            error: getErrorMessage(err, t('upload.errors.encryptFileFailed')),
+            partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
+          };
+        }
+      }
+
+      setProgress({
+        phase: 'uploading',
+        index,
+        total: selected.length,
+        fileName: file.name,
+        sentBytes: 0,
+        totalBytes: file.size
+      });
+
+      // oxlint-disable-next-line no-await-in-loop -- files are uploaded one at a time for progress/cancel
+      const uploadResult = await uploadFile(
+        packageId,
+        file,
+        (sentBytes, totalBytes) => {
+          setProgress((current) => (current ? { ...current, phase: 'uploading', sentBytes, totalBytes } : current));
+        },
+        abortController.signal
+      );
+
+      if (uploadResult.canceled) {
+        return {
+          error: t('upload.errors.canceled'),
+          partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
+        };
+      }
+      if (!uploadResult.data) {
+        return {
+          error: getErrorMessage(uploadResult.error, t('upload.errors.uploadFilesFailed')),
+          partial: toPartial(packageId, index, passphrase, willEncrypt, expiry().label)
+        };
+      }
+    }
+
+    setProgress(null);
+    abortController = null;
+
+    const link = `${window.location.origin}/s/${packageId}`;
+    return { link, passphrase, expiryLabel: resume?.expiryLabel ?? expiry().label, encrypted: willEncrypt };
+  };
+
+  const runSubmit = async (resume?: PartialPackage): Promise<void> => {
+    setSubmitting(true);
+    try {
+      applyResult(await buildUploadResult(resume));
+    } catch (err) {
+      setError(getErrorMessage(err, t('upload.errors.createPackage')));
+      setPartial(null);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleSubmit = (event: Event) => {
     event.preventDefault();
@@ -240,7 +264,7 @@ export function UploadPage() {
     // package; only then is it safe to resume, otherwise start a new package.
     const resume = partial();
     setPartial(null);
-    submitMutation.mutate(resume ?? undefined, { onSuccess: mutationSuccess });
+    void runSubmit(resume ?? undefined);
   };
 
   // Shows the share link for a package with unfinished file uploads: the text
@@ -275,7 +299,6 @@ export function UploadPage() {
     setResult(null);
     setProgress(null);
     setPartial(null);
-    submitMutation.reset();
     setStage('form');
   };
 
@@ -397,8 +420,8 @@ export function UploadPage() {
               <p class="text-xs text-muted">{t('upload.password.caption')}</p>
             </div>
 
-            <button class="btn btn-primary" type="submit" disabled={submitMutation.isPending}>
-              {submitMutation.isPending
+            <button class="btn btn-primary" type="submit" disabled={submitting()}>
+              {submitting()
                 ? t('upload.submit.uploading')
                 : partial()
                   ? t('upload.recovery.retry')

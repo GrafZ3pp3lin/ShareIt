@@ -1,5 +1,5 @@
-import { useNavigate } from '@tanstack/solid-router';
-import { createEffect } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
+import { onSettled } from 'solid-js';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import { useAuth } from '../auth-context.tsx';
 
@@ -8,13 +8,13 @@ export function AuthCallbackPage() {
   const navigate = useNavigate();
   const { t } = useI18n();
 
-  createEffect(() => {
+  onSettled(() => {
     if (!auth.isEnabled) {
       return;
     }
     const handle = async () => {
       await auth.handleCallback();
-      void navigate({ to: '/' });
+      navigate('/');
     };
 
     void handle();

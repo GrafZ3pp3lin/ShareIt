@@ -78,10 +78,10 @@
 
 @utility nav-tab {
   @apply font-mono text-sm text-muted transition hover:text-ink;
-}
 
-@utility nav-tab-active {
-  @apply border-b-2 border-brand text-ink;
+  &[data-active] {
+    @apply border-b-2 border-brand text-ink;
+  }
 }
 
 @layer base {

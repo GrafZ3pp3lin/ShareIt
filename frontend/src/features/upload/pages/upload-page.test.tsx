@@ -1,5 +1,5 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/solid-query';
 import { fireEvent, render, screen, waitFor } from '@solidjs/testing-library';
+import { flush } from 'solid-js';
 import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -28,18 +28,14 @@ const fireFileChange = (input: HTMLInputElement, files: File[]) => {
   fireEvent(input, new Event('change', { bubbles: true }));
 };
 
-const renderPage = () => {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(() => (
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <AuthProvider>
-          <UploadPage />
-        </AuthProvider>
-      </I18nProvider>
-    </QueryClientProvider>
+const renderPage = () =>
+  render(() => (
+    <I18nProvider>
+      <AuthProvider>
+        <UploadPage />
+      </AuthProvider>
+    </I18nProvider>
   ));
-};
 
 describe('<UploadPage />', () => {
   let createPackageRequests: { url: string; body: unknown }[];
@@ -83,6 +79,9 @@ describe('<UploadPage />', () => {
     renderPage();
 
     fireEvent.input(screen.getByPlaceholderText('Paste or type your text'), { target: { value: 'hello' } });
+    // Solid 2.0 batches writes to the next microtask: drain before the submit
+    // click reads the form state.
+    flush();
     fireEvent.click(screen.getByRole('button', { name: 'upload --get-link' }));
 
     await screen.findByText(`${window.location.origin}/s/package-1`);
@@ -103,6 +102,7 @@ describe('<UploadPage />', () => {
     fireEvent.input(screen.getByPlaceholderText('Paste or type your text'), { target: { value: 'hello' } });
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
     fireFileChange(fileInput, [makeFile('photo.txt')]);
+    flush();
 
     fireEvent.click(screen.getByRole('button', { name: 'upload --get-link' }));
 
@@ -130,6 +130,7 @@ describe('<UploadPage />', () => {
     renderPage();
     fireEvent.input(screen.getByPlaceholderText('Paste or type your text'), { target: { value: 'hello' } });
     fireFileChange(document.querySelector<HTMLInputElement>('input[type="file"]')!, [makeFile('photo.txt')]);
+    flush();
 
     fireEvent.click(screen.getByRole('button', { name: 'upload --get-link' }));
     await screen.findByText('storage unreachable');
@@ -147,6 +148,7 @@ describe('<UploadPage />', () => {
     renderPage();
     fireEvent.input(screen.getByPlaceholderText('Paste or type your text'), { target: { value: 'hello' } });
     fireFileChange(document.querySelector<HTMLInputElement>('input[type="file"]')!, [makeFile('photo.txt')]);
+    flush();
 
     fireEvent.click(screen.getByRole('button', { name: 'upload --get-link' }));
     // Wait until the XHR is actually in flight, then cancel it.

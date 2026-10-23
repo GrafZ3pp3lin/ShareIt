@@ -45,13 +45,14 @@ describe('UploadResultPanel', () => {
     expect(onReset).toHaveBeenCalledTimes(1);
   });
 
-  it('reports a link copy through the callback and flips the button label', () => {
+  it('reports a link copy through the callback and flips the button label', async () => {
     const { onCopyLink } = renderPanel(baseResult);
 
     fireEvent.click(screen.getByRole('button', { name: 'copy' }));
 
     expect(onCopyLink).toHaveBeenCalledWith(baseResult.link);
-    expect(screen.getByRole('button', { name: 'copied' })).toBeInTheDocument();
+    // Solid 2.0 applies writes on the next microtask: wait for the label flip.
+    await screen.findByRole('button', { name: 'copied' });
   });
 
   it('shows and copies the passphrase when one is set', () => {

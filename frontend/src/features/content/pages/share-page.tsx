@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/solid-query';
-import { useParams } from '@tanstack/solid-router';
-import { For, Show, createSignal } from 'solid-js';
-import type { ContentItemInPackage } from '../../../client/model/index.ts';
+import { For, Show, createEffect, createSignal } from 'solid-js';
+import { useParams } from '@solidjs/router';
+import type { ContentItemInPackage, ContentPackageDetailsResponse } from '../../../client/model/index.ts';
 import { getPackageDetails, downloadContent } from '../../../shared/api/content.ts';
+import type { ApiResult } from '../../../shared/api/content.ts';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
 import { decryptFile, decryptText, isEncryptedBlob, ENCRYPTED_FILE_MIME_TYPE } from '../../../shared/crypto/crypto.ts';
 import { parseEncryptedTextEnvelope } from '../../../shared/crypto/envelope.ts';
@@ -12,8 +12,8 @@ import { SharePackageSummary } from '../components/share-package-summary.tsx';
 
 export function SharePage() {
   const { t } = useI18n();
-  const params = useParams({ strict: false });
-  const packageId = () => params().packageId ?? '';
+  const params = useParams();
+  const packageId = () => params.packageId ?? '';
   // One passphrase protects the whole package (texts and files alike).
   const [passphrase, setPassphrase] = createSignal('');
   const [decrypted, setDecrypted] = createSignal<Record<string, string>>({});
@@ -21,19 +21,41 @@ export function SharePage() {
   const [errors, setErrors] = createSignal<Record<string, string>>({});
   const [downloadErrors, setDownloadErrors] = createSignal<Record<string, string>>({});
 
-  const packageQuery = useQuery(() => ({
-    queryKey: ['package', packageId()],
-    queryFn: () => getPackageDetails(packageId()),
-    enabled: Boolean(packageId()),
-    // Opening the link consumes one of the package's accesses; never refetch
-    // in the background (e.g. on window focus) or the access would be burned
-    // without the user reloading the page.
-    refetchOnWindowFocus: false,
-    retry: false
-  }));
+  // Explicit one-shot load per address: opening the link consumes one of the
+  // package's accesses, so the result is never refetched in the background
+  // (window focus, remounts, etc.) — the access would burn without the user
+  // actually reading the content.
+  const [details, setDetails] = createSignal<ContentPackageDetailsResponse | null>(null);
+  const [loading, setLoading] = createSignal(true);
+  const [loadError, setLoadError] = createSignal<unknown>(null);
 
-  const packageData = () => packageQuery.data?.data;
-  const packageError = () => packageQuery.data?.error;
+  const loadDetails = async (id: string) => {
+    setLoading(true);
+    setLoadError(null);
+    setDetails(null);
+    try {
+      const result = await getPackageDetails(id);
+      if (result.data) {
+        setDetails(result.data);
+      } else {
+        setLoadError(result.error);
+      }
+    } catch (err) {
+      setLoadError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  createEffect(
+    () => packageId(),
+    (id) => {
+      void loadDetails(id);
+    }
+  );
+
+  const packageData = () => details();
+  const packageError = () => loadError();
 
   const decryptItem = async (item: ContentItemInPackage) => {
     const value = passphrase();
@@ -72,7 +94,16 @@ export function SharePage() {
     if (!item.DownloadToken) {
       return;
     }
-    const result = await downloadContent(packageId(), item.Id, item.DownloadToken);
+    let result: ApiResult<Blob>;
+    try {
+      result = await downloadContent(packageId(), item.Id, item.DownloadToken);
+    } catch (err) {
+      setDownloadErrors((current) => ({
+        ...current,
+        [item.Id]: getErrorMessage(err, t('share.downloadFailed'))
+      }));
+      return;
+    }
     if (!result.data) {
       setDownloadErrors((current) => ({
         ...current,
@@ -135,7 +166,7 @@ export function SharePage() {
       <section class="lg:sticky lg:top-28">
         <SharePackageSummary
           title={t('share.title')}
-          loadingLabel={packageQuery.isLoading ? t('share.loading') : ''}
+          loadingLabel={loading() ? t('share.loading') : ''}
           loadError={packageError() ? getErrorMessage(packageError(), t('share.loadFailed')) : undefined}
           packageLabel={packageData() ? t('share.packageLabel', { id: packageData()!.Package.Id }) : undefined}
           itemsLabel={packageData() ? t('share.itemsLabel', { count: packageData()!.Package.ItemCount }) : undefined}

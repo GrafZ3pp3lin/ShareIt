@@ -1,5 +1,5 @@
 import * as matchers from '@testing-library/jest-dom/matchers';
-import h from 'solid-js/h';
+import h from '@solidjs/h';
 import { afterEach } from 'vitest';
 import { cleanup } from '@solidjs/testing-library';
 import { expect } from 'vitest';

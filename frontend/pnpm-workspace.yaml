@@ -28,8 +28,6 @@ minimumReleaseAgeExclude:
     '@oxlint-tsgolint/linux-x64@7.0.2005',
     '@oxlint-tsgolint/win32-arm64@7.0.2005',
     '@oxlint-tsgolint/win32-x64@7.0.2005',
-    '@tanstack/router-core@1.171.39',
-    '@tanstack/solid-router@1.170.43',
     oxlint-tsgolint@7.0.2005
   ]
 
@@ -53,7 +51,3 @@ strictDepBuilds: true
 
 # Never the blanket "run every dependency's install scripts" mode. (pnpm default)
 dangerouslyAllowAllBuilds: false
-
-permissions:
-  '@tanstack/solid-router':
-    skills: true

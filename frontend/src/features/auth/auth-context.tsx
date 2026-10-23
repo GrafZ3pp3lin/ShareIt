@@ -1,12 +1,14 @@
 import type { User } from 'oidc-client-ts';
-import { createContext, createEffect, createMemo, createSignal, onCleanup, useContext } from 'solid-js';
+import { createContext, createSignal, onCleanup, onSettled, useContext } from 'solid-js';
 import { getOidcSettings, getUserManager } from '../../shared/auth/oidc.ts';
 
 type AuthContextValue = {
   isEnabled: boolean;
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  user: User | null;
+  // Solid 2.0: a context value is snapshotted once by its provider, so reactive
+  // state must be carried as accessors, not plain fields.
+  isLoading: () => boolean;
+  isAuthenticated: () => boolean;
+  user: () => User | null;
   login: () => Promise<void> | void;
   logout: () => Promise<void> | void;
   handleCallback: () => Promise<void>;
@@ -31,10 +33,6 @@ export function AuthProvider(props: { children: any }) {
     setIsLoading(false);
   };
 
-  createEffect(() => {
-    void loadUser();
-  });
-
   if (manager) {
     const handleUserLoaded = (loadedUser: User) => {
       setUser(loadedUser);
@@ -49,12 +47,15 @@ export function AuthProvider(props: { children: any }) {
       manager.events.removeUserUnloaded(handleUserUnloaded);
     });
   }
+  onSettled(() => {
+    void loadUser();
+  });
 
-  const value = createMemo<AuthContextValue>(() => ({
+  const value: AuthContextValue = {
     isEnabled: Boolean(settings),
-    isLoading: isLoading(),
-    isAuthenticated: Boolean(user()),
-    user: user(),
+    isLoading,
+    isAuthenticated: () => Boolean(user()),
+    user,
     login: () => (manager ? manager.signinRedirect() : undefined),
     logout: () => (manager ? manager.signoutRedirect() : undefined),
     handleCallback: async () => {
@@ -64,15 +65,11 @@ export function AuthProvider(props: { children: any }) {
       await manager.signinRedirectCallback();
       await loadUser();
     }
-  }));
+  };
 
-  return <AuthContext.Provider value={value()}>{props.children}</AuthContext.Provider>;
+  return <AuthContext value={value}>{props.children}</AuthContext>;
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('AuthContext is not available');
-  }
-  return ctx;
+  return useContext(AuthContext);
 }

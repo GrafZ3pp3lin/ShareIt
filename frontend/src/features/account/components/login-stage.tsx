@@ -1,4 +1,3 @@
-import { Link } from '@tanstack/solid-router';
 import { Show } from 'solid-js';
 import IconLock from '~icons/lucide/lock';
 
@@ -27,9 +26,9 @@ export function LoginStage(props: LoginStageProps) {
           {props.ctaLabel}
         </button>
       </Show>
-      <Link class="font-sans text-xs text-muted transition hover:text-ink" to="/">
+      <a class="font-sans text-xs text-muted transition hover:text-ink" href="/">
         {props.continueLabel}
-      </Link>
+      </a>
     </div>
   );
 }

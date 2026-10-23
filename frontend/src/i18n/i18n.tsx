@@ -1,5 +1,5 @@
 import { createContext, createMemo, createSignal, useContext } from 'solid-js';
-import type { JSX, ParentProps } from 'solid-js';
+import type { ParentProps } from 'solid-js';
 import * as i18n from '@solid-primitives/i18n';
 import { dict as enDict } from './en.ts';
 
@@ -19,16 +19,12 @@ const createI18nStore = () => {
 type I18nContextValue = ReturnType<typeof createI18nStore>;
 const I18nContext = createContext<I18nContextValue>();
 
-export function I18nProvider(props: ParentProps): JSX.Element {
+export function I18nProvider(props: ParentProps) {
   const store = createI18nStore();
 
-  return <I18nContext.Provider value={store}>{props.children}</I18nContext.Provider>;
+  return <I18nContext value={store}>{props.children}</I18nContext>;
 }
 
 export function useI18n() {
-  const context = useContext(I18nContext);
-  if (!context) {
-    throw new Error('useI18n must be used within I18nProvider.');
-  }
-  return context;
+  return useContext(I18nContext);
 }

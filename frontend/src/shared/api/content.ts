@@ -12,7 +12,7 @@ import type {
 import { getAuthHeaders } from './fetch-client.ts';
 import { getRuntimeConfig } from '../config/runtime-config.ts';
 
-type ApiResult<T> = {
+export type ApiResult<T> = {
   data?: T;
   error?: unknown;
   response?: Response;

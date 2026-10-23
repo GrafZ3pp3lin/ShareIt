@@ -13,7 +13,7 @@ export function AccountPage() {
     <div class="mx-auto w-full max-w-2xl">
       <TerminalWindow label={t('account.windowLabel')}>
         <Show
-          when={auth.isAuthenticated}
+          when={auth.isAuthenticated()}
           fallback={
             <LoginStage
               enabled={auth.isEnabled}
