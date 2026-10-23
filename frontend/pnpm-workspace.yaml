@@ -51,3 +51,9 @@ strictDepBuilds: true
 
 # Never the blanket "run every dependency's install scripts" mode. (pnpm default)
 dangerouslyAllowAllBuilds: false
+
+permissions:
+  '@solidjs/web':
+    skills: true
+  solid-js:
+    skills: true
