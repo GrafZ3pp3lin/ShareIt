@@ -7,7 +7,7 @@ const dictionaries = {
   en: enDict
 };
 
-export type Locale = keyof typeof dictionaries;
+type Locale = keyof typeof dictionaries;
 
 const createI18nStore = () => {
   const [locale, setLocale] = createSignal<Locale>('en');

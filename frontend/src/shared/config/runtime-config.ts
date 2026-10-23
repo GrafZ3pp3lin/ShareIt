@@ -1,4 +1,4 @@
-export type RuntimeEnv = {
+type RuntimeEnv = {
   ApiBaseUrl?: string;
   AuthAuthority?: string;
   AuthClientId?: string;
@@ -7,7 +7,12 @@ export type RuntimeEnv = {
   AuthScope?: string;
 };
 
-export type RuntimeConfig = {
+declare global {
+  interface Window {
+    env?: RuntimeEnv;
+  }
+}
+type RuntimeConfig = {
   apiBaseUrl?: string;
   authAuthority?: string;
   authClientId?: string;
