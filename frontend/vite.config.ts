@@ -18,10 +18,6 @@ export default defineConfig({
       importSource: 'solid-js'
     }
   },
-  define: {
-    // solid-testing-library relies on "process" which is not shimmed by default
-    'process.env.STL_SKIP_AUTO_CLEANUP': 'false'
-  },
   test: {
     globals: true,
     projects: [
