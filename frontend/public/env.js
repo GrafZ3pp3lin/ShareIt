@@ -1,8 +1,6 @@
 window.env = {
   ApiBaseUrl: 'http://localhost:5155',
-  AuthAuthority: '',
-  AuthClientId: '',
-  AuthRedirectUri: '',
-  AuthPostLogoutRedirectUri: '',
-  AuthScope: 'openid profile email roles'
+  AuthAuthority: 'https://keycloak.kroet.de/realms/shareit',
+  AuthClientId: 'shareit-spa-dev',
+  AuthScope: 'openid profile'
 };

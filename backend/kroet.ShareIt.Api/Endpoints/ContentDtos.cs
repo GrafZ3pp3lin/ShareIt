@@ -70,6 +70,25 @@ public class UploadLimitsResponse
     /// Maximum size of a single uploaded file for authenticated users, in bytes.
     /// </summary>
     public required long AuthenticatedFileLimitBytes { get; init; }
+    /// <summary>
+    /// Maximum package lifetime for anonymous (guest) users, in hours.
+    /// </summary>
+    public required int AnonymousMaxLifetimeHours { get; init; }
+
+    /// <summary>
+    /// Maximum package lifetime for authenticated users, in hours.
+    /// </summary>
+    public required int AuthenticatedMaxLifetimeHours { get; init; }
+
+    /// <summary>
+    /// Maximum number of times an anonymous package may be accessed.
+    /// </summary>
+    public required int AnonymousMaxDownloadCount { get; init; }
+
+    /// <summary>
+    /// Maximum number of times an authenticated package may be accessed.
+    /// </summary>
+    public required int AuthenticatedMaxDownloadCount { get; init; }
 }
 
 /// <summary>

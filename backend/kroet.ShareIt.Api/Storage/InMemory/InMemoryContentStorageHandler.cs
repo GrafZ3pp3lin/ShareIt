@@ -135,7 +135,11 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 
     public Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
     {
-        var packageIds = _packages.Select(p => p.Id).ToList();
+        var now = DateTimeOffset.UtcNow;
+        var packageIds = _packages
+            .Where(p => p.IsAccessLimitReached || p.IsExpired(now))
+            .Select(p => p.Id)
+            .ToList();
         return Task.FromResult<IReadOnlyList<Guid>>(packageIds);
     }
 }

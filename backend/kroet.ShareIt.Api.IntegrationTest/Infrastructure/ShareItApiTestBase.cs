@@ -46,10 +46,11 @@ public abstract class ShareItApiTestBase
         byte[]? fileBytes = null,
         string fileName = "hello.txt",
         string? title = null,
-        int? maxDownloadCount = null,
+        int? maxDownloadCount = 1,
         bool? isPrivate = null,
         Guid? guestId = null,
-        Guid? userId = null)
+        Guid? userId = null,
+        int? timeToLiveHours = 1)
     {
         var form = new MultipartFormDataContent();
         if (title is not null)
@@ -63,6 +64,10 @@ public abstract class ShareItApiTestBase
         if (isPrivate is not null)
         {
             form.Add(new StringContent(isPrivate.Value ? "true" : "false"), "IsPrivate");
+        }
+        if (timeToLiveHours is not null)
+        {
+            form.Add(new StringContent(timeToLiveHours.Value.ToString()), "TimeToLiveHours");
         }
         if (fileBytes is not null)
         {
@@ -84,12 +89,13 @@ public abstract class ShareItApiTestBase
         byte[]? fileBytes = null,
         string fileName = "hello.txt",
         string? title = null,
-        int? maxDownloadCount = null,
+        int? maxDownloadCount = 1,
         bool? isPrivate = null,
         Guid? guestId = null,
-        Guid? userId = null)
+        Guid? userId = null,
+        int? timeToLiveHours = 1)
     {
-        var response = await SendCreatePackageAsync(fileBytes, fileName, title, maxDownloadCount, isPrivate, guestId, userId);
+        var response = await SendCreatePackageAsync(fileBytes, fileName, title, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 

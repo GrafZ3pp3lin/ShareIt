@@ -158,7 +158,7 @@ public static class ContentEndpoints
             });
         }
 
-        // Validate upload sizes before anything is stored
+        // Validate upload sizes and lifetime before anything is stored
         var settings = uploadOptions.Value;
         var fileLimitBytes = FileLimitBytes(userIdentity, settings);
         if (request.Files is { Count: > 0 })
@@ -168,6 +168,18 @@ public static class ContentEndpoints
             {
                 return FileTooLargeProblem(oversized.FileName, fileLimitBytes);
             }
+        }
+
+        var lifetimeProblem = ValidateLifetime(userIdentity, settings, request.TimeToLiveHours);
+        if (lifetimeProblem is not null)
+        {
+            return lifetimeProblem;
+        }
+
+        var downloadCountProblem = ValidateMaxDownloadCount(userIdentity, settings, request.MaxDownloadCount);
+        if (downloadCountProblem is not null)
+        {
+            return downloadCountProblem;
         }
 
         var now = timeProvider.GetUtcNow();
@@ -748,8 +760,12 @@ public static class ContentEndpoints
 
         return TypedResults.Ok(new UploadLimitsResponse
         {
-            AnonymousFileLimitBytes = settings.AnonymousFileLimitMb * 1024L * 1024L,
-            AuthenticatedFileLimitBytes = settings.AuthenticatedFileLimitMb * 1024L * 1024L
+            AnonymousFileLimitBytes = settings.Anonymous.FileLimitMb * 1024L * 1024L,
+            AuthenticatedFileLimitBytes = settings.Authenticated.FileLimitMb * 1024L * 1024L,
+            AnonymousMaxLifetimeHours = settings.Anonymous.MaxLifetimeHours,
+            AuthenticatedMaxLifetimeHours = settings.Authenticated.MaxLifetimeHours,
+            AnonymousMaxDownloadCount = settings.Anonymous.MaxDownloadCount,
+            AuthenticatedMaxDownloadCount = settings.Authenticated.MaxDownloadCount
         });
     }
 
@@ -758,9 +774,88 @@ public static class ContentEndpoints
     /// </summary>
     private static long FileLimitBytes(UserIdentity userIdentity, UploadSettings settings)
     {
-        return userIdentity.IsGuest
-            ? settings.AnonymousFileLimitMb * 1024L * 1024L
-            : settings.AuthenticatedFileLimitMb * 1024L * 1024L;
+        var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
+        return identityLimits.FileLimitMb * 1024L * 1024L;
+    }
+
+    /// <summary>
+    /// Enforces the per-identity package lifetime limits: anonymous users are
+    /// capped at a short lifetime (and must set one at all), authenticated
+    /// users may go up to the configured maximum or omit it (no expiration).
+    /// </summary>
+    private static ProblemHttpResult? ValidateLifetime(UserIdentity userIdentity, UploadSettings settings, int? timeToLiveHours)
+    {
+        if (timeToLiveHours is { } hours)
+        {
+            if (hours <= 0)
+            {
+                return BadRequestProblem(
+                    "Invalid lifetime",
+                    "TimeToLiveHours must be a positive number of hours.");
+            }
+
+            var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
+            if (hours > identityLimits.MaxLifetimeHours)
+            {
+                return BadRequestProblem(
+                    "Lifetime too long",
+                    $"Packages for this identity may live for at most {identityLimits.MaxLifetimeHours} hours.");
+            }
+
+            return null;
+        }
+
+        if (userIdentity.IsGuest)
+        {
+            return BadRequestProblem(
+                "Lifetime required",
+                $"Anonymous packages must set TimeToLiveHours of at most {settings.Anonymous.MaxLifetimeHours} hours.");
+        }
+
+        return null;
+    }
+
+    private static ProblemHttpResult? ValidateMaxDownloadCount(
+        UserIdentity userIdentity, UploadSettings settings, int? maxDownloadCount)
+    {
+        if (maxDownloadCount is { } count)
+        {
+            if (count <= 0)
+            {
+                return BadRequestProblem(
+                    "Invalid download limit",
+                    "MaxDownloadCount must be a positive number.");
+            }
+
+            var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
+            if (count > identityLimits.MaxDownloadCount)
+            {
+                return BadRequestProblem(
+                    "Download limit too high",
+                    $"Packages for this identity allow at most {identityLimits.MaxDownloadCount} downloads.");
+            }
+
+            return null;
+        }
+
+        if (userIdentity.IsGuest)
+        {
+            return BadRequestProblem(
+                "Download limit required",
+                $"Anonymous packages must set MaxDownloadCount of at most {settings.Anonymous.MaxDownloadCount}.");
+        }
+
+        return null;
+    }
+
+    private static ProblemHttpResult BadRequestProblem(string title, string detail)
+    {
+        return TypedResults.Problem(new ProblemDetails
+        {
+            Title = title,
+            Detail = detail,
+            Status = StatusCodes.Status400BadRequest
+        });
     }
 
     /// <summary>

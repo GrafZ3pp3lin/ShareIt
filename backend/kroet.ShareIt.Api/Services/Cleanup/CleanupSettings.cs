@@ -17,6 +17,7 @@ public class CleanupSettingsValidator : AbstractValidator<CleanupSettings>
 {
     public CleanupSettingsValidator()
     {
-        RuleFor(x => x.CleanupIntervalMinutes).GreaterThan(0);
+        RuleFor(x => x.CleanupIntervalMinutes)
+            .GreaterThan(0);
     }
 }

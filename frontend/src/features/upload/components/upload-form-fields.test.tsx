@@ -3,7 +3,7 @@ import type { JSX } from '@solidjs/web';
 import { describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../../../i18n/i18n.tsx';
-import { UploadFilePanel, UploadMetadataFields, UploadTextPanel } from './upload-form-fields.tsx';
+import { UploadFilePanel, UploadTextPanel } from './upload-form-fields.tsx';
 
 const makeFile = (name: string, type = 'text/plain') => new File(['abc'], name, { type });
 
@@ -83,26 +83,5 @@ describe('UploadTextPanel', () => {
     render(() => <UploadTextPanel text="filled" onTextInput={() => {}} />);
 
     expect(screen.getByPlaceholderText('Paste or type your text').className).toContain('border-ink/30');
-  });
-});
-
-describe('UploadMetadataFields', () => {
-  it('forwards title and description input', () => {
-    const onTitleInput = vi.fn();
-    const onDescriptionInput = vi.fn();
-    render(() => (
-      <UploadMetadataFields
-        title=""
-        description=""
-        onTitleInput={onTitleInput}
-        onDescriptionInput={onDescriptionInput}
-      />
-    ));
-
-    fireEvent.input(screen.getByPlaceholderText('Title (optional)'), { target: { value: 'my title' } });
-    fireEvent.input(screen.getByPlaceholderText('Description (optional)'), { target: { value: 'my desc' } });
-
-    expect(onTitleInput).toHaveBeenCalledWith('my title');
-    expect(onDescriptionInput).toHaveBeenCalledWith('my desc');
   });
 });

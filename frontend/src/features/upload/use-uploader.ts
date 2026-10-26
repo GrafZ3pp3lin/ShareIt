@@ -1,6 +1,12 @@
 import { createMemo, createSignal, onSettled } from 'solid-js';
 import type { UploadResult } from './components/upload-types.ts';
-import { DEFAULT_EXPIRY_INDEX, EXPIRY_OPTIONS, cycleExpiryIndex } from './upload-expiry.ts';
+import { DEFAULT_EXPIRY_INDEX, EXPIRY_OPTIONS, ANONYMOUS_EXPIRY_INDEX, cycleExpiryIndex } from './upload-expiry.ts';
+import {
+  DEFAULT_DOWNLOAD_COUNT_INDEX,
+  DOWNLOAD_COUNT_OPTIONS,
+  ANONYMOUS_DOWNLOAD_COUNT,
+  cycleDownloadCountIndex
+} from './upload-download-count.ts';
 import { createContentPackage, getUploadLimits, uploadFile } from '../../shared/api/content.ts';
 import type { UploadLimits } from '../../shared/api/content.ts';
 import { getErrorMessage } from '../../shared/api/error-message.ts';
@@ -55,12 +61,11 @@ export function createUploader() {
   const [stage, setStage] = createSignal<'form' | 'result'>('form');
   // Raw signal setters; the public setters below clear a resumable partial
   // upload first, so any form edit invalidates recovery.
-  const [title, setTitleBase] = createSignal('');
-  const [description, setDescriptionBase] = createSignal('');
   const [text, setTextBase] = createSignal('');
   const [files, setFiles] = createSignal<File[]>([]);
   const [encrypt, setEncrypt] = createSignal(true);
   const [expiryIndex, setExpiryIndex] = createSignal(DEFAULT_EXPIRY_INDEX);
+  const [downloadCountIndex, setDownloadCountIndex] = createSignal(DEFAULT_DOWNLOAD_COUNT_INDEX);
   const [error, setError] = createSignal<string | null>(null);
   const [result, setResult] = createSignal<UploadResult | null>(null);
   const [progress, setProgress] = createSignal<UploadProgress | null>(null);
@@ -69,7 +74,8 @@ export function createUploader() {
   const [partial, setPartial] = createSignal<PartialPackage | null>(null);
   const hasText = createMemo(() => text().trim().length > 0);
   const hasFiles = createMemo(() => files().length > 0);
-  const expiry = createMemo(() => EXPIRY_OPTIONS[expiryIndex()]);
+  // Guests have no expiry picker: they always get the shortest lifetime.
+  const expiry = createMemo(() => EXPIRY_OPTIONS[isAuthenticated() ? expiryIndex() : ANONYMOUS_EXPIRY_INDEX]);
 
   let abortController: AbortController | null = null;
 
@@ -105,16 +111,6 @@ export function createUploader() {
   });
 
   const clearPartial = () => setPartial(null);
-
-  const setTitle = (value: string) => {
-    clearPartial();
-    setTitleBase(value);
-  };
-
-  const setDescription = (value: string) => {
-    clearPartial();
-    setDescriptionBase(value);
-  };
 
   const setText = (value: string) => {
     clearPartial();
@@ -154,6 +150,20 @@ export function createUploader() {
     clearPartial();
     setExpiryIndex(cycleExpiryIndex);
   };
+
+  const downloadCount = createMemo(() =>
+    isAuthenticated() ? DOWNLOAD_COUNT_OPTIONS[downloadCountIndex()] : ANONYMOUS_DOWNLOAD_COUNT
+  );
+
+  const cycleDownloadCount = () => {
+    clearPartial();
+    setDownloadCountIndex(cycleDownloadCountIndex);
+  };
+
+  const accessLabel = createMemo(() => {
+    const count = downloadCount();
+    return count == null ? t('upload.access.unlimited') : String(count);
+  });
 
   const applyResult = (value: SubmitResult) => {
     if ('error' in value) {
@@ -198,9 +208,10 @@ export function createUploader() {
     let packageId = resume?.packageId;
     if (!packageId) {
       const packageResult = await createContentPackage({
-        Title: title() || null,
-        Description: description() || null,
+        Title: null,
+        Description: null,
         TimeToLiveHours: expiry().hours,
+        MaxDownloadCount: downloadCount(),
         Texts: texts
       });
 
@@ -327,8 +338,6 @@ export function createUploader() {
 
   const resetForm = () => {
     clearPartial();
-    setTitleBase('');
-    setDescriptionBase('');
     setTextBase('');
     setFiles([]);
     setError(null);
@@ -360,12 +369,13 @@ export function createUploader() {
   return {
     // state
     stage,
-    title,
-    description,
     text,
     files,
     encrypt,
     expiry,
+    downloadCount,
+    accessLabel,
+    isAuthenticated,
     submitting,
     progress,
     progressLabel,
@@ -374,12 +384,11 @@ export function createUploader() {
     result,
     limitLabel,
     // actions
-    setTitle,
-    setDescription,
     setText,
     handleFilesChange,
     toggleEncrypt,
     cycleExpiry,
+    cycleDownloadCount,
     handleSubmit,
     handleCancel,
     showLinkAnyway,

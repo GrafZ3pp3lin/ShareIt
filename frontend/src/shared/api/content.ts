@@ -23,13 +23,21 @@ const isSuccess = (status: number): boolean => status >= 200 && status < 300;
 export type UploadLimits = {
   AnonymousFileLimitBytes: number;
   AuthenticatedFileLimitBytes: number;
+  AnonymousMaxLifetimeHours: number;
+  AuthenticatedMaxLifetimeHours: number;
+  AnonymousMaxDownloadCount: number;
+  AuthenticatedMaxDownloadCount: number;
 };
 
 const isUploadLimits = (value: unknown): value is UploadLimits =>
   typeof value === 'object' &&
   value !== null &&
   'AnonymousFileLimitBytes' in value &&
-  'AuthenticatedFileLimitBytes' in value;
+  'AuthenticatedFileLimitBytes' in value &&
+  'AnonymousMaxLifetimeHours' in value &&
+  'AuthenticatedMaxLifetimeHours' in value &&
+  'AnonymousMaxDownloadCount' in value &&
+  'AuthenticatedMaxDownloadCount' in value;
 
 const isContentPackageResponse = (value: unknown): value is ContentPackageResponse =>
   typeof value === 'object' && value !== null && 'Id' in value;

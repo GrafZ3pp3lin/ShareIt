@@ -10,4 +10,12 @@ export interface UploadLimitsResponse {
   AnonymousFileLimitBytes: number | string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   AuthenticatedFileLimitBytes: number | string;
+  /** @pattern ^-?(?:0|[1-9]\d*)$ */
+  AnonymousMaxLifetimeHours: number | string;
+  /** @pattern ^-?(?:0|[1-9]\d*)$ */
+  AuthenticatedMaxLifetimeHours: number | string;
+  /** @pattern ^-?(?:0|[1-9]\d*)$ */
+  AnonymousMaxDownloadCount: number | string;
+  /** @pattern ^-?(?:0|[1-9]\d*)$ */
+  AuthenticatedMaxDownloadCount: number | string;
 }

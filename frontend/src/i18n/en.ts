@@ -25,15 +25,16 @@ export const dict = {
       limit: 'limit {{ limit }}/file'
     },
     placeholders: {
-      title: 'Title (optional)',
-      description: 'Description (optional)',
       text: 'Paste or type your text'
     },
-    details: {
-      toggle: '+ add title & description'
-    },
     expiry: {
-      label: 'expires'
+      label: 'expires',
+      anonymousNote: 'content is available for {{ expiry }}'
+    },
+    access: {
+      label: 'access',
+      unlimited: '∞',
+      anonymousNote: 'link works once'
     },
     password: {
       label: 'password',

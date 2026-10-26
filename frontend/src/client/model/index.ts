@@ -7,6 +7,7 @@
 
 export * from './contentItemInPackage';
 export * from './contentPackageDetailsResponse';
+export * from './contentPackagePreviewResponse';
 export * from './contentPackageResponse';
 export * from './createPackageRequest';
 export * from './createTextRequest';

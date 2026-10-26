@@ -1,5 +1,5 @@
 import { Show } from 'solid-js';
-import { UploadFilePanel, UploadMetadataFields, UploadTextPanel } from '../components/upload-form-fields.tsx';
+import { UploadFilePanel, UploadTextPanel } from '../components/upload-form-fields.tsx';
 import { UploadResultPanel } from '../components/upload-result-panel.tsx';
 import { createUploader } from '../use-uploader.ts';
 import { TerminalWindow } from '../../../shared/components/terminal-window.tsx';
@@ -14,20 +14,6 @@ export function UploadPage() {
       <TerminalWindow label={t('upload.windowLabel')}>
         <Show when={uploader.stage() === 'form'}>
           <form class="grid gap-5" onSubmit={uploader.handleSubmit}>
-            <details>
-              <summary class="cursor-pointer font-mono text-xs text-muted transition hover:text-ink">
-                {t('upload.details.toggle')}
-              </summary>
-              <div class="mt-3 grid gap-3">
-                <UploadMetadataFields
-                  title={uploader.title()}
-                  description={uploader.description()}
-                  onTitleInput={uploader.setTitle}
-                  onDescriptionInput={uploader.setDescription}
-                />
-              </div>
-            </details>
-
             <div class="grid gap-4 sm:grid-cols-2 min-h-42">
               <UploadFilePanel files={uploader.files()} onFilesChange={uploader.handleFilesChange} />
               <UploadTextPanel text={uploader.text()} onTextInput={uploader.setText} />
@@ -35,10 +21,26 @@ export function UploadPage() {
 
             <div class="grid gap-2">
               <div class="flex flex-wrap items-center gap-3">
-                <button type="button" class="pill-badge cursor-pointer" onClick={uploader.cycleExpiry}>
-                  <span>{t('upload.expiry.label')}:</span>
-                  <span class="text-ink">{uploader.expiry().label}</span>
-                </button>
+                <Show
+                  when={uploader.isAuthenticated()}
+                  fallback={
+                    <>
+                      <span class="pill-badge">
+                        {t('upload.expiry.anonymousNote', { expiry: uploader.expiry().label })}
+                      </span>
+                      <span class="pill-badge">{t('upload.access.anonymousNote')}</span>
+                    </>
+                  }
+                >
+                  <button type="button" class="pill-badge cursor-pointer" onClick={uploader.cycleExpiry}>
+                    <span>{t('upload.expiry.label')}:</span>
+                    <span class="text-ink">{uploader.expiry().label}</span>
+                  </button>
+                  <button type="button" class="pill-badge cursor-pointer" onClick={uploader.cycleDownloadCount}>
+                    <span>{t('upload.access.label')}:</span>
+                    <span class="text-ink">{uploader.accessLabel()}</span>
+                  </button>
+                </Show>
                 <button type="button" class="pill-badge cursor-pointer" onClick={uploader.toggleEncrypt}>
                   <span>{t('upload.password.label')}:</span>
                   <span class="text-ink">

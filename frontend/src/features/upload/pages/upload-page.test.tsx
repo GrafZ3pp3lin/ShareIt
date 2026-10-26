@@ -78,6 +78,11 @@ describe('<UploadPage />', () => {
   it('uploads text and shows the link, passphrase and expiry', async () => {
     renderPage();
 
+    // Anonymous users get no pickers, just fixed short-lifetime notes.
+    expect(screen.getByText('content is available for 6h')).toBeInTheDocument();
+    expect(screen.getByText('link works once')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /expires:/ })).not.toBeInTheDocument();
+
     fireEvent.input(screen.getByPlaceholderText('Paste or type your text'), { target: { value: 'hello' } });
     // Solid 2.0 batches writes to the next microtask: drain before the submit
     // click reads the form state.
@@ -93,6 +98,8 @@ describe('<UploadPage />', () => {
       throw new Error('createPackage must send a FormData body');
     }
     expect(body.getAll('Texts')).toEqual(['enc:hello']);
+    expect(body.get('TimeToLiveHours')).toBe('6');
+    expect(body.get('MaxDownloadCount')).toBe('1');
   });
 
   it('retries into the same package after a file upload failure', async () => {

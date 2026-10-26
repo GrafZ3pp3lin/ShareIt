@@ -3,13 +3,6 @@ import { Show, onSettled } from 'solid-js';
 import IconUpload from '~icons/lucide/upload';
 import { useI18n } from '../../../i18n/i18n.tsx';
 
-type UploadMetadataFieldsProps = {
-  title: string;
-  description: string;
-  onTitleInput: (value: string) => void;
-  onDescriptionInput: (value: string) => void;
-};
-
 type UploadFilePanelProps = {
   files: File[];
   onFilesChange: (files: File[]) => void;
@@ -19,29 +12,6 @@ type UploadTextPanelProps = {
   text: string;
   onTextInput: (value: string) => void;
 };
-
-export function UploadMetadataFields(props: UploadMetadataFieldsProps) {
-  const { t } = useI18n();
-
-  return (
-    <>
-      <input
-        class="text-field"
-        type="text"
-        placeholder={t('upload.placeholders.title')}
-        value={props.title}
-        onInput={(event) => props.onTitleInput(event.currentTarget.value)}
-      />
-      <input
-        class="text-field"
-        type="text"
-        placeholder={t('upload.placeholders.description')}
-        value={props.description}
-        onInput={(event) => props.onDescriptionInput(event.currentTarget.value)}
-      />
-    </>
-  );
-}
 
 export function UploadFilePanel(props: UploadFilePanelProps) {
   const { t } = useI18n();

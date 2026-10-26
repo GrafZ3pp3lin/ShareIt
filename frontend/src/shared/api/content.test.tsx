@@ -19,11 +19,27 @@ const makeFile = (name = 'notes.txt') => new File(['hello'], name, { type: 'text
 
 describe('getUploadLimits', () => {
   it('narrow the limits payload and resolve data on success', async () => {
-    stubFetch(async () => jsonResponse(200, { AnonymousFileLimitBytes: 100, AuthenticatedFileLimitBytes: 200 }));
+    stubFetch(async () =>
+      jsonResponse(200, {
+        AnonymousFileLimitBytes: 100,
+        AuthenticatedFileLimitBytes: 200,
+        AnonymousMaxLifetimeHours: 6,
+        AuthenticatedMaxLifetimeHours: 720,
+        AnonymousMaxDownloadCount: 1,
+        AuthenticatedMaxDownloadCount: 10
+      })
+    );
 
     const result = await getUploadLimits();
 
-    expect(result.data).toEqual({ AnonymousFileLimitBytes: 100, AuthenticatedFileLimitBytes: 200 });
+    expect(result.data).toEqual({
+      AnonymousFileLimitBytes: 100,
+      AuthenticatedFileLimitBytes: 200,
+      AnonymousMaxLifetimeHours: 6,
+      AuthenticatedMaxLifetimeHours: 720,
+      AnonymousMaxDownloadCount: 1,
+      AuthenticatedMaxDownloadCount: 10
+    });
     expect(result.error).toBeUndefined();
   });
 

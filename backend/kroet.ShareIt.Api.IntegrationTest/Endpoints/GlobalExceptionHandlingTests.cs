@@ -76,6 +76,9 @@ public sealed class GlobalExceptionHandlingTests
         // An empty multipart body is a malformed request on the test server;
         // a title keeps the form well-formed.
         form.Add(new StringContent(string.Empty), "Title");
+        // Guests must set a package lifetime and access limit.
+        form.Add(new StringContent("1"), "TimeToLiveHours");
+        form.Add(new StringContent("1"), "MaxDownloadCount");
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package") { Content = form };
         request.Headers.Add("X-Guest-ID", guestId.ToString());
 

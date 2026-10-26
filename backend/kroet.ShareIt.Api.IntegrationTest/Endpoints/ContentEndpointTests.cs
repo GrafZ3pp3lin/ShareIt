@@ -146,7 +146,9 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     public async Task GetPackage_WithAccessLimit_AllowsExactlyMaxViews()
     {
         // Three distinct viewers may open the link; the fourth is rejected.
-        var packageId = await CreatePackageAsync(guestId: Guid.NewGuid(), fileBytes: FileBytes, maxDownloadCount: 3);
+        // The limit is the creator's: guests are capped at 1, so an
+        // authenticated owner sets the limit here.
+        var packageId = await CreatePackageAsync(userId: Guid.NewGuid(), fileBytes: FileBytes, maxDownloadCount: 3);
 
         for (var access = 1; access <= 3; access++)
         {

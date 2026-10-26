@@ -6,6 +6,7 @@
  */
 import type {
   ContentPackageDetailsResponse,
+  ContentPackagePreviewResponse,
   ContentPackageResponse,
   CreatePackageRequest,
   CreateTextRequest,
@@ -321,6 +322,59 @@ export const getPackage = async (
   options?: Parameters<typeof customFetch>[1]
 ): Promise<getPackageResponse> => {
   return customFetch<getPackageResponse>(getGetPackageUrl(packageId), {
+    ...options,
+    method: 'GET'
+  });
+};
+
+export type getPackagePreviewResponse200 = {
+  data: ContentPackagePreviewResponse;
+  status: 200;
+};
+
+export type getPackagePreviewResponse400 = {
+  data: ProblemDetails;
+  status: 400;
+};
+
+export type getPackagePreviewResponse401 = {
+  data: ProblemDetails;
+  status: 401;
+};
+
+export type getPackagePreviewResponse404 = {
+  data: ProblemDetails;
+  status: 404;
+};
+
+export type getPackagePreviewResponse500 = {
+  data: ProblemDetails;
+  status: 500;
+};
+
+export type getPackagePreviewResponseSuccess = getPackagePreviewResponse200 & {
+  headers: Headers;
+};
+export type getPackagePreviewResponseError = (
+  | getPackagePreviewResponse400
+  | getPackagePreviewResponse401
+  | getPackagePreviewResponse404
+  | getPackagePreviewResponse500
+) & {
+  headers: Headers;
+};
+
+export type getPackagePreviewResponse = getPackagePreviewResponseSuccess | getPackagePreviewResponseError;
+
+export const getGetPackagePreviewUrl = (packageId: string) => {
+  return `/api/v1/content/package/${packageId}/preview`;
+};
+
+export const getPackagePreview = async (
+  packageId: string,
+  options?: Parameters<typeof customFetch>[1]
+): Promise<getPackagePreviewResponse> => {
+  return customFetch<getPackagePreviewResponse>(getGetPackagePreviewUrl(packageId), {
     ...options,
     method: 'GET'
   });

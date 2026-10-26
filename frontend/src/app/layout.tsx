@@ -25,16 +25,27 @@ export function AppLayout(props: RouteSectionProps) {
               </span>
               <span>{t('app.brand')}</span>
             </a>
-            <nav class="flex items-center gap-5">
-              <a class="nav-tab" href="/">
-                {t('app.nav.upload')}
-              </a>
-              <a class="nav-tab" href="/account">
-                {t('app.nav.myFiles')}
-              </a>
-            </nav>
+            <Show when={auth.isAuthenticated()}>
+              <nav class="flex items-center gap-5">
+                <a class="nav-tab" href="/">
+                  {t('app.nav.upload')}
+                </a>
+                <a class="nav-tab" href="/account">
+                  {t('app.nav.myFiles')}
+                </a>
+              </nav>
+            </Show>
           </div>
           <div class="flex items-center gap-3">
+            <Show when={!auth.isAuthenticated() && auth.isEnabled}>
+              <button
+                type="button"
+                class="font-mono text-sm text-muted transition hover:text-ink"
+                onClick={() => void auth.login()}
+              >
+                {t('auth.signIn')}
+              </button>
+            </Show>
             <Show when={auth.isAuthenticated()}>
               <button
                 type="button"

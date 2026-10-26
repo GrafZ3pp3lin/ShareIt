@@ -18,8 +18,8 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
 {
     protected override IReadOnlyDictionary<string, string?> Settings { get; } = new Dictionary<string, string?>
     {
-        ["UploadSettings:AnonymousFileLimitMb"] = "1",
-        ["UploadSettings:AuthenticatedFileLimitMb"] = "2",
+        ["UploadSettings:Anonymous:FileLimitMb"] = "1",
+        ["UploadSettings:Authenticated:FileLimitMb"] = "2",
         ["UploadSettings:MaxRequestBodySizeMb"] = "2",
     };
 
