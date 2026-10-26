@@ -2,9 +2,8 @@ import { For, Show, createEffect, createSignal } from 'solid-js';
 import { useParams } from '@solidjs/router';
 import type { ContentItemInPackage, ContentPackageDetailsResponse } from '../../../client/model/index.ts';
 import { getPackageDetails, downloadContent } from '../../../shared/api/content.ts';
-import type { ApiResult } from '../../../shared/api/content.ts';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
-import { decryptFile, decryptText, isEncryptedBlob, ENCRYPTED_FILE_MIME_TYPE } from '../../../shared/crypto/crypto.ts';
+import { decryptFile, decryptText, isEncryptedBlob } from '../../../shared/crypto/crypto.ts';
 import { parseEncryptedTextEnvelope } from '../../../shared/crypto/envelope.ts';
 import { ShareItemCard } from '../components/share-item-card.tsx';
 import { useI18n } from '../../../i18n/i18n.tsx';
@@ -54,9 +53,6 @@ export function SharePage() {
     }
   );
 
-  const packageData = () => details();
-  const packageError = () => loadError();
-
   const decryptItem = async (item: ContentItemInPackage) => {
     const value = passphrase();
     if (!value) {
@@ -90,126 +86,104 @@ export function SharePage() {
     URL.revokeObjectURL(url);
   };
 
-  const downloadItem = async (item: ContentItemInPackage) => {
-    if (!item.DownloadToken) {
-      return;
-    }
-    let result: ApiResult<Blob>;
-    try {
-      result = await downloadContent(packageId(), item.Id, item.DownloadToken);
-    } catch (err) {
-      setDownloadErrors((current) => ({
-        ...current,
-        [item.Id]: getErrorMessage(err, t('share.downloadFailed'))
-      }));
-      return;
-    }
-    if (!result.data) {
-      setDownloadErrors((current) => ({
-        ...current,
-        [item.Id]: getErrorMessage(result.error, t('share.downloadFailed'))
-      }));
-      return;
-    }
+  const downloadFailed = (item: ContentItemInPackage, message: string) => {
+    setDownloadErrors((current) => ({ ...current, [item.Id]: message }));
+  };
 
+  const downloadCleared = (item: ContentItemInPackage) => {
     setDownloadErrors((current) => ({ ...current, [item.Id]: '' }));
+  };
 
-    let blob: Blob = result.data;
+  // Downloads the item's blob and decrypts it when the content is encrypted,
+  // returning either the ready-to-save blob or a user-facing error message.
+  const prepareDownload = async (item: ContentItemInPackage): Promise<Blob | string> => {
+    if (!item.DownloadToken) {
+      return ''; // the card already explains the missing token
+    }
+
+    let blob: Blob;
+    try {
+      const result = await downloadContent(packageId(), item.Id, item.DownloadToken);
+      if (!result.data) {
+        return getErrorMessage(result.error, t('share.downloadFailed'));
+      }
+      blob = result.data;
+    } catch (err) {
+      return getErrorMessage(err, t('share.downloadFailed'));
+    }
+
+    const passphraseError = () => (passphrase() ? '' : t('share.enterPassphrase'));
+
     if (await isEncryptedBlob(blob)) {
-      const value = passphrase();
-      if (!value) {
-        setDownloadErrors((current) => ({
-          ...current,
-          [item.Id]: t('share.enterPassphrase')
-        }));
-        return;
+      const error = passphraseError();
+      if (error) {
+        return error;
       }
       try {
-        blob = await decryptFile(blob, value);
+        return await decryptFile(blob, passphrase());
       } catch {
-        setDownloadErrors((current) => ({
-          ...current,
-          [item.Id]: t('share.invalidPassphrase')
-        }));
-        return;
+        return t('share.invalidPassphrase');
       }
-    } else if (item.Type === 'text') {
+    }
+
+    if (item.Type === 'text') {
       // Oversized text items are delivered as blobs; an encrypted envelope
       // must be decrypted with the passphrase before saving.
       const text = await blob.text();
       if (parseEncryptedTextEnvelope(text)) {
-        const value = passphrase();
-        if (!value) {
-          setDownloadErrors((current) => ({
-            ...current,
-            [item.Id]: t('share.enterPassphrase')
-          }));
-          return;
+        const error = passphraseError();
+        if (error) {
+          return error;
         }
         try {
-          blob = new Blob([await decryptText(text, value)], { type: 'text/plain;charset=utf-8' });
+          return new Blob([await decryptText(text, passphrase())], { type: 'text/plain;charset=utf-8' });
         } catch {
-          setDownloadErrors((current) => ({
-            ...current,
-            [item.Id]: t('share.invalidPassphrase')
-          }));
-          return;
+          return t('share.invalidPassphrase');
         }
       }
     }
 
-    saveBlob(item, blob);
+    return blob;
+  };
+
+  const downloadItem = async (item: ContentItemInPackage) => {
+    const outcome = await prepareDownload(item);
+    if (typeof outcome === 'string') {
+      if (outcome) {
+        downloadFailed(item, outcome);
+      }
+      return;
+    }
+    downloadCleared(item);
+    saveBlob(item, outcome);
   };
 
   return (
     <div class="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:items-start lg:gap-6">
       <section class="lg:sticky lg:top-28">
         <SharePackageSummary
-          title={t('share.title')}
-          loadingLabel={loading() ? t('share.loading') : ''}
-          loadError={packageError() ? getErrorMessage(packageError(), t('share.loadFailed')) : undefined}
-          packageLabel={packageData() ? t('share.packageLabel', { id: packageData()!.Package.Id }) : undefined}
-          itemsLabel={packageData() ? t('share.itemsLabel', { count: packageData()!.Package.ItemCount }) : undefined}
+          loading={loading()}
+          loadError={loadError() ? getErrorMessage(loadError(), t('share.loadFailed')) : undefined}
+          details={details()}
         />
       </section>
 
-      <Show when={packageData()?.Items?.length}>
+      <Show when={details()?.Items?.length}>
         <div class="grid gap-3">
-          <For each={packageData()?.Items ?? []}>
-            {(item) => {
-              const envelope = item.Text ? parseEncryptedTextEnvelope(item.Text) : null;
-              const isEncryptedFile = item.MimeType === ENCRYPTED_FILE_MIME_TYPE;
-              const decryptedText = () => decrypted()[item.Id];
-              const errorMessage = () => errors()[item.Id];
-              const downloadError = () => downloadErrors()[item.Id];
-
-              return (
-                <ShareItemCard
-                  item={item}
-                  title={item.FileName ?? (item.Type === 'text' ? t('share.textEntry') : t('share.content'))}
-                  encryptedNoticeLabel={t('share.encryptedNotice')}
-                  encryptedFileNoticeLabel={t('share.encryptedFileNotice')}
-                  passphrasePlaceholder={t('share.passphrasePlaceholder')}
-                  decryptLabel={t('share.decrypt')}
-                  decryptingLabel={t('share.decrypting')}
-                  decryptError={errorMessage()}
-                  decryptedText={decryptedText()}
-                  rawText={item.Text ?? ''}
-                  mimeType={isEncryptedFile ? null : item.MimeType}
-                  canDownload={Boolean(item.DownloadToken)}
-                  downloadLabel={t('share.downloadFile')}
-                  onDownload={() => void downloadItem(item)}
-                  downloadError={downloadError()}
-                  noDownloadTokenLabel={t('share.noDownloadToken')}
-                  isEncryptedText={Boolean(envelope)}
-                  isEncryptedFile={isEncryptedFile}
-                  passphraseValue={passphrase()}
-                  onPassphraseInput={setPassphrase}
-                  onDecrypt={() => void decryptItem(item)}
-                  isDecrypting={decrypting()[item.Id] ?? false}
-                />
-              );
-            }}
+          <For each={details()?.Items ?? []}>
+            {(item) => (
+              <ShareItemCard
+                item={item}
+                passphraseValue={passphrase()}
+                onPassphraseInput={setPassphrase}
+                onDecrypt={() => void decryptItem(item)}
+                isDecrypting={decrypting()[item.Id] ?? false}
+                decryptedText={decrypted()[item.Id]}
+                decryptError={errors()[item.Id]}
+                onDownload={() => void downloadItem(item)}
+                downloadError={downloadErrors()[item.Id]}
+              />
+            )}
           </For>
         </div>
       </Show>

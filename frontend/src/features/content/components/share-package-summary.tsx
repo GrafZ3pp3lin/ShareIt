@@ -1,30 +1,32 @@
 import { Show } from 'solid-js';
+import type { ContentPackageDetailsResponse } from '../../../client/model/index.ts';
+import { useI18n } from '../../../i18n/i18n.tsx';
 
 type SharePackageSummaryProps = {
-  title: string;
-  loadingLabel: string;
+  loading: boolean;
   loadError?: string;
-  packageLabel?: string;
-  itemsLabel?: string;
+  details?: ContentPackageDetailsResponse | null;
 };
 
 export function SharePackageSummary(props: SharePackageSummaryProps) {
+  const { t } = useI18n();
+
   return (
     <div class="surface-card grid gap-3">
-      <h2 class="text-lg font-semibold text-ink">{props.title}</h2>
-      <Show when={props.loadingLabel}>
-        <div>{props.loadingLabel}</div>
+      <h2 class="text-lg font-semibold text-ink">{t('share.title')}</h2>
+      <Show when={props.loading}>
+        <div>{t('share.loading')}</div>
       </Show>
       <Show when={props.loadError}>
         <div class="notice-box">{props.loadError}</div>
       </Show>
-      <Show when={props.packageLabel}>
-        <div class="grid gap-3">
-          <div class="pill-badge">{props.packageLabel}</div>
-          <Show when={props.itemsLabel}>
-            <div class="text-sm text-muted">{props.itemsLabel}</div>
-          </Show>
-        </div>
+      <Show when={props.details}>
+        {(details) => (
+          <div class="grid gap-3">
+            <div class="pill-badge">{t('share.packageLabel', { id: details().Package.Id })}</div>
+            <div class="text-sm text-muted">{t('share.itemsLabel', { count: details().Package.ItemCount })}</div>
+          </div>
+        )}
       </Show>
     </div>
   );

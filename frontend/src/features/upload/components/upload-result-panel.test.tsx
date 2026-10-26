@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@solidjs/testing-library';
 import { describe, expect, it, vi } from 'vitest';
 
+import { I18nProvider } from '../../../i18n/i18n.tsx';
 import { UploadResultPanel } from './upload-result-panel.tsx';
 import type { UploadResult } from './upload-types.ts';
 
@@ -10,27 +11,17 @@ const baseResult: UploadResult = {
   encrypted: false
 };
 
-const renderPanel = (result: UploadResult, props: { partialLabel?: string } = {}) => {
-  const onCopyLink = vi.fn();
-  const onCopyPassphrase = vi.fn();
+// Translation labels come from the en dictionary via the shared I18nProvider.
+const renderPanel = (result: UploadResult) => {
+  const writeText = vi.fn(async () => undefined);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
   const onReset = vi.fn();
   const rendered = render(() => (
-    <UploadResultPanel
-      result={result}
-      headingLabel="link ready"
-      caption="expires 1 hour"
-      copyLabel="copy"
-      copiedLabel="copied"
-      passphraseLabel="Passphrase (shown once):"
-      copyPassphraseLabel="Copy passphrase"
-      anotherLabel="Upload another"
-      partialLabel={props.partialLabel}
-      onCopyLink={onCopyLink}
-      onCopyPassphrase={onCopyPassphrase}
-      onReset={onReset}
-    />
+    <I18nProvider>
+      <UploadResultPanel result={result} onReset={onReset} />
+    </I18nProvider>
   ));
-  return { onCopyLink, onCopyPassphrase, onReset, ...rendered };
+  return { writeText, onReset, ...rendered };
 };
 
 describe('UploadResultPanel', () => {
@@ -45,24 +36,35 @@ describe('UploadResultPanel', () => {
     expect(onReset).toHaveBeenCalledTimes(1);
   });
 
-  it('reports a link copy through the callback and flips the button label', async () => {
-    const { onCopyLink } = renderPanel(baseResult);
+  it('writes the link to the clipboard and flips the button label', async () => {
+    const { writeText } = renderPanel(baseResult);
 
     fireEvent.click(screen.getByRole('button', { name: 'copy' }));
 
-    expect(onCopyLink).toHaveBeenCalledWith(baseResult.link);
-    // Solid 2.0 applies writes on the next microtask: wait for the label flip.
     await screen.findByRole('button', { name: 'copied' });
+    expect(writeText).toHaveBeenCalledWith(baseResult.link);
   });
 
-  it('shows and copies the passphrase when one is set', () => {
-    const { onCopyPassphrase } = renderPanel({ ...baseResult, passphrase: 'correct horse', encrypted: true });
+  it('writes the passphrase to the clipboard when one is set', async () => {
+    const { writeText } = renderPanel({ ...baseResult, passphrase: 'correct horse', encrypted: true });
 
     expect(screen.getByText('correct horse')).toBeInTheDocument();
+    expect(screen.getByText('Passphrase (shown once):')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy passphrase' }));
 
-    expect(onCopyPassphrase).toHaveBeenCalledWith('correct horse');
+    await screen.findByRole('button', { name: 'copied' });
+    expect(writeText).toHaveBeenCalledWith('correct horse');
+  });
+
+  it('keeps the copy button untouched when the clipboard write fails', async () => {
+    const { writeText } = renderPanel(baseResult);
+    writeText.mockRejectedValueOnce(new Error('denied'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'copy' }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByRole('button', { name: 'copy' })).toBeInTheDocument();
   });
 
   it('hides the passphrase section for plain uploads', () => {
@@ -72,14 +74,16 @@ describe('UploadResultPanel', () => {
   });
 
   it('shows the partial notice only for incomplete uploads', () => {
-    renderPanel({ ...baseResult, incomplete: true }, { partialLabel: 'Some files did not finish uploading.' });
+    renderPanel({ ...baseResult, incomplete: true });
 
-    expect(screen.getByText('Some files did not finish uploading.')).toBeInTheDocument();
+    expect(screen.getByText('Some files did not finish uploading — the link may be missing them.')).toBeInTheDocument();
   });
 
   it('hides the partial notice for complete uploads', () => {
-    renderPanel(baseResult, { partialLabel: 'Some files did not finish uploading.' });
+    renderPanel(baseResult);
 
-    expect(screen.queryByText('Some files did not finish uploading.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Some files did not finish uploading — the link may be missing them.')
+    ).not.toBeInTheDocument();
   });
 });

@@ -14,19 +14,9 @@ export function AccountPage() {
       <TerminalWindow label={t('account.windowLabel')}>
         <Show
           when={auth.isAuthenticated()}
-          fallback={
-            <LoginStage
-              enabled={auth.isEnabled}
-              heading={t('account.login.heading')}
-              body={t('account.login.body')}
-              ctaLabel={t('account.login.cta')}
-              continueLabel={t('account.login.continueWithoutAccount')}
-              disabledNotice={t('auth.oidcNotConfiguredLong')}
-              onLogin={auth.login}
-            />
-          }
+          fallback={<LoginStage enabled={auth.isEnabled} onLogin={() => void auth.login()} />}
         >
-          <DashboardStage emptyLabel={t('account.dashboard.empty')} notWiredLabel={t('account.notWired')} />
+          <DashboardStage />
         </Show>
       </TerminalWindow>
     </div>

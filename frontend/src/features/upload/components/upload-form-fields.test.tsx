@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from '@solidjs/testing-library';
+import { fireEvent, render as tlRender, screen } from '@solidjs/testing-library';
+import type { JSX } from '@solidjs/web';
 import { describe, expect, it, vi } from 'vitest';
 
+import { I18nProvider } from '../../../i18n/i18n.tsx';
 import { UploadFilePanel, UploadMetadataFields, UploadTextPanel } from './upload-form-fields.tsx';
 
 const makeFile = (name: string, type = 'text/plain') => new File(['abc'], name, { type });
@@ -10,47 +12,26 @@ const fireFileChange = (input: HTMLInputElement, files: File[]) => {
   fireEvent(input, new Event('change', { bubbles: true }));
 };
 
+// Labels come from the en dictionary via the shared I18nProvider.
+const render = (jsx: () => JSX.Element) => tlRender(() => <I18nProvider>{jsx()}</I18nProvider>);
+
 describe('UploadFilePanel', () => {
   it('shows the prompt label when no files are selected', () => {
-    render(() => (
-      <UploadFilePanel
-        label="FILE"
-        promptLabel="Drop file or browse"
-        selectedLabel="1 file(s) selected"
-        files={[]}
-        onFilesChange={() => {}}
-      />
-    ));
+    render(() => <UploadFilePanel files={[]} onFilesChange={() => {}} />);
 
     expect(screen.getByText('Drop file or browse')).toBeInTheDocument();
     expect(screen.queryByText('1 file(s) selected')).not.toBeInTheDocument();
   });
 
   it('shows the selected label when files are present', () => {
-    render(() => (
-      <UploadFilePanel
-        label="FILE"
-        promptLabel="Drop file or browse"
-        selectedLabel="2 file(s) selected"
-        files={[makeFile('a.txt'), makeFile('b.txt')]}
-        onFilesChange={() => {}}
-      />
-    ));
+    render(() => <UploadFilePanel files={[makeFile('a.txt'), makeFile('b.txt')]} onFilesChange={() => {}} />);
 
     expect(screen.getByText('2 file(s) selected')).toBeInTheDocument();
   });
 
   it('forwards files picked via the file input', () => {
     const onFilesChange = vi.fn();
-    const { container } = render(() => (
-      <UploadFilePanel
-        label="FILE"
-        promptLabel="prompt"
-        selectedLabel="selected"
-        files={[]}
-        onFilesChange={onFilesChange}
-      />
-    ));
+    const { container } = render(() => <UploadFilePanel files={[]} onFilesChange={onFilesChange} />);
 
     const input = container.querySelector<HTMLInputElement>(`input[type="file"]`)!;
     fireFileChange(input, [makeFile('a.txt')]);
@@ -62,15 +43,7 @@ describe('UploadFilePanel', () => {
     const onFilesChange = vi.fn();
     const existing = makeFile('a.txt');
     const added = makeFile('b.txt');
-    const { container } = render(() => (
-      <UploadFilePanel
-        label="FILE"
-        promptLabel="prompt"
-        selectedLabel="selected"
-        files={[existing]}
-        onFilesChange={onFilesChange}
-      />
-    ));
+    const { container } = render(() => <UploadFilePanel files={[existing]} onFilesChange={onFilesChange} />);
 
     const input = container.querySelector<HTMLInputElement>(`input[type="file"]`)!;
     fireFileChange(input, [makeFile('a.txt'), added]);
@@ -80,15 +53,7 @@ describe('UploadFilePanel', () => {
 
   it('does not forward a change that contains only duplicates', () => {
     const onFilesChange = vi.fn();
-    const { container } = render(() => (
-      <UploadFilePanel
-        label="FILE"
-        promptLabel="prompt"
-        selectedLabel="selected"
-        files={[makeFile('a.txt')]}
-        onFilesChange={onFilesChange}
-      />
-    ));
+    const { container } = render(() => <UploadFilePanel files={[makeFile('a.txt')]} onFilesChange={onFilesChange} />);
 
     const input = container.querySelector<HTMLInputElement>(`input[type="file"]`)!;
     fireFileChange(input, [makeFile('a.txt')]);
@@ -99,15 +64,7 @@ describe('UploadFilePanel', () => {
 
 describe('UploadTextPanel', () => {
   it('renders the label and placeholder', () => {
-    render(() => (
-      <UploadTextPanel
-        label="TEXT / SNIPPET"
-        placeholder="Paste or type your text"
-        text=""
-        hasText={false}
-        onTextInput={() => {}}
-      />
-    ));
+    render(() => <UploadTextPanel text="" onTextInput={() => {}} />);
 
     expect(screen.getByText('TEXT / SNIPPET')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Paste or type your text')).toBeInTheDocument();
@@ -115,15 +72,7 @@ describe('UploadTextPanel', () => {
 
   it('forwards text input', () => {
     const onTextInput = vi.fn();
-    render(() => (
-      <UploadTextPanel
-        label="TEXT"
-        placeholder="Paste or type your text"
-        text=""
-        hasText={false}
-        onTextInput={onTextInput}
-      />
-    ));
+    render(() => <UploadTextPanel text="" onTextInput={onTextInput} />);
 
     fireEvent.input(screen.getByPlaceholderText('Paste or type your text'), { target: { value: 'hello' } });
 
@@ -131,15 +80,7 @@ describe('UploadTextPanel', () => {
   });
 
   it('highlights the textarea when it has text', () => {
-    render(() => (
-      <UploadTextPanel
-        label="TEXT"
-        placeholder="Paste or type your text"
-        text="filled"
-        hasText={true}
-        onTextInput={() => {}}
-      />
-    ));
+    render(() => <UploadTextPanel text="filled" onTextInput={() => {}} />);
 
     expect(screen.getByPlaceholderText('Paste or type your text').className).toContain('border-ink/30');
   });
@@ -153,8 +94,6 @@ describe('UploadMetadataFields', () => {
       <UploadMetadataFields
         title=""
         description=""
-        titlePlaceholder="Title (optional)"
-        descriptionPlaceholder="Description (optional)"
         onTitleInput={onTitleInput}
         onDescriptionInput={onDescriptionInput}
       />

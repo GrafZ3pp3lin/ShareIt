@@ -1,46 +1,41 @@
 import { clsx } from 'clsx/lite';
 import { Show, onSettled } from 'solid-js';
 import IconUpload from '~icons/lucide/upload';
+import { useI18n } from '../../../i18n/i18n.tsx';
 
 type UploadMetadataFieldsProps = {
   title: string;
   description: string;
-  titlePlaceholder: string;
-  descriptionPlaceholder: string;
   onTitleInput: (value: string) => void;
   onDescriptionInput: (value: string) => void;
 };
 
 type UploadFilePanelProps = {
-  label: string;
-  promptLabel: string;
-  selectedLabel: string;
   files: File[];
   onFilesChange: (files: File[]) => void;
 };
 
 type UploadTextPanelProps = {
-  label: string;
-  placeholder: string;
   text: string;
-  hasText: boolean;
   onTextInput: (value: string) => void;
 };
 
 export function UploadMetadataFields(props: UploadMetadataFieldsProps) {
+  const { t } = useI18n();
+
   return (
     <>
       <input
         class="text-field"
         type="text"
-        placeholder={props.titlePlaceholder}
+        placeholder={t('upload.placeholders.title')}
         value={props.title}
         onInput={(event) => props.onTitleInput(event.currentTarget.value)}
       />
       <input
         class="text-field"
         type="text"
-        placeholder={props.descriptionPlaceholder}
+        placeholder={t('upload.placeholders.description')}
         value={props.description}
         onInput={(event) => props.onDescriptionInput(event.currentTarget.value)}
       />
@@ -49,6 +44,8 @@ export function UploadMetadataFields(props: UploadMetadataFieldsProps) {
 }
 
 export function UploadFilePanel(props: UploadFilePanelProps) {
+  const { t } = useI18n();
+
   onSettled(() => {
     const preventDocumentDrop = (event: DragEvent) => event.preventDefault();
     document.addEventListener('dragover', preventDocumentDrop);
@@ -82,7 +79,7 @@ export function UploadFilePanel(props: UploadFilePanelProps) {
 
   return (
     <div class="flex flex-col">
-      <div class="mb-3.5 font-mono text-xs text-muted">{props.label}</div>
+      <div class="mb-3.5 font-mono text-xs text-muted">{t('upload.panels.fileLabel')}</div>
       <label
         class={clsx(
           'grid h-full min-h-28 flex-1 cursor-pointer place-items-center rounded-xl border border-dashed border-border-soft bg-panel-soft/75 p-4 py-8 text-center text-sm text-muted transition hover:border-ink/30 focus-within:ring-2 focus-within:ring-ink/25',
@@ -103,7 +100,7 @@ export function UploadFilePanel(props: UploadFilePanelProps) {
           class="sr-only"
           type="file"
           multiple
-          aria-label={props.label}
+          aria-label={t('upload.panels.fileLabel')}
           onChange={(event) => {
             appendFiles(Array.from(event.currentTarget.files ?? []));
             event.currentTarget.value = '';
@@ -114,8 +111,8 @@ export function UploadFilePanel(props: UploadFilePanelProps) {
             <IconUpload class="h-4 w-4 text-muted" />
           </div>
           <div class="text-sm font-medium text-ink">
-            <Show when={props.files.length > 0} fallback={props.promptLabel}>
-              {props.selectedLabel}
+            <Show when={props.files.length > 0} fallback={t('upload.filePanel.prompt')}>
+              {t('upload.filePanel.selected', { count: props.files.length })}
             </Show>
           </div>
         </div>
@@ -125,15 +122,18 @@ export function UploadFilePanel(props: UploadFilePanelProps) {
 }
 
 export function UploadTextPanel(props: UploadTextPanelProps) {
+  const { t } = useI18n();
+  const hasText = () => props.text.trim().length > 0;
+
   return (
     <div class="flex flex-col">
-      <div class="mb-3.5 font-mono text-xs text-muted">{props.label}</div>
+      <div class="mb-3.5 font-mono text-xs text-muted">{t('upload.panels.textLabel')}</div>
       <textarea
         class={clsx(
           'flex-1 w-full resize-none overflow-y-auto rounded-xl border border-border-soft bg-panel-soft/45 p-3 text-sm font-sans text-ink placeholder:text-muted/80 transition focus:border-ink/30 focus:bg-panel focus:outline-none',
-          props.hasText && 'border-ink/30 bg-panel'
+          hasText() && 'border-ink/30 bg-panel'
         )}
-        placeholder={props.placeholder}
+        placeholder={t('upload.placeholders.text')}
         value={props.text}
         onInput={(event) => props.onTextInput(event.currentTarget.value)}
       />
