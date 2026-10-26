@@ -20,14 +20,14 @@
   "dependencies": {
     "@solid-primitives/i18n": "3.0.0-next.6",
     "@solidjs/router": "2.0.0-next.42",
-    "@solidjs/web": "2.0.0-rc.17",
+    "@solidjs/web": "2.0.0-rc.18",
     "clsx": "2.1.1",
     "oidc-client-ts": "3.5.0",
-    "solid-js": "2.0.0-rc.17"
+    "solid-js": "2.0.0-rc.18"
   },
   "devDependencies": {
     "@iconify-json/lucide": "1.2.147",
-    "@solidjs/h": "2.0.0-rc.17",
+    "@solidjs/h": "2.0.0-rc.18",
     "@solidjs/testing-library": "1.0.0-rc.2",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/jest-dom": "7.0.1",
@@ -35,7 +35,7 @@
     "@vitest/browser-playwright": "5.0.5",
     "@vitest/ui": "5.0.5",
     "happy-dom": "21.0.4",
-    "knip": "6.42.1",
+    "knip": "6.43.0",
     "orval": "^8.44.0",
     "oxfmt": "0.74.0",
     "oxlint": "1.89.0",

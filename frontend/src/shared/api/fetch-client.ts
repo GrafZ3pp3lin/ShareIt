@@ -23,6 +23,7 @@ export const customFetch = async <T>(url: string, options: RequestInit = {}): Pr
 
   // The generic is supplied by each generated call site; the literal response shape
   // satisfies every generated `{ data, status, headers }` response union.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   return { data: body, status: response.status, headers: response.headers } as T;
 };
 
