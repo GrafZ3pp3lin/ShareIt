@@ -8,6 +8,7 @@
     "dev": "vite",
     "test": "vitest",
     "test:ui": "vitest --ui",
+    "verify": "pnpm lint && tsc -b && pnpm format:check && pnpm test -- --run && pnpm knip",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "oxlint",
