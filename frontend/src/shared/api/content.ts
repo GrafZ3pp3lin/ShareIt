@@ -9,7 +9,7 @@ import type {
   ContentPackageResponse,
   CreatePackageRequest
 } from '../../client/model/index.ts';
-import { getAuthHeaders } from './fetch-client.ts';
+import { getAuthHeaders, absoluteApiUrl } from './fetch-client.ts';
 import { getRuntimeConfig } from '../config/runtime-config.ts';
 
 export type ApiResult<T> = {
@@ -62,7 +62,8 @@ export async function uploadFile(
   onProgress?: UploadProgressCallback,
   signal?: AbortSignal
 ): Promise<UploadFileResult> {
-  const headers = await getAuthHeaders();
+  const uploadUrl = absoluteApiUrl(`/api/v1/content/package/${packageId}/upload`);
+  const headers = await getAuthHeaders(uploadUrl, 'POST');
   const baseUrl = getRuntimeConfig().apiBaseUrl;
 
   return new Promise((resolve) => {

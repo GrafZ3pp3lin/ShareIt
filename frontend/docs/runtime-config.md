@@ -24,6 +24,7 @@ Priority order:
 - `AuthRedirectUri`
 - `AuthPostLogoutRedirectUri`
 - `AuthScope`
+- `AuthDpop` (`true`/`false`, default `true`) — enable DPoP (RFC 9449) sender-constrained tokens: tokens are bound to a client key pair stored in IndexedDB and API requests carry one-time `DPoP` proofs. Disabling is only needed for environments whose Keycloak version cannot handle DPoP-bound tokens (< 26.4).
 
 ## Deployment pattern
 

@@ -1,16 +1,16 @@
 import { getRuntimeConfig } from '../config/runtime-config.ts';
-import { getAuthToken } from '../auth/oidc.ts';
+import { getAuthToken, getDpopAuthHeaders } from '../auth/oidc.ts';
 import { getGuestId } from './guest.ts';
 
 /**
  * Orval mutator (fetch client). Adds the runtime-configured base URL and the
- * identity headers (OIDC bearer token or persisted guest ID), then returns the
- * generated `{ data, status, headers }` response shape.
+ * identity headers (OIDC DPoP/bearer token or persisted guest ID), then returns
+ * the generated `{ data, status, headers }` response shape.
  */
 export const customFetch = async <T>(url: string, options: RequestInit = {}): Promise<T> => {
   const headers = new Headers(options.headers);
   if (!headers.has('Authorization') && !headers.has('X-Guest-ID')) {
-    for (const [name, value] of Object.entries(await getAuthHeaders())) {
+    for (const [name, value] of Object.entries(await getAuthHeaders(absoluteApiUrl(url), options.method ?? 'GET'))) {
       headers.set(name, value);
     }
   }
@@ -43,10 +43,29 @@ const parseBody = async (response: Response): Promise<unknown> => {
 };
 
 /**
- * Returns the identity headers to send with API requests: an OIDC bearer token
- * when authenticated, otherwise the persisted guest ID.
+ * Builds the absolute API URL for a generated-client path, stripped of query
+ * and fragment. DPoP proofs bind `htu` to exactly this canonical form
+ * (RFC 9449: scheme, authority and path only).
  */
-export const getAuthHeaders = async (): Promise<Record<string, string>> => {
+export const absoluteApiUrl = (url: string): string => {
+  const path = url.split(/[?#]/, 1)[0];
+  return `${getRuntimeConfig().apiBaseUrl}${path}`;
+};
+
+/**
+ * Returns the identity headers to send with API requests. When a target URL is
+ * given, DPoP headers are preferred for authenticated requests (falling back to
+ * a plain bearer token when DPoP is disabled or no proof could be generated);
+ * otherwise the persisted guest ID is sent, keeping uploads working anonymously.
+ */
+export const getAuthHeaders = async (url?: string, method: string = 'GET'): Promise<Record<string, string>> => {
+  if (url) {
+    const dpopHeaders = await getDpopAuthHeaders(url, method);
+    if (Object.keys(dpopHeaders).length > 0) {
+      return dpopHeaders;
+    }
+  }
+
   const headers: Record<string, string> = {};
   const authToken = await getAuthToken();
   if (authToken) {

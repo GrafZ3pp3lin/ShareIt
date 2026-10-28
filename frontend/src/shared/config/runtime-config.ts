@@ -5,6 +5,7 @@ type RuntimeEnv = {
   AuthRedirectUri?: string;
   AuthPostLogoutRedirectUri?: string;
   AuthScope?: string;
+  AuthDpop?: string | boolean;
 };
 
 declare global {
@@ -19,6 +20,7 @@ type RuntimeConfig = {
   authRedirectUri?: string;
   authPostLogoutRedirectUri?: string;
   authScope?: string;
+  authDpop: boolean;
 };
 
 type ViteEnvKey =
@@ -27,7 +29,8 @@ type ViteEnvKey =
   | 'VITE_OIDC_CLIENT_ID'
   | 'VITE_OIDC_REDIRECT_URI'
   | 'VITE_OIDC_POST_LOGOUT_REDIRECT_URI'
-  | 'VITE_OIDC_SCOPE';
+  | 'VITE_OIDC_SCOPE'
+  | 'VITE_OIDC_DPOP';
 
 const normalize = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -54,6 +57,16 @@ const readConfigValue = (runtimeValue: string | undefined, viteKey: ViteEnvKey):
   return normalize(runtimeValue) ?? readViteEnv(viteKey);
 };
 
+const readFlag = (value: string | boolean | undefined): boolean => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (value === undefined) {
+    return true;
+  }
+  return normalize(value)?.toLowerCase() === 'true';
+};
+
 const createRuntimeConfig = (): RuntimeConfig => {
   const runtimeEnv = readRuntimeEnv();
 
@@ -66,7 +79,8 @@ const createRuntimeConfig = (): RuntimeConfig => {
       runtimeEnv.AuthPostLogoutRedirectUri,
       'VITE_OIDC_POST_LOGOUT_REDIRECT_URI'
     ),
-    authScope: readConfigValue(runtimeEnv.AuthScope, 'VITE_OIDC_SCOPE')
+    authScope: readConfigValue(runtimeEnv.AuthScope, 'VITE_OIDC_SCOPE'),
+    authDpop: readFlag(runtimeEnv.AuthDpop ?? import.meta.env.VITE_OIDC_DPOP)
   };
 };
 

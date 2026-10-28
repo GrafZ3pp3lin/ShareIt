@@ -11,6 +11,8 @@ using kroet.ShareIt.Api.Storage.Extensions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 
@@ -38,6 +40,19 @@ try
     // instead of letting them escape as bare server responses.
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+    // The API runs behind Traefik, which terminates TLS. Without this, Kestrel
+    // sees http as the request scheme/host — which breaks DPoP's htu
+    // comparison (RFC 9449: the proof binds scheme, authority and path).
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders =
+            ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+        // Traefik is the only entrypoint (docker/private network), so trust it
+        // regardless of its address.
+        options.KnownNetworks.Clear();
+        options.KnownProxies.Clear();
+    });
 
     // Upload size limits (also enforced per-file in the content endpoints)
     builder.Services.AddOptions<UploadSettings>()
@@ -95,6 +110,8 @@ try
     if (!string.IsNullOrEmpty(authAuthority))
     {
         var authAudience = configuration["Auth:Audience"];
+        builder.Services.AddOptions<DpopSettings>().BindConfiguration(DpopSettings.SectionName);
+        builder.Services.AddSingleton<DpopProofValidator>();
         builder.Services.AddAuthentication().AddJwtBearer(options =>
         {
             options.Authority = authAuthority;
@@ -105,6 +122,69 @@ try
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateAudience = !string.IsNullOrEmpty(authAudience)
+            };
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    // DPoP-bound tokens use the DPoP authorization scheme instead
+                    // of Bearer (RFC 9449 §7.1); accept both.
+                    var authorization = context.Request.Headers.Authorization.ToString();
+                    if (authorization.StartsWith("DPoP ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        context.Token = authorization["DPoP ".Length..].Trim();
+                    }
+
+                    return Task.CompletedTask;
+                },
+                OnTokenValidated = async context =>
+                {
+                    // DPoP proof validation (RFC 9449 §7.2): tokens bound to a
+                    // client key (cnf.jkt) require a fresh, single-use proof that
+                    // covers the token, method and URI. Plain bearer tokens pass
+                    // while Auth:Dpop:Required is false.
+                    var authorization = context.Request.Headers.Authorization.ToString();
+                    var separator = authorization.IndexOf(' ');
+                    if (separator <= 0)
+                    {
+                        context.Fail("Malformed Authorization header.");
+                        return;
+                    }
+
+                    var validator = context.HttpContext.RequestServices.GetRequiredService<DpopProofValidator>();
+                    var result = await validator.ValidateAsync(
+                        context.Request.Headers["DPoP"].ToString(),
+                        authorization[(separator + 1)..].Trim(),
+                        context.Principal?.FindFirst("cnf")?.Value,
+                        context.Request);
+                    if (!result.Succeeded)
+                    {
+                        context.HttpContext.Items[DpopProofValidator.DpopErrorItemKey] = result.ErrorCode;
+                        context.Fail(result.ErrorDescription ?? "DPoP validation failed.");
+                    }
+                },
+                OnChallenge = context =>
+                {
+                    // With Auth:Dpop:Required, DPoP is the only accepted scheme,
+                    // so challenges advertise DPoP (RFC 9449 §7.1) instead of the
+                    // JWT bearer handler's default Bearer challenge, whose error
+                    // details would otherwise be attached to the wrong scheme.
+                    var dpopSettings = context.HttpContext.RequestServices
+                        .GetRequiredService<IOptions<DpopSettings>>().Value;
+                    if (!dpopSettings.Required)
+                    {
+                        return Task.CompletedTask;
+                    }
+
+                    var errorCode = context.HttpContext.Items.TryGetValue(DpopProofValidator.DpopErrorItemKey, out var value)
+                        ? value as string ?? "invalid_dpop_proof"
+                        : "invalid_token";
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    context.Response.Headers.WWWAuthenticate =
+                        DpopProofValidator.BuildChallenge(errorCode, context.AuthenticateFailure?.Message);
+                    context.HandleResponse();
+                    return Task.CompletedTask;
+                }
             };
         });
 
@@ -130,7 +210,9 @@ try
     builder.Services.AddOpenApi();
 
     var app = builder.Build();
-    
+
+    app.UseForwardedHeaders();
+
     app.UseSerilogRequestLogging();
     
     var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
