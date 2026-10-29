@@ -4,7 +4,7 @@ using Testcontainers.PostgreSql;
 
 namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 
-internal sealed class PostgresIntegrationDatabase : IAsyncDisposable
+public sealed class PostgresIntegrationDatabase : IAsyncDisposable
 {
     private readonly PostgreSqlContainer _container;
 

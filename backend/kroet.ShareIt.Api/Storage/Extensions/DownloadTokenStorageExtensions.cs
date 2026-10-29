@@ -19,7 +19,7 @@ public static class DownloadTokenStorageExtensions
             {
                 services.AddSqlDownloadTokenStorage();
             }
-            if (configuration.GetSection(InMemoryContentStorageSettings.SectionName).Exists())
+            else if (configuration.GetSection(InMemoryContentStorageSettings.SectionName).Exists())
             {
                 services.AddInMemoryDownloadTokenStorage();
             }

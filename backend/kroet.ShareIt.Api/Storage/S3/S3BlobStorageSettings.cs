@@ -6,28 +6,32 @@ namespace kroet.ShareIt.Api.Storage.S3;
 /// <summary>
 /// Configuration settings for AWS S3 Blob Storage.
 /// </summary>
+/// <remarks>
+/// Properties use setters (not init-only setters): the source-generated
+/// configuration binder does not populate init-only properties.
+/// </remarks>
 public class S3BlobStorageSettings : ISettings
 {
     /// <summary>
     /// AWS Access Key ID for authentication.
     /// </summary>
-    public required string AccessKeyId { get; init; }
+    public string AccessKeyId { get; set; } = string.Empty;
     
     /// <summary>
     /// AWS Secret Access Key for authentication.
     /// </summary>
-    public required string SecretAccessKey { get; init; }
+    public string SecretAccessKey { get; set; } = string.Empty;
     
     /// <summary>
     /// Service URL for S3-compatible storage (e.g., MinIO, Wasabi).
     /// </summary>
-    public required string ServiceUrl { get; init; }
+    public string ServiceUrl { get; set; } = string.Empty;
     
     /// <summary>
     /// Name of the S3 bucket to store files.
     /// Default: "content-files"
     /// </summary>
-    public string BucketName { get; init; } = "content-files";
+    public string BucketName { get; set; } = "content-files";
 
     public static string SectionName => "BlobStorage:S3";
 }

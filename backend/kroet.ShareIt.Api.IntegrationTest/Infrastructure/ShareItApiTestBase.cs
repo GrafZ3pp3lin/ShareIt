@@ -3,46 +3,93 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Amazon.S3;
+using Amazon.S3.Model;
+using Dapper;
 using kroet.ShareIt.Api.Content.Dtos;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 
 /// <summary>
-/// Shared plumbing for endpoint tests. Every test method gets a fresh, fully
-/// isolated API instance (its own in-memory storage) so tests cannot see
-/// each other's packages.
+/// Shared plumbing for endpoint tests. Every test method gets a fresh API
+/// instance backed by the real Postgres and RustFS containers, with the
+/// database reset and a unique S3 bucket per test so tests are isolated.
 /// </summary>
 public abstract class ShareItApiTestBase
 {
     protected static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private ShareItApiFactory _factory = null!;
+    private AmazonS3Client _s3Client = null!;
 
     protected HttpClient Client { get; private set; } = null!;
+
+    protected string BucketName { get; private set; } = null!;
+
+    protected MutableTimeProvider TimeProvider { get; private set; } = null!;
+
+    protected PostgresIntegrationDatabase Database => EndpointTestStorage.Database;
+
+    protected AmazonS3Client S3Client => _s3Client;
+
+    protected IServiceProvider Services => _factory.Services;
 
     /// <summary>
     /// Configuration overrides applied on top of the application defaults.
     /// </summary>
     protected virtual IReadOnlyDictionary<string, string?> Settings => new Dictionary<string, string?>();
 
+    /// <summary>
+    /// Optional service overrides applied after the real storage registrations.
+    /// </summary>
+    protected virtual Action<IServiceCollection>? ConfigureTestServices => null;
+
     [TestInitialize]
-    public void StartApplication()
+    public async Task StartApplication()
     {
-        _factory = new ShareItApiFactory(Settings);
+        await EndpointTestStorage.EnsureStartedAsync();
+        await EndpointTestStorage.ResetDatabaseAsync();
+
+        BucketName = $"shareit-e2e-{Guid.NewGuid():N}";
+        TimeProvider = new MutableTimeProvider(DateTimeOffset.UtcNow);
+
+        var settings = new Dictionary<string, string?>(Settings)
+        {
+            ["ContentStorage:PostgreSqlDb:ConnectionString"] = Database.ConnectionString,
+            ["ContentStorage:PostgreSqlDb:AutoInitializeSchema"] = "false",
+            ["BlobStorage:S3:AccessKeyId"] = EndpointTestStorage.RustFs.AccessKeyId,
+            ["BlobStorage:S3:SecretAccessKey"] = EndpointTestStorage.RustFs.SecretAccessKey,
+            ["BlobStorage:S3:ServiceUrl"] = EndpointTestStorage.RustFs.ServiceUrl,
+            ["BlobStorage:S3:BucketName"] = BucketName
+        };
+
+        _factory = new ShareItApiFactory(
+            settings,
+            useInMemoryStorage: false,
+            configureTestServices: services =>
+            {
+                services.AddSingleton<TimeProvider>(TimeProvider);
+                ConfigureTestServices?.Invoke(services);
+            });
+
         Client = _factory.CreateClient();
+        _s3Client = EndpointTestStorage.RustFs.CreateClient();
     }
 
     [TestCleanup]
     public void StopApplication()
     {
-        Client.Dispose();
-        _factory.Dispose();
+        Client?.Dispose();
+        _factory?.Dispose();
+        _s3Client?.Dispose();
     }
 
     /// <summary>
     /// Sends a multipart POST to the package creation endpoint.
     /// </summary>
-    protected Task<HttpResponseMessage> SendCreatePackageAsync(
+    protected async Task<HttpResponseMessage> SendCreatePackageAsync(
         byte[]? fileBytes = null,
         string fileName = "hello.txt",
         string? title = null,
@@ -50,9 +97,11 @@ public abstract class ShareItApiTestBase
         bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
-        int? timeToLiveHours = 1)
+        int? timeToLiveHours = 1,
+        string[]? texts = null,
+        (byte[] Bytes, string FileName)[]? files = null)
     {
-        var form = new MultipartFormDataContent();
+        using var form = new MultipartFormDataContent();
         if (title is not null)
         {
             form.Add(new StringContent(title), "Title");
@@ -69,16 +118,24 @@ public abstract class ShareItApiTestBase
         {
             form.Add(new StringContent(timeToLiveHours.Value.ToString()), "TimeToLiveHours");
         }
-        if (fileBytes is not null)
+        if (texts is not null)
         {
-            var fileContent = new ByteArrayContent(fileBytes);
+            foreach (var text in texts)
+            {
+                form.Add(new StringContent(text), "Texts");
+            }
+        }
+
+        foreach (var file in files ?? (fileBytes is null ? [] : [(fileBytes, fileName)]))
+        {
+            var fileContent = new ByteArrayContent(file.Bytes);
             fileContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
-            form.Add(fileContent, "Files", fileName);
+            form.Add(fileContent, "Files", file.FileName);
         }
 
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package") { Content = form };
         AddIdentity(request, guestId, userId);
-        return Client.SendAsync(request);
+        return await Client.SendAsync(request);
     }
 
     /// <summary>
@@ -93,9 +150,12 @@ public abstract class ShareItApiTestBase
         bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
-        int? timeToLiveHours = 1)
+        int? timeToLiveHours = 1,
+        string[]? texts = null,
+        (byte[] Bytes, string FileName)[]? files = null)
     {
-        var response = await SendCreatePackageAsync(fileBytes, fileName, title, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours);
+        var response = await SendCreatePackageAsync(
+            fileBytes, fileName, title, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours, texts, files);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
@@ -112,15 +172,47 @@ public abstract class ShareItApiTestBase
         string fileName = "hello.txt",
         Guid? guestId = null,
         Guid? userId = null)
+        => SendUploadFilesAsync(packageId, [(fileBytes, fileName)], guestId, userId);
+
+    /// <summary>
+    /// Sends a multipart POST of one or more files to an existing package.
+    /// </summary>
+    protected async Task<HttpResponseMessage> SendUploadFilesAsync(
+        Guid packageId,
+        (byte[] Bytes, string FileName)[] files,
+        Guid? guestId = null,
+        Guid? userId = null)
     {
-        var form = new MultipartFormDataContent();
-        var fileContent = new ByteArrayContent(fileBytes);
-        fileContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
-        form.Add(fileContent, "files", fileName);
+        using var form = new MultipartFormDataContent();
+        foreach (var file in files)
+        {
+            var fileContent = new ByteArrayContent(file.Bytes);
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+            form.Add(fileContent, "files", file.FileName);
+        }
 
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload") { Content = form };
         AddIdentity(request, guestId, userId);
-        return Client.SendAsync(request);
+        return await Client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Sends a multipart POST without any file parts to exercise the
+    /// "no files provided" endpoint branch.
+    /// </summary>
+    protected async Task<HttpResponseMessage> SendUploadWithoutFilesAsync(
+        Guid packageId,
+        Guid? guestId = null,
+        Guid? userId = null)
+    {
+        using var form = new MultipartFormDataContent
+        {
+            { new StringContent("noop"), "Dummy" }
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload") { Content = form };
+        AddIdentity(request, guestId, userId);
+        return await Client.SendAsync(request);
     }
 
     protected Task<HttpResponseMessage> SendAddTextAsync(Guid packageId, string text, Guid? guestId = null, Guid? userId = null)
@@ -155,11 +247,17 @@ public abstract class ShareItApiTestBase
     /// <summary>
     /// Fetches a content item via its download token.
     /// </summary>
-    protected Task<HttpResponseMessage> SendDownloadAsync(string downloadUrl, string token, Guid guestId)
+    protected Task<HttpResponseMessage> SendDownloadAsync(string downloadUrl, string? token, Guid? guestId)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
-        request.Headers.Add("X-File-Token", token);
-        request.Headers.Add("X-Guest-ID", guestId.ToString());
+        if (token is not null)
+        {
+            request.Headers.Add("X-File-Token", token);
+        }
+        if (guestId.HasValue)
+        {
+            request.Headers.Add("X-Guest-ID", guestId.Value.ToString());
+        }
         return Client.SendAsync(request);
     }
 
@@ -168,6 +266,29 @@ public abstract class ShareItApiTestBase
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/content/packages/{packageId}");
         AddIdentity(request, guestId, userId);
         return Client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Counts all objects in the test's RustFS bucket.
+    /// </summary>
+    protected async Task<int> CountStoredObjectsAsync()
+    {
+        var response = await S3Client.ListObjectsV2Async(new ListObjectsV2Request { BucketName = BucketName });
+        return response.S3Objects?.Count ?? 0;
+    }
+
+    /// <summary>
+    /// Reads package/content row counts directly from the real Postgres database.
+    /// </summary>
+    protected async Task<(int PackageCount, int ContentCount)> GetDatabaseCountsAsync()
+    {
+        await using var connection = new NpgsqlConnection(Database.ConnectionString);
+        await connection.OpenAsync();
+
+        var packageCount = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM content_packages");
+        var contentCount = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM contents");
+
+        return (packageCount, contentCount);
     }
 
     protected static void AddIdentity(HttpRequestMessage request, Guid? guestId, Guid? userId)

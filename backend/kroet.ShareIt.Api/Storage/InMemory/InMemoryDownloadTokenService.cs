@@ -49,7 +49,7 @@ public class InMemoryDownloadTokenService : IDownloadTokenService
             return Task.FromResult(new TokenValidationResult(false, null, "Token does not belong to the client"));
         }
 
-        if (tokenEntry.ExpiresAt < DateTimeOffset.UtcNow)
+        if (tokenEntry.ExpiresAt < _timeProvider.GetUtcNow())
         {
             _tokens.Remove(tokenEntry.Id);
             return Task.FromResult(new TokenValidationResult(false, null, "Token has expired"));

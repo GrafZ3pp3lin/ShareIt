@@ -61,6 +61,30 @@ public class StorageHandlerTests
     }
 
     [TestMethod]
+    public async Task StoreContentAsync_RethrowsOriginalWhenBlobCleanupAlsoFails()
+    {
+        var subject = CreateSubject();
+        var content = CreateContent();
+        await using var stream = new MemoryStream([1, 2, 3]);
+
+        _blobStorageHandler
+            .UploadAsync(stream, content.MimeType, content.FileName, Arg.Any<CancellationToken>())
+            .Returns("blob://content");
+        _contentStorageHandler
+            .StoreContentAsync(Arg.Any<ExternalContent>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new InvalidOperationException("metadata failed"));
+        _blobStorageHandler
+            .DeleteAsync("blob://content", Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<bool>(new InvalidOperationException("cleanup failed")));
+
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => subject.StoreContentAsync(content, stream));
+
+        Assert.AreEqual("metadata failed", exception.Message);
+        await _blobStorageHandler.Received(1).DeleteAsync("blob://content", Arg.Any<CancellationToken>());
+    }
+
+    [TestMethod]
     public async Task DeleteContentAsync_ReturnsFalseWhenContentDoesNotExist()
     {
         var subject = CreateSubject();

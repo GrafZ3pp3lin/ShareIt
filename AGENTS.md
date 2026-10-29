@@ -8,8 +8,8 @@
 - Prefer native browser elements for UI primitives where possible.
 
 ### Backend (.NET)
-- Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`). They select the in-memory storage implementations purely via configuration and authenticate via the `X-Test-User` header (see `Infrastructure/ShareItApiFactory.cs`); no S3/Postgres/identity provider is needed.
-- The Postgres integration tests additionally require a running Docker daemon (Testcontainers).
+- Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`) against the real PostgreSQL and RustFS containers. They share those containers, reset the database per test, and use a unique S3 bucket per test; authentication is provided by the `X-Test-User` header (see `Infrastructure/ShareItApiTestBase.cs`).
+- The endpoint, Postgres, and S3 integration tests require a running Docker daemon (Testcontainers). The S3 tests use a RustFS container.
 
 ## Code Style Guidelines
 

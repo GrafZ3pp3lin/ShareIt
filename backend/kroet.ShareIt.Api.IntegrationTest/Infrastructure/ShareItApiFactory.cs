@@ -9,11 +9,11 @@ using Microsoft.Extensions.Hosting;
 namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 
 /// <summary>
-/// Boots the real API entry point (Program) on the in-memory test server with:
-/// - in-memory storage for content, blobs and download tokens (no S3/Postgres required),
+/// Boots the real API entry point (Program) on the test server with:
+/// - either in-memory storage or caller-provided real storage configuration,
 /// - a background cleanup interval long enough to never fire during a test run,
 /// - the test authentication scheme driven by the X-Test-User header,
-/// - optional per-test-configuration overrides.
+/// - optional per-test configuration and service overrides.
 /// </summary>
 /// <remarks>
 /// Configuration overrides are injected through <see cref="CreateHost"/> /
@@ -22,13 +22,19 @@ namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 /// to influence <c>WebApplicationBuilder.Configuration</c> that Program.cs
 /// consults while wiring storage (dotnet/aspnetcore#33876).
 /// </remarks>
-public sealed class ShareItApiFactory(IReadOnlyDictionary<string, string?>? settings = null)
+public sealed class ShareItApiFactory(
+    IReadOnlyDictionary<string, string?>? settings = null,
+    bool useInMemoryStorage = true,
+    Action<IServiceCollection>? configureTestServices = null)
     : WebApplicationFactory<Program>
 {
     private readonly IReadOnlyDictionary<string, string?> _settings = settings ?? new Dictionary<string, string?>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Keep tests independent of local appsettings.{Environment}.json files.
+        builder.UseEnvironment("Testing");
+
         builder.ConfigureTestServices(services =>
         {
             services.AddAuthentication(options =>
@@ -36,6 +42,8 @@ public sealed class ShareItApiFactory(IReadOnlyDictionary<string, string?>? sett
                 options.DefaultScheme = TestAuthHandler.SchemeName;
                 options.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
             }).AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
+
+            configureTestServices?.Invoke(services);
         });
     }
 
@@ -43,14 +51,16 @@ public sealed class ShareItApiFactory(IReadOnlyDictionary<string, string?>? sett
     {
         var overrides = new Dictionary<string, string?>
         {
-            // Select the in-memory storage implementations for every storage concern.
-            ["ContentStorage:InMemory:Enabled"] = "true",
-            ["BlobStorage:InMemory:Enabled"] = "true",
-
-            // The cleanup service would wipe all packages on its first tick
-            // (in-memory storage reports every package as deletable).
+            // The cleanup service would wipe all packages on its first tick.
             ["CleanupSettings:CleanupIntervalMinutes"] = "10080",
         };
+
+        if (useInMemoryStorage)
+        {
+            // Select the in-memory storage implementations for every storage concern.
+            overrides["ContentStorage:InMemory:Enabled"] = "true";
+            overrides["BlobStorage:InMemory:Enabled"] = "true";
+        }
 
         foreach (var (key, value) in _settings)
         {

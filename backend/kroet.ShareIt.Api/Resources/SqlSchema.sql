@@ -7,12 +7,16 @@ CREATE TABLE IF NOT EXISTS content_packages (
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     user_id UUID,
+    is_private BOOLEAN,
     max_download_count INT,
     current_download_count INT NOT NULL DEFAULT 0,
     expires_at TIMESTAMPTZ,
     CONSTRAINT chk_download_count CHECK (current_download_count >= 0),
     CONSTRAINT chk_max_download_count CHECK (max_download_count IS NULL OR max_download_count > 0)
 );
+
+-- Upgrade databases created before the is_private column existed.
+ALTER TABLE content_packages ADD COLUMN IF NOT EXISTS is_private BOOLEAN;
 
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_packages_user_id ON content_packages(user_id);

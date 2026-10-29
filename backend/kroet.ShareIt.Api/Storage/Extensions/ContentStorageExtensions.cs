@@ -2,6 +2,7 @@
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Storage.InMemory;
 using kroet.ShareIt.Api.Storage.Postgres;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace kroet.ShareIt.Api.Storage.Extensions;
@@ -76,7 +77,7 @@ public static class ContentStorageExtensions
         /// </summary>
         private async Task InitializePostgresPackageStorageAsync()
         {
-            var settings = app.Services.GetRequiredService<SqlStorageSettings>();
+            var settings = app.Services.GetRequiredService<IOptions<SqlStorageSettings>>().Value;
             var logger = app.Services.GetRequiredService<ILogger<Program>>();
             if (!settings.AutoInitializeSchema)
             {

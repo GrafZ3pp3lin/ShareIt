@@ -16,6 +16,7 @@ public class PostgresStorageIntegrationTests
 
     private SqlContentStorageHandler _contentStorageHandler = null!;
     private SqlDownloadTokenService _downloadTokenService = null!;
+    private MutableTimeProvider _timeProvider = null!;
 
     [ClassInitialize]
     public static async Task ClassInitialize(TestContext _)
@@ -48,18 +49,19 @@ public class PostgresStorageIntegrationTests
             UsedTokenRetentionHours = 24
         });
 
+        _timeProvider = new MutableTimeProvider(DateTimeOffset.UtcNow);
         _contentStorageHandler = new SqlContentStorageHandler(sqlSettings, NullLogger<SqlContentStorageHandler>.Instance);
         _downloadTokenService = new SqlDownloadTokenService(
             sqlSettings,
             downloadSettings,
-            TimeProvider.System,
+            _timeProvider,
             NullLogger<SqlDownloadTokenService>.Instance);
     }
 
     [TestMethod]
     public async Task StorePackageAsync_AndGetPackageAsync_RoundTripsPackageWithContent()
     {
-        var package = CreatePackage(maxDownloadCount: 3);
+        var package = CreatePackage(maxDownloadCount: 3, isPrivate: true);
         var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
 
         await _contentStorageHandler.StorePackageAsync(package);
@@ -71,6 +73,7 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual(package.Id, storedPackage.Id);
         Assert.AreEqual(package.Title, storedPackage.Title);
         Assert.AreEqual(package.MaxDownloadCount, storedPackage.MaxDownloadCount);
+        Assert.AreEqual(package.IsPrivate, storedPackage.IsPrivate);
         Assert.IsNotNull(storedPackage.Contents);
         Assert.HasCount(1, storedPackage.Contents);
         Assert.AreEqual(content.Id, storedPackage.Contents[0].Id);
@@ -142,7 +145,144 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual("Token is not valid for this client", validation.ErrorMessage);
     }
 
-    private static ContentPackage CreatePackage(int? maxDownloadCount = null)
+    [TestMethod]
+    public async Task StoreContentsAsync_GetContentsAsync_AndGetPackagesAsync_RoundTripBatch()
+    {
+        var firstPackage = CreatePackage();
+        var secondPackage = CreatePackage();
+        var firstContent = new ExternalContent(CreateContent(firstPackage.Id), "https://blob.example/file-1");
+        var secondContent = new ExternalContent(CreateContent(secondPackage.Id), "https://blob.example/file-2");
+
+        await _contentStorageHandler.StorePackageAsync(firstPackage);
+        await _contentStorageHandler.StorePackageAsync(secondPackage);
+        await _contentStorageHandler.StoreContentsAsync([firstContent, secondContent]);
+        await _contentStorageHandler.StoreContentsAsync([]);
+
+        var contents = await _contentStorageHandler.GetContentsAsync([firstContent.Id, secondContent.Id]);
+        var packagesWithContent = await _contentStorageHandler.GetPackagesAsync(
+            [firstPackage.Id, secondPackage.Id],
+            includeContent: true);
+        var packagesWithoutContent = await _contentStorageHandler.GetPackagesAsync(
+            [firstPackage.Id, secondPackage.Id],
+            includeContent: false);
+        var emptyContents = await _contentStorageHandler.GetContentsAsync([]);
+        var emptyPackages = await _contentStorageHandler.GetPackagesAsync([]);
+
+        Assert.HasCount(2, contents);
+        Assert.HasCount(2, packagesWithContent);
+        Assert.HasCount(1, packagesWithContent.Single(package => package.Id == firstPackage.Id).Contents!);
+        Assert.HasCount(1, packagesWithContent.Single(package => package.Id == secondPackage.Id).Contents!);
+        Assert.HasCount(2, packagesWithoutContent);
+        Assert.IsTrue(packagesWithoutContent.All(package => package.Contents is null));
+        Assert.IsEmpty(emptyContents);
+        Assert.IsEmpty(emptyPackages);
+    }
+
+    [TestMethod]
+    public async Task ExistsPackageAsync_AndExistsContentAsync_ReflectStoredRows()
+    {
+        var package = CreatePackage();
+        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
+
+        await _contentStorageHandler.StorePackageAsync(package);
+        await _contentStorageHandler.StoreContentAsync(content);
+
+        Assert.IsTrue(await _contentStorageHandler.ExistsPackageAsync(package.Id));
+        Assert.IsFalse(await _contentStorageHandler.ExistsPackageAsync(Guid.NewGuid()));
+        Assert.IsTrue(await _contentStorageHandler.ExistsContentAsync(content.Id));
+        Assert.IsFalse(await _contentStorageHandler.ExistsContentAsync(Guid.NewGuid()));
+    }
+
+    [TestMethod]
+    public async Task DeletePackagesAsync_AndDeleteContentsAsync_DeleteOnlyRequestedRows()
+    {
+        var firstPackage = CreatePackage();
+        var secondPackage = CreatePackage();
+        var firstContent = new ExternalContent(CreateContent(firstPackage.Id), "https://blob.example/file-1");
+        var secondContent = new ExternalContent(CreateContent(secondPackage.Id), "https://blob.example/file-2");
+
+        await _contentStorageHandler.StorePackageAsync(firstPackage);
+        await _contentStorageHandler.StorePackageAsync(secondPackage);
+        await _contentStorageHandler.StoreContentsAsync([firstContent, secondContent]);
+
+        Assert.AreEqual(1, await _contentStorageHandler.DeleteContentsAsync([firstContent.Id]));
+        Assert.AreEqual(0, await _contentStorageHandler.DeleteContentsAsync([]));
+        Assert.IsFalse(await _contentStorageHandler.ExistsContentAsync(firstContent.Id));
+        Assert.IsTrue(await _contentStorageHandler.ExistsContentAsync(secondContent.Id));
+
+        Assert.AreEqual(1, await _contentStorageHandler.DeletePackagesAsync([firstPackage.Id]));
+        Assert.AreEqual(0, await _contentStorageHandler.DeletePackagesAsync([]));
+        Assert.IsFalse(await _contentStorageHandler.ExistsPackageAsync(firstPackage.Id));
+        Assert.IsTrue(await _contentStorageHandler.ExistsPackageAsync(secondPackage.Id));
+    }
+
+    [TestMethod]
+    public async Task GetPackagesToDeleteAsync_ReturnsExpiredAndLimitReachedPackages()
+    {
+        var activePackage = CreatePackage();
+        var expiredPackage = CreatePackage(expiresAt: DateTimeOffset.UtcNow.AddHours(-1));
+        var limitedPackage = CreatePackage(maxDownloadCount: 1);
+
+        await _contentStorageHandler.StorePackageAsync(activePackage);
+        await _contentStorageHandler.StorePackageAsync(expiredPackage);
+        await _contentStorageHandler.StorePackageAsync(limitedPackage);
+        await _contentStorageHandler.IncrementPackageAccessCountAsync(limitedPackage.Id);
+
+        var packagesToDelete = await _contentStorageHandler.GetPackagesToDeleteAsync();
+
+        CollectionAssert.AreEquivalent(
+            new[] { expiredPackage.Id, limitedPackage.Id },
+            packagesToDelete.ToArray());
+        Assert.DoesNotContain(activePackage.Id, packagesToDelete);
+    }
+
+    [TestMethod]
+    public async Task ValidateAndConsumeTokenAsync_ReturnsInvalidForUnknownToken()
+    {
+        var result = await _downloadTokenService.ValidateAndConsumeTokenAsync("unknown-token", Guid.NewGuid());
+
+        Assert.IsFalse(result.IsValid);
+        Assert.AreEqual("Invalid token", result.ErrorMessage);
+    }
+
+    [TestMethod]
+    public async Task ValidateAndConsumeTokenAsync_ReturnsInvalidForExpiredToken()
+    {
+        var token = await _downloadTokenService.GenerateTokenAsync(Guid.NewGuid(), Guid.NewGuid());
+
+        _timeProvider.UtcNow = token.ExpiresAt.AddSeconds(1);
+
+        var result = await _downloadTokenService.ValidateAndConsumeTokenAsync(token.Token, token.ClientId);
+
+        Assert.IsFalse(result.IsValid);
+        Assert.AreEqual("Token has expired", result.ErrorMessage);
+    }
+
+    [TestMethod]
+    public async Task CleanupExpiredTokensAsync_RemovesOnlyExpiredTokens()
+    {
+        var clientId = Guid.NewGuid();
+        var secondContentId = Guid.NewGuid();
+        var firstToken = await _downloadTokenService.GenerateTokenAsync(Guid.NewGuid(), clientId);
+
+        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(10);
+        var secondToken = await _downloadTokenService.GenerateTokenAsync(secondContentId, clientId);
+
+        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(6);
+        var deleted = await _downloadTokenService.CleanupExpiredTokensAsync();
+
+        Assert.AreEqual(1, deleted);
+        Assert.IsFalse((await _downloadTokenService.ValidateAndConsumeTokenAsync(firstToken.Token, clientId)).IsValid);
+
+        var stillValid = await _downloadTokenService.ValidateAndConsumeTokenAsync(secondToken.Token, clientId);
+        Assert.IsTrue(stillValid.IsValid);
+        Assert.AreEqual(secondContentId, stillValid.ContentId);
+    }
+
+    private static ContentPackage CreatePackage(
+        int? maxDownloadCount = null,
+        bool? isPrivate = null,
+        DateTimeOffset? expiresAt = null)
     {
         return new ContentPackage
         {
@@ -151,7 +291,9 @@ public class PostgresStorageIntegrationTests
             Description = "Round-trip through PostgreSQL",
             CreatedAt = DateTimeOffset.UtcNow,
             UserId = Guid.NewGuid(),
-            MaxDownloadCount = maxDownloadCount
+            IsPrivate = isPrivate,
+            MaxDownloadCount = maxDownloadCount,
+            ExpiresAt = expiresAt
         };
     }
 

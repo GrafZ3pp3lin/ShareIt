@@ -31,10 +31,10 @@ public class SqlContentStorageHandler : IContentStorageHandler
     {
         const string insertPackageSql = """
                                         INSERT INTO content_packages (
-                                            id, title, description, created_at, user_id, 
+                                            id, title, description, created_at, user_id, is_private,
                                             max_download_count, current_download_count, expires_at
                                         ) VALUES (
-                                            @Id, @Title, @Description, @CreatedAt, @UserId,
+                                            @Id, @Title, @Description, @CreatedAt, @UserId, @IsPrivate,
                                             @MaxDownloadCount, 0, @ExpiresAt
                                         );
                                         """;
@@ -51,6 +51,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
                 package.Description,
                 package.CreatedAt,
                 package.UserId,
+                package.IsPrivate,
                 package.MaxDownloadCount,
                 package.ExpiresAt
             });
@@ -142,7 +143,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
     {
         const string getPackageSql = """
                                      SELECT 
-                                         id, title, description, created_at, user_id,
+                                         id, title, description, created_at, user_id, is_private,
                                          max_download_count, current_download_count, expires_at
                                      FROM content_packages
                                      WHERE id = @PackageId
@@ -192,7 +193,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
 
         const string getPackagesSql = """
                                       SELECT 
-                                          id, title, description, created_at, user_id,
+                                          id, title, description, created_at, user_id, is_private,
                                           max_download_count, current_download_count, expires_at
                                       FROM content_packages
                                       WHERE id = ANY(@PackageIds)
@@ -535,6 +536,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
             Description = dbDto.Description,
             CreatedAt = dbDto.CreatedAt,
             UserId = dbDto.UserId,
+            IsPrivate = dbDto.IsPrivate,
             MaxDownloadCount = dbDto.MaxDownloadCount,
             CurrentDownloadCount = dbDto.CurrentDownloadCount,
             ExpiresAt = dbDto.ExpiresAt
@@ -551,6 +553,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
         public string? Description { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public Guid? UserId { get; init; }
+        public bool? IsPrivate { get; init; }
         public int? MaxDownloadCount { get; init; }
         public int CurrentDownloadCount { get; init; }
         public DateTimeOffset? ExpiresAt { get; init; }
