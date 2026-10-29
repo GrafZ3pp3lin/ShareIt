@@ -107,7 +107,7 @@ public sealed class DpopProofValidatorTests
     private Task<DpopValidationResult> ValidateAsync(
         DpopProofValidator validator,
         string? proof,
-        string cnfJson,
+        string? cnfJson,
         HttpRequest? request = null) =>
         validator.ValidateAsync(proof, AccessToken, cnfJson, request ?? CreateRequest());
 

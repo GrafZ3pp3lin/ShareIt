@@ -50,7 +50,7 @@ try
             ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
         // Traefik is the only entrypoint (docker/private network), so trust it
         // regardless of its address.
-        options.KnownNetworks.Clear();
+        options.KnownIPNetworks.Clear();
         options.KnownProxies.Clear();
     });
 
