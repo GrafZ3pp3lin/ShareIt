@@ -3,6 +3,13 @@
 ## Scope
 - Repo has two major areas: `backend/` (.NET 10, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript).
 
+### Run everything with Aspire
+- `dotnet run --project backend/kroet.ShareIt.AppHost` starts the AuthTwin, API, frontend
+  (`pnpm dev`), PostgreSQL 18, and RustFS together. It requires the Aspire CLI
+  (`dotnet tool install -g Aspire.Cli`), a running Docker daemon, and `pnpm`.
+- Ports are pinned to 8190 (AuthTwin), 5155 (API), and 3001 (frontend) to match
+  `frontend/public/env.js`; change them in both places if you move a service.
+
 ### Auth twin
 - `backend/kroet.ShareIt.AuthTwin` is a local Keycloak stand-in for development. Start it with
   `dotnet run --project backend/kroet.ShareIt.AuthTwin`; it listens on `http://localhost:8190/realms/shareit`.
