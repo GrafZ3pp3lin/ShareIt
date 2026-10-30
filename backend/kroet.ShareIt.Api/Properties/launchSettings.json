@@ -7,6 +7,18 @@
       "launchBrowser": false,
       "applicationUrl": "http://localhost:5155",
       "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Auth__Authority": "http://localhost:8190/realms/shareit",
+        "Auth__Audience": "shareit-api-dev",
+        "Auth__RequireHttpsMetadata": "false"
+      }
+    },
+    "keycloak": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5155",
+      "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }

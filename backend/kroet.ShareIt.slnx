@@ -5,4 +5,6 @@
   <Project Path="kroet.ShareIt.Api.Test/kroet.ShareIt.Api.Test.csproj" />
   <Project Path="kroet.ShareIt.Api.IntegrationTest/kroet.ShareIt.Api.IntegrationTest.csproj" />
   <Project Path="kroet.ShareIt.Api/kroet.ShareIt.Api.csproj" />
+  <Project Path="kroet.ShareIt.AuthTwin.Test/kroet.ShareIt.AuthTwin.Test.csproj" />
+  <Project Path="kroet.ShareIt.AuthTwin/kroet.ShareIt.AuthTwin.csproj" />
 </Solution>

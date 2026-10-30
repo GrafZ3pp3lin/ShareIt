@@ -3,6 +3,15 @@
 ## Scope
 - Repo has two major areas: `backend/` (.NET 10, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript).
 
+### Auth twin
+- `backend/kroet.ShareIt.AuthTwin` is a local Keycloak stand-in for development. Start it with
+  `dotnet run --project backend/kroet.ShareIt.AuthTwin`; it listens on `http://localhost:8190/realms/shareit`.
+- The API's `http` launch profile and `frontend/public/env.js` point at it by default. Use the API's
+  `keycloak` launch profile to talk to the real Keycloak again.
+- It models only the OIDC endpoints this app uses (discovery, JWKS, authorization code + PKCE + DPoP,
+  token, refresh, logout) plus a loopback-only `/control` API. See its README before changing auth
+  configuration.
+
 ### Frontend (SolidJS + Vite)
 - Tailwind CSS is the primary styling system; prefer utility classes over custom CSS when possible.
 - Prefer native browser elements for UI primitives where possible.

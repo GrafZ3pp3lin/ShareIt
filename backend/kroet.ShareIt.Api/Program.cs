@@ -110,12 +110,18 @@ try
     if (!string.IsNullOrEmpty(authAuthority))
     {
         var authAudience = configuration["Auth:Audience"];
+        // Local Keycloak twins run on plain http; every real deployment keeps the default.
+        var requireHttpsMetadata = configuration.GetValue("Auth:RequireHttpsMetadata", true);
         builder.Services.AddOptions<DpopSettings>().BindConfiguration(DpopSettings.SectionName);
         builder.Services.AddSingleton<DpopProofValidator>();
         builder.Services.AddAuthentication().AddJwtBearer(options =>
         {
             options.Authority = authAuthority;
             options.Audience = authAudience;
+            options.RequireHttpsMetadata = requireHttpsMetadata;
+            // Keep JWT claim names (sub, email, ...) instead of ASP.NET's legacy
+            // SOAP mappings: the API reads "sub" directly.
+            options.MapInboundClaims = false;
             // The SPA uses authorization-code + PKCE; access tokens carry the
             // client id as audience. Audience validation is enforced as soon as
             // an explicit API audience is configured (Auth:Audience).
