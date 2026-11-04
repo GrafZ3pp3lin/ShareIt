@@ -7,10 +7,6 @@
 
 export interface ContentPackagePreviewResponse {
   Id: string;
-  /** @nullable */
-  Title?: string | null;
-  /** @nullable */
-  Description?: string | null;
   CreatedAt: string;
   /** @nullable */
   ExpiresAt?: string | null;

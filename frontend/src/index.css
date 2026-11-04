@@ -111,6 +111,14 @@
   @apply grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3.5 border-b border-border-soft px-1 py-3 font-mono text-xs last:border-b-0;
 }
 
+@utility tiny-label {
+  @apply font-mono text-[10.5px] tracking-[0.07em] text-muted uppercase;
+}
+
+@utility link-field {
+  @apply flex items-center gap-2 rounded-lg border border-border-soft bg-panel-soft px-2.5 py-2 font-mono text-xs text-muted;
+}
+
 @layer base {
   :root {
     font-family: var(--font-sans);

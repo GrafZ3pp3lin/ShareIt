@@ -7,6 +7,7 @@ type CopyButtonProps = {
   label?: string;
   copiedLabel?: string;
   class?: string;
+  variant?: 'button' | 'inline';
 };
 
 export function CopyButton(props: CopyButtonProps) {
@@ -34,7 +35,16 @@ export function CopyButton(props: CopyButtonProps) {
   };
 
   return (
-    <button type="button" class={clsx('btn btn-secondary', props.class)} onClick={() => void copy()}>
+    <button
+      type="button"
+      class={clsx(
+        props.variant === 'inline'
+          ? 'cursor-pointer font-mono text-[11px] font-semibold text-ink transition hover:text-brand'
+          : 'btn btn-secondary',
+        props.class
+      )}
+      onClick={() => void copy()}
+    >
       <span aria-live="polite">
         {copied() ? (props.copiedLabel ?? t('app.copied')) : (props.label ?? t('app.copy'))}
       </span>

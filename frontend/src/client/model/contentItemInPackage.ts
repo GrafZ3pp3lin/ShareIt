@@ -7,14 +7,13 @@
 
 export interface ContentItemInPackage {
   Id: string;
-  Type: string;
-  /** @nullable */
-  FileName?: string | null;
-  MimeType: string;
+  Kind: string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   Size: number | string;
   /** @nullable */
-  Text?: string | null;
+  Meta?: string | null;
+  /** @nullable */
+  Payload?: string | null;
   /** @nullable */
   DownloadToken?: string | null;
   /** @nullable */

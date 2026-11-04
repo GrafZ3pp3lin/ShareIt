@@ -7,13 +7,7 @@
 
 export interface ContentPackageResponse {
   Id: string;
-  /** @nullable */
-  Title?: string | null;
-  /** @nullable */
-  Description?: string | null;
   CreatedAt: string;
-  /** @nullable */
-  UserId?: string | null;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   ItemCount: number | string;
   /**
@@ -21,6 +15,8 @@ export interface ContentPackageResponse {
    * @pattern ^-?(?:0|[1-9]\d*)$
    */
   MaxDownloadCount?: number | string | null;
+  /** @pattern ^-?(?:0|[1-9]\d*)$ */
+  CurrentDownloadCount: number | string;
   /**
    * @nullable
    * @pattern ^-?(?:0|[1-9]\d*)$

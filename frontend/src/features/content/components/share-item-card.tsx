@@ -1,11 +1,11 @@
 import { Show } from 'solid-js';
-import type { ContentItemInPackage } from '../../../client/model/index.ts';
+import type { LegacyItem } from '../legacy-item.ts';
 import { ENCRYPTED_FILE_MIME_TYPE } from '../../../shared/crypto/crypto.ts';
 import { parseEncryptedTextEnvelope } from '../../../shared/crypto/envelope.ts';
 import { useI18n } from '../../../i18n/i18n.tsx';
 
 type ShareItemCardProps = {
-  item: ContentItemInPackage;
+  item: LegacyItem;
   passphraseValue: string;
   onPassphraseInput: (value: string) => void;
   onDecrypt: () => void;

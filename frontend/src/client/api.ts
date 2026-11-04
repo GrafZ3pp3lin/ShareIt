@@ -6,13 +6,14 @@
  */
 import type {
   ContentPackageDetailsResponse,
+  ContentPackageListResponse,
   ContentPackagePreviewResponse,
   ContentPackageResponse,
   CreatePackageRequest,
-  CreateTextRequest,
   FileStreamHttpResult,
+  ListPackagesParams,
   ProblemDetails,
-  UploadFileToPackageBody,
+  UploadContentRequest,
   UploadLimitsResponse
 } from './model';
 
@@ -55,6 +56,11 @@ export const getUploadLimits = async (
   });
 };
 
+export type createPackageResponse200 = {
+  data: ContentPackageResponse;
+  status: 200;
+};
+
 export type createPackageResponse201 = {
   data: ContentPackageResponse;
   status: 201;
@@ -70,9 +76,9 @@ export type createPackageResponse401 = {
   status: 401;
 };
 
-export type createPackageResponse413 = {
+export type createPackageResponse409 = {
   data: ProblemDetails;
-  status: 413;
+  status: 409;
 };
 
 export type createPackageResponse500 = {
@@ -80,13 +86,13 @@ export type createPackageResponse500 = {
   status: 500;
 };
 
-export type createPackageResponseSuccess = createPackageResponse201 & {
+export type createPackageResponseSuccess = (createPackageResponse200 | createPackageResponse201) & {
   headers: Headers;
 };
 export type createPackageResponseError = (
   | createPackageResponse400
   | createPackageResponse401
-  | createPackageResponse413
+  | createPackageResponse409
   | createPackageResponse500
 ) & {
   headers: Headers;
@@ -102,33 +108,25 @@ export const createPackage = async (
   createPackageRequest: CreatePackageRequest,
   options?: Parameters<typeof customFetch>[1]
 ): Promise<createPackageResponse> => {
-  const formData = new FormData();
-  if (createPackageRequest.Title !== undefined && createPackageRequest.Title !== null) {
-    formData.append(`Title`, createPackageRequest.Title);
-  }
-  if (createPackageRequest.Description !== undefined && createPackageRequest.Description !== null) {
-    formData.append(`Description`, createPackageRequest.Description);
-  }
-  if (createPackageRequest.MaxDownloadCount !== undefined && createPackageRequest.MaxDownloadCount !== null) {
-    formData.append(`MaxDownloadCount`, createPackageRequest.MaxDownloadCount.toString());
-  }
-  if (createPackageRequest.TimeToLiveHours !== undefined && createPackageRequest.TimeToLiveHours !== null) {
-    formData.append(`TimeToLiveHours`, createPackageRequest.TimeToLiveHours.toString());
-  }
-  if (createPackageRequest.IsPrivate !== undefined && createPackageRequest.IsPrivate !== null) {
-    formData.append(`IsPrivate`, createPackageRequest.IsPrivate.toString());
-  }
-  if (createPackageRequest.Texts !== undefined && createPackageRequest.Texts !== null) {
-    createPackageRequest.Texts.forEach((value) => formData.append(`Texts`, value));
-  }
-  if (createPackageRequest.Files !== undefined && createPackageRequest.Files !== null) {
-    createPackageRequest.Files.forEach((value) => formData.append(`Files`, value));
-  }
-
+  const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string])
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<createPackageResponse>(getCreatePackageUrl(), {
     ...options,
     method: 'POST',
-    body: formData
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createPackageRequest)
   });
 };
 
@@ -157,6 +155,11 @@ export type uploadFileToPackageResponse404 = {
   status: 404;
 };
 
+export type uploadFileToPackageResponse409 = {
+  data: ProblemDetails;
+  status: 409;
+};
+
 export type uploadFileToPackageResponse413 = {
   data: ProblemDetails;
   status: 413;
@@ -175,6 +178,7 @@ export type uploadFileToPackageResponseError = (
   | uploadFileToPackageResponse401
   | uploadFileToPackageResponse403
   | uploadFileToPackageResponse404
+  | uploadFileToPackageResponse409
   | uploadFileToPackageResponse413
   | uploadFileToPackageResponse500
 ) & {
@@ -189,88 +193,27 @@ export const getUploadFileToPackageUrl = (packageId: string) => {
 
 export const uploadFileToPackage = async (
   packageId: string,
-  uploadFileToPackageBody: UploadFileToPackageBody,
+  uploadContentRequest: UploadContentRequest,
   options?: Parameters<typeof customFetch>[1]
 ): Promise<uploadFileToPackageResponse> => {
   const formData = new FormData();
-  if (uploadFileToPackageBody.files !== null) {
-    uploadFileToPackageBody.files.forEach((value) => formData.append(`files`, value));
+  if (uploadContentRequest.Id !== undefined && uploadContentRequest.Id !== null) {
+    formData.append(`Id`, uploadContentRequest.Id);
+  }
+  if (uploadContentRequest.Kind !== undefined && uploadContentRequest.Kind !== null) {
+    formData.append(`Kind`, uploadContentRequest.Kind);
+  }
+  if (uploadContentRequest.Meta !== undefined && uploadContentRequest.Meta !== null) {
+    formData.append(`Meta`, uploadContentRequest.Meta);
+  }
+  if (uploadContentRequest.File !== undefined && uploadContentRequest.File !== null) {
+    formData.append(`File`, uploadContentRequest.File);
   }
 
   return customFetch<uploadFileToPackageResponse>(getUploadFileToPackageUrl(packageId), {
     ...options,
     method: 'POST',
     body: formData
-  });
-};
-
-export type addTextToPackageResponse200 = {
-  data: ContentPackageResponse;
-  status: 200;
-};
-
-export type addTextToPackageResponse400 = {
-  data: ProblemDetails;
-  status: 400;
-};
-
-export type addTextToPackageResponse403 = {
-  data: ProblemDetails;
-  status: 403;
-};
-
-export type addTextToPackageResponse404 = {
-  data: ProblemDetails;
-  status: 404;
-};
-
-export type addTextToPackageResponse500 = {
-  data: ProblemDetails;
-  status: 500;
-};
-
-export type addTextToPackageResponseSuccess = addTextToPackageResponse200 & {
-  headers: Headers;
-};
-export type addTextToPackageResponseError = (
-  | addTextToPackageResponse400
-  | addTextToPackageResponse403
-  | addTextToPackageResponse404
-  | addTextToPackageResponse500
-) & {
-  headers: Headers;
-};
-
-export type addTextToPackageResponse = addTextToPackageResponseSuccess | addTextToPackageResponseError;
-
-export const getAddTextToPackageUrl = (packageId: string) => {
-  return `/api/v1/content/package/${packageId}/text`;
-};
-
-export const addTextToPackage = async (
-  packageId: string,
-  createTextRequest: CreateTextRequest,
-  options?: Parameters<typeof customFetch>[1]
-): Promise<addTextToPackageResponse> => {
-  const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string])
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-  return customFetch<addTextToPackageResponse>(getAddTextToPackageUrl(packageId), {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(createTextRequest)
   });
 };
 
@@ -284,6 +227,11 @@ export type getPackageResponse400 = {
   status: 400;
 };
 
+export type getPackageResponse401 = {
+  data: ProblemDetails;
+  status: 401;
+};
+
 export type getPackageResponse404 = {
   data: ProblemDetails;
   status: 404;
@@ -292,6 +240,11 @@ export type getPackageResponse404 = {
 export type getPackageResponse410 = {
   data: ProblemDetails;
   status: 410;
+};
+
+export type getPackageResponse429 = {
+  data: ProblemDetails;
+  status: 429;
 };
 
 export type getPackageResponse500 = {
@@ -304,8 +257,10 @@ export type getPackageResponseSuccess = getPackageResponse200 & {
 };
 export type getPackageResponseError = (
   | getPackageResponse400
+  | getPackageResponse401
   | getPackageResponse404
   | getPackageResponse410
+  | getPackageResponse429
   | getPackageResponse500
 ) & {
   headers: Headers;
@@ -431,6 +386,63 @@ export const downloadContentWithToken = async (
   options?: Parameters<typeof customFetch>[1]
 ): Promise<downloadContentWithTokenResponse> => {
   return customFetch<downloadContentWithTokenResponse>(getDownloadContentWithTokenUrl(packageId, contentId), {
+    ...options,
+    method: 'GET'
+  });
+};
+
+export type listPackagesResponse200 = {
+  data: ContentPackageListResponse;
+  status: 200;
+};
+
+export type listPackagesResponse400 = {
+  data: ProblemDetails;
+  status: 400;
+};
+
+export type listPackagesResponse401 = {
+  data: ProblemDetails;
+  status: 401;
+};
+
+export type listPackagesResponse500 = {
+  data: ProblemDetails;
+  status: 500;
+};
+
+export type listPackagesResponseSuccess = listPackagesResponse200 & {
+  headers: Headers;
+};
+export type listPackagesResponseError = (
+  | listPackagesResponse400
+  | listPackagesResponse401
+  | listPackagesResponse500
+) & {
+  headers: Headers;
+};
+
+export type listPackagesResponse = listPackagesResponseSuccess | listPackagesResponseError;
+
+export const getListPackagesUrl = (params?: ListPackagesParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/content/packages?${stringifiedParams}` : `/api/v1/content/packages`;
+};
+
+export const listPackages = async (
+  params?: ListPackagesParams,
+  options?: Parameters<typeof customFetch>[1]
+): Promise<listPackagesResponse> => {
+  return customFetch<listPackagesResponse>(getListPackagesUrl(params), {
     ...options,
     method: 'GET'
   });

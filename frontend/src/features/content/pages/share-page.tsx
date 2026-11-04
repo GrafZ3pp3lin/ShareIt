@@ -1,11 +1,12 @@
-import { For, Show, createEffect, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { useParams } from '@solidjs/router';
-import type { ContentItemInPackage, ContentPackageDetailsResponse } from '../../../client/model/index.ts';
+import type { ContentPackageDetailsResponse } from '../../../client/model/index.ts';
 import { getPackageDetails, downloadContent } from '../../../shared/api/content.ts';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
 import { decryptFile, decryptText, isEncryptedBlob } from '../../../shared/crypto/crypto.ts';
 import { parseEncryptedTextEnvelope } from '../../../shared/crypto/envelope.ts';
 import { ShareItemCard } from '../components/share-item-card.tsx';
+import { toLegacyItem, type LegacyItem } from '../legacy-item.ts';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import { SharePackageSummary } from '../components/share-package-summary.tsx';
 
@@ -27,6 +28,7 @@ export function SharePage() {
   const [details, setDetails] = createSignal<ContentPackageDetailsResponse | null>(null);
   const [loading, setLoading] = createSignal(true);
   const [loadError, setLoadError] = createSignal<unknown>(null);
+  const items = createMemo(() => (details()?.Items ?? []).map(toLegacyItem));
 
   const loadDetails = async (id: string) => {
     setLoading(true);
@@ -53,7 +55,7 @@ export function SharePage() {
     }
   );
 
-  const decryptItem = async (item: ContentItemInPackage) => {
+  const decryptItem = async (item: LegacyItem) => {
     const value = passphrase();
     if (!value) {
       setErrors((current) => ({
@@ -77,7 +79,7 @@ export function SharePage() {
     }
   };
 
-  const saveBlob = (item: ContentItemInPackage, blob: Blob) => {
+  const saveBlob = (item: LegacyItem, blob: Blob) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -86,17 +88,17 @@ export function SharePage() {
     URL.revokeObjectURL(url);
   };
 
-  const downloadFailed = (item: ContentItemInPackage, message: string) => {
+  const downloadFailed = (item: LegacyItem, message: string) => {
     setDownloadErrors((current) => ({ ...current, [item.Id]: message }));
   };
 
-  const downloadCleared = (item: ContentItemInPackage) => {
+  const downloadCleared = (item: LegacyItem) => {
     setDownloadErrors((current) => ({ ...current, [item.Id]: '' }));
   };
 
   // Downloads the item's blob and decrypts it when the content is encrypted,
   // returning either the ready-to-save blob or a user-facing error message.
-  const prepareDownload = async (item: ContentItemInPackage): Promise<Blob | string> => {
+  const prepareDownload = async (item: LegacyItem): Promise<Blob | string> => {
     if (!item.DownloadToken) {
       return ''; // the card already explains the missing token
     }
@@ -146,7 +148,7 @@ export function SharePage() {
     return blob;
   };
 
-  const downloadItem = async (item: ContentItemInPackage) => {
+  const downloadItem = async (item: LegacyItem) => {
     const outcome = await prepareDownload(item);
     if (typeof outcome === 'string') {
       if (outcome) {
@@ -168,9 +170,9 @@ export function SharePage() {
         />
       </section>
 
-      <Show when={details()?.Items?.length}>
+      <Show when={items().length > 0}>
         <div class="grid gap-3">
-          <For each={details()?.Items ?? []}>
+          <For each={items()}>
             {(item) => (
               <ShareItemCard
                 item={item}

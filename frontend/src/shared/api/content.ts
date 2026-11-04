@@ -1,7 +1,7 @@
 import {
-  createPackage,
+  createPackage as createPackageGenerated,
   downloadContentWithToken,
-  getPackage,
+  getPackage as getPackageGenerated,
   getUploadLimits as getUploadLimitsGenerated
 } from '../../client/api.ts';
 import type {
@@ -47,28 +47,40 @@ const isContentPackageDetailsResponse = (value: unknown): value is ContentPackag
 
 export type UploadProgressCallback = (sentBytes: number, totalBytes: number) => void;
 
-export type UploadFileResult = ApiResult<ContentPackageResponse> & {
+export type UploadItem = {
+  Id: string;
+  Kind: 'text' | 'file';
+  /** base64url of the sealed-or-plaintext `{ name, mime }` blob. */
+  Meta: string;
+  File: Blob;
+  FileName: string;
+};
+
+export type UploadItemResult = ApiResult<ContentPackageResponse> & {
   canceled?: boolean;
 };
 
 /**
- * Uploads a single file with real progress reporting via XHR (the fetch API
- * cannot report upload progress). Resolves with `canceled: true` when the
- * signal was aborted before completion.
+ * Uploads a single item — text bytes or file bytes — with real progress
+ * reporting via XHR. Resolves with `canceled: true` when the signal was
+ * aborted before completion.
  */
-export async function uploadFile(
+export async function uploadItem(
   packageId: string,
-  file: File,
+  item: UploadItem,
   onProgress?: UploadProgressCallback,
   signal?: AbortSignal
-): Promise<UploadFileResult> {
+): Promise<UploadItemResult> {
   const uploadUrl = absoluteApiUrl(`/api/v1/content/package/${packageId}/upload`);
   const headers = await getAuthHeaders(uploadUrl, 'POST');
   const baseUrl = getRuntimeConfig().apiBaseUrl;
 
   return new Promise((resolve) => {
     const form = new FormData();
-    form.append('files', file);
+    form.append('Id', item.Id);
+    form.append('Kind', item.Kind);
+    form.append('Meta', item.Meta);
+    form.append('File', item.File, item.FileName);
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${baseUrl}/api/v1/content/package/${packageId}/upload`);
@@ -100,9 +112,7 @@ export async function uploadFile(
           resolve({ error: new Error(`Unexpected upload response (status ${xhr.status})`) });
         }
       } else {
-        resolve({
-          error: xhr.response ?? new Error(`Upload failed with status ${xhr.status}`)
-        });
+        resolve({ error: xhr.response ?? new Error(`Upload failed with status ${xhr.status}`) });
       }
     });
     xhr.addEventListener('abort', () => resolve({ canceled: true }));
@@ -111,8 +121,8 @@ export async function uploadFile(
   });
 }
 
-export async function createContentPackage(request: CreatePackageRequest): Promise<ApiResult<ContentPackageResponse>> {
-  const result = await createPackage(request);
+export async function createPackage(request: CreatePackageRequest): Promise<ApiResult<ContentPackageResponse>> {
+  const result = await createPackageGenerated(request);
   if (isSuccess(result.status) && isContentPackageResponse(result.data)) {
     return { data: result.data };
   }
@@ -129,8 +139,18 @@ export async function getUploadLimits(): Promise<ApiResult<UploadLimits>> {
   };
 }
 
-export async function getPackageDetails(packageId: string): Promise<ApiResult<ContentPackageDetailsResponse>> {
-  const result = await getPackage(packageId);
+/**
+ * Fetches a package, optionally with the `X-Unlock-Proof` header. The header is
+ * only ever attached to this call.
+ */
+export async function getPackageDetails(
+  packageId: string,
+  unlockProof?: string
+): Promise<ApiResult<ContentPackageDetailsResponse>> {
+  const result = await getPackageGenerated(
+    packageId,
+    unlockProof ? { headers: { 'X-Unlock-Proof': unlockProof } } : undefined
+  );
   if (isSuccess(result.status) && isContentPackageDetailsResponse(result.data)) {
     return { data: result.data };
   }

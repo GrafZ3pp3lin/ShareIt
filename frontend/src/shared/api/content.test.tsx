@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeXhr } from '../../tests/fake-xhr.ts';
-import { getUploadLimits, uploadFile } from './content.ts';
+import { getUploadLimits, uploadItem } from './content.ts';
 
 const originalXhr = globalThis.XMLHttpRequest;
 const originalFetch = globalThis.fetch;
@@ -63,9 +63,17 @@ describe('getUploadLimits', () => {
   });
 });
 
-describe('uploadFile', () => {
+const uploadRequest = (fileName = 'notes.txt') => ({
+  Id: 'item-1',
+  Kind: 'file' as const,
+  Meta: 'bWV0YQ',
+  File: makeFile(fileName),
+  FileName: fileName
+});
+
+describe('uploadItem', () => {
   beforeEach(() => {
-    // oxlint-disable-next-line no-unsafe-type-assertion -- FakeXhr only implements the XHR surface uploadFile uses
+    // oxlint-disable-next-line no-unsafe-type-assertion -- FakeXhr only implements the XHR surface uploadItem uses
     globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
     globalThis.fetch = vi.fn(async () => {
       throw new Error('XHR path must not use fetch');
@@ -78,10 +86,8 @@ describe('uploadFile', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('posts the file to the package upload endpoint and resolves the response', async () => {
-    const file = makeFile();
-
-    const result = await uploadFile('pkg-1', file);
+  it('posts the item fields and bytes to the package upload endpoint', async () => {
+    const result = await uploadItem('pkg-1', uploadRequest());
 
     expect(result.data?.Id).toBe('fake-package');
     expect(result.error).toBeUndefined();
@@ -89,7 +95,10 @@ describe('uploadFile', () => {
 
     const xhr = FakeXhr.sent[0];
     expect(xhr.url.endsWith('/api/v1/content/package/pkg-1/upload')).toBe(true);
-    const entry = xhr.form?.get('files');
+    expect(xhr.form?.get('Id')).toBe('item-1');
+    expect(xhr.form?.get('Kind')).toBe('file');
+    expect(xhr.form?.get('Meta')).toBe('bWV0YQ');
+    const entry = xhr.form?.get('File');
     expect(entry).toBeInstanceOf(File);
     if (entry instanceof File) {
       expect(entry.name).toBe('notes.txt');
@@ -99,7 +108,7 @@ describe('uploadFile', () => {
   it('reports upload progress through the callback', async () => {
     const onProgress = vi.fn();
 
-    await uploadFile('pkg-1', makeFile(), onProgress);
+    await uploadItem('pkg-1', uploadRequest(), onProgress);
 
     expect(onProgress).toHaveBeenCalledWith(6, 10);
   });
@@ -108,7 +117,7 @@ describe('uploadFile', () => {
     const body = { title: 'Payload too large', detail: 'file exceeds the limit' };
     FakeXhr.responses = [{ status: 413, body }];
 
-    const result = await uploadFile('pkg-1', makeFile());
+    const result = await uploadItem('pkg-1', uploadRequest());
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
@@ -117,7 +126,7 @@ describe('uploadFile', () => {
   it('resolve a network error when the request fails', async () => {
     FakeXhr.responses = [{ status: 0, networkError: true }];
 
-    const result = await uploadFile('pkg-1', makeFile());
+    const result = await uploadItem('pkg-1', uploadRequest());
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(new Error('Network error during upload'));
@@ -127,7 +136,7 @@ describe('uploadFile', () => {
     FakeXhr.loadDelayMs = 50;
     const controller = new AbortController();
 
-    const promise = uploadFile('pkg-1', makeFile(), undefined, controller.signal);
+    const promise = uploadItem('pkg-1', uploadRequest(), undefined, controller.signal);
     // The signal listener is registered once the request is in flight.
     await vi.waitFor(() => expect(FakeXhr.sent).toHaveLength(1));
     controller.abort();
@@ -141,7 +150,7 @@ describe('uploadFile', () => {
   it('sends the persisted guest ID as an identity header', async () => {
     window.localStorage.setItem('shareit-guest-id', 'guest-test-1');
 
-    await uploadFile('pkg-1', makeFile());
+    await uploadItem('pkg-1', uploadRequest());
 
     expect(FakeXhr.sent[0].requestHeaders['X-Guest-ID']).toBe('guest-test-1');
   });

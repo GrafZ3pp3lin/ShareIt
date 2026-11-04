@@ -20,66 +20,106 @@ export const dict = {
     },
     footer: 'Share it once. Access it anywhere.'
   },
-  upload: {
-    panels: {
-      fileLabel: 'FILE',
-      textLabel: 'TEXT / SNIPPET'
+  composer: {
+    headline: 'Paste it or drop it. One link.',
+    subline: 'Text and files together. Expires when you say, encrypted if you want.',
+    placeholder: 'paste or type your text',
+    hint: 'drop files anywhere in this box · + browses',
+    drop: 'drop to add files',
+    addFiles: 'add files',
+    textItemName: 'content.txt',
+    fileItemName: 'file',
+    files: {
+      count: '{{ count }} file(s)',
+      remove: 'remove {{ name }}'
     },
-    filePanel: {
-      prompt: 'Drop file or browse',
-      selected: '{{ count }} file(s) selected',
-      limit: 'limit {{ limit }}/file'
+    limit: 'limit {{ limit }}/file',
+    submit: 'Create link',
+    submitting: 'Creating link…',
+    cancel: 'Cancel',
+    retry: 'retry upload',
+    showLinkAnyway: 'show link anyway',
+    progress: {
+      encrypting: 'Encrypting {{ current }}/{{ total }}: {{ fileName }}',
+      uploading: 'Uploading {{ current }}/{{ total }}: {{ percent }}%'
     },
-    placeholders: {
-      text: 'Paste or type your text'
+    errors: {
+      fileTooLarge: 'Skipped: {{ names }} exceed the {{ limit }} per-file limit.'
     },
+    how: {
+      title: 'how it works',
+      one: 'Paste text, drop files — or both at once.',
+      two: 'Pick how long it lives and who can open it.',
+      three: 'Copy the link. It stops working when it should.',
+      note: 'No account needed. With a password, everything is encrypted in your browser first.'
+    }
+  },
+  options: {
+    summary: 'expires {{ expiry }} · {{ downloads }} · password {{ password }}',
     expiry: {
       label: 'expires',
-      anonymousNote: 'content is available for {{ expiry }}'
+      sixHours: '6 hours',
+      oneDay: '1 day',
+      sevenDays: '7 days',
+      thirtyDays: '30 days'
     },
-    access: {
-      label: 'access',
-      unlimited: '∞',
-      anonymousNote: 'link works once'
+    downloads: {
+      label: 'downloads allowed',
+      hint: 'one person, one download',
+      once: 'once',
+      count: '{{ count }} downloads',
+      unlimited: 'unlimited'
     },
     password: {
       label: 'password',
-      on: 'on',
+      hint: 'encrypt text and files before upload',
+      mode: {
+        off: 'off',
+        generate: 'generate',
+        custom: 'custom'
+      },
       off: 'off',
-      caption: 'Encrypts pasted text and files client-side before upload. The passphrase is shown once.'
+      generated: 'generated',
+      custom: 'custom',
+      regenerate: 'regenerate ↻',
+      show: 'show',
+      hide: 'hide',
+      shownOnce: 'shown once on the result screen',
+      suggestion: '5 random words is plenty',
+      note: 'Encrypts text and files in your browser. The passphrase is never sent to the server — if you lose it, the content is gone.',
+      errors: {
+        tooShort: 'Use at least 12 characters.'
+      },
+      strength: {
+        weak: 'weak',
+        ok: 'ok',
+        strong: 'strong'
+      }
     },
-    submitCommand: 'upload --get-link',
-    submit: {
-      uploading: 'Uploading...',
-      encrypting: 'Encrypting {{ current }}/{{ total }}: {{ fileName }}',
-      uploadingFile: 'Uploading {{ current }}/{{ total }}: {{ fileName }} · {{ percent }}%',
-      cancel: 'Cancel'
-    },
-    result: {
-      heading: 'link ready',
-      copy: 'copy',
-      copied: 'copied',
-      captionPlain: 'expires {{ expiry }}',
-      captionWithPassword: 'expires {{ expiry }} · password set',
-      partialNotice: 'Some files did not finish uploading — the link may be missing them.',
-      another: 'Upload another'
-    },
-    recovery: {
-      retry: 'retry --files',
-      showLink: 'show link anyway'
-    },
-    passphraseLabel: 'Passphrase (shown once):',
-    copyPassphrase: 'Copy passphrase',
-    errors: {
-      createPackage: 'Failed to create package.',
-      missingContent: 'Add text or select at least one file before uploading.',
-      encryptFailed: 'Unable to encrypt the text.',
-      encryptFileFailed: 'Unable to encrypt the files.',
-      addTextFailed: 'Failed to add text.',
-      uploadFilesFailed: 'Failed to upload files.',
-      fileTooLarge: 'Skipped: {{ names }} exceed the {{ limit }} per-file limit.',
-      canceled: 'Upload canceled.'
-    }
+    guestNote: 'Expiry and downloads are fixed for links created without an account. Sign in to choose them.'
+  },
+  result: {
+    ready: 'link ready',
+    summary: 'expires {{ expiry }} · {{ downloads }} · password {{ password }}',
+    link: 'link',
+    passphrase: 'passphrase',
+    combined: 'link + passphrase — both included',
+    selfOpenTitle: "Don't open this link yourself.",
+    selfOpenBody:
+      'Opening it counts as an access: it uses up one of the allowed downloads, and with a one-time link the upload is deleted by the cleanup job after you look at it.',
+    channels:
+      'Anyone holding this single link has everything. For maximum security, send the link and the passphrase through different channels — link by mail, passphrase by chat, for example.',
+    noPasswordNote:
+      "Anyone with the link can open it — including you, and that counts as an access. Don't test it on yourself.",
+    incomplete: 'Some items did not finish uploading — the link may be missing them.',
+    another: 'Upload another'
+  },
+  errors: {
+    createPackage: 'Failed to create the link.',
+    upload: 'Failed to upload {{ fileName }}.',
+    encrypt: 'Unable to encrypt {{ fileName }}.',
+    canceled: 'Upload canceled.',
+    missingContent: 'Add text or a file first.'
   },
   share: {
     title: 'Shared content',

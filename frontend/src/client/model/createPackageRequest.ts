@@ -4,13 +4,12 @@
  * kroet.ShareIt.Api | v1
  * OpenAPI spec version: 1.0.0
  */
-import type { IFormFileCollection } from './iFormFileCollection';
 
 export interface CreatePackageRequest {
   /** @nullable */
-  Title?: string | null;
+  Id?: string | null;
   /** @nullable */
-  Description?: string | null;
+  UnlockVerifier?: string | null;
   /**
    * @nullable
    * @pattern ^-?(?:0|[1-9]\d*)$
@@ -23,7 +22,4 @@ export interface CreatePackageRequest {
   TimeToLiveHours?: number | string | null;
   /** @nullable */
   IsPrivate?: boolean | null;
-  /** @nullable */
-  Texts?: string[] | null;
-  Files?: null | IFormFileCollection;
 }
