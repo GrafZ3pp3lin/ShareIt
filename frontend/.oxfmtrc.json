@@ -12,5 +12,14 @@
   "arrowParens": "always",
   "endOfLine": "lf",
   "experimentalSortPackageJson": false,
-  "ignorePatterns": ["*.html", "*.yml", "dist", "coverage", "node_modules", "package.json", "package-lock.json"]
+  "ignorePatterns": [
+    "*.html",
+    "*.yml",
+    "design-lab",
+    "dist",
+    "coverage",
+    "node_modules",
+    "package.json",
+    "package-lock.json"
+  ]
 }

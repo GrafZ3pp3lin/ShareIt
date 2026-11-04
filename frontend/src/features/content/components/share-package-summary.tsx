@@ -18,7 +18,7 @@ export function SharePackageSummary(props: SharePackageSummaryProps) {
         <div>{t('share.loading')}</div>
       </Show>
       <Show when={props.loadError}>
-        <div class="notice-box">{props.loadError}</div>
+        <div class="caution">{props.loadError}</div>
       </Show>
       <Show when={props.details}>
         {(details) => (

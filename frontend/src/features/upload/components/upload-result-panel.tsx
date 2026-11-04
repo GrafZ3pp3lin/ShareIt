@@ -1,6 +1,5 @@
 import { Show, createSignal } from 'solid-js';
 import IconCheck from '~icons/lucide/check';
-import { QrPlaceholder } from './qr-placeholder.tsx';
 import type { UploadResult } from './upload-types.ts';
 import { useI18n } from '../../../i18n/i18n.tsx';
 
@@ -53,18 +52,15 @@ export function UploadResultPanel(props: UploadResultPanelProps) {
         </button>
       </div>
 
-      <div class="flex items-center gap-3">
-        <QrPlaceholder />
-        <span class="text-xs text-muted">
-          {t(props.result.encrypted ? 'upload.result.captionWithPassword' : 'upload.result.captionPlain', {
-            expiry: props.result.expiryLabel
-          })}
-        </span>
+      <div class="text-xs text-muted">
+        {t(props.result.encrypted ? 'upload.result.captionWithPassword' : 'upload.result.captionPlain', {
+          expiry: props.result.expiryLabel
+        })}
       </div>
 
       <Show when={props.result.passphrase}>
         {(passphrase) => (
-          <div class="notice-box">
+          <div class="caution">
             <div class="text-ink">{t('upload.passphraseLabel')}</div>
             <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
               <span class="pill-badge w-full break-all sm:w-auto">{passphrase()}</span>
@@ -81,7 +77,7 @@ export function UploadResultPanel(props: UploadResultPanelProps) {
       </Show>
 
       <Show when={props.result.incomplete}>
-        <div class="notice-box">{t('upload.result.partialNotice')}</div>
+        <div class="caution">{t('upload.result.partialNotice')}</div>
       </Show>
 
       <button type="button" class="btn btn-secondary" onClick={props.onReset}>

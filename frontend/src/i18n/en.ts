@@ -3,8 +3,15 @@ export const dict = {
     brand: 'ShareIt',
     nav: {
       upload: 'upload',
-      myFiles: 'my files',
+      links: 'links',
       logout: 'log out'
+    },
+    copy: 'copy',
+    copied: 'copied',
+    notFound: {
+      title: 'Page not found',
+      body: 'The page you were looking for does not exist.',
+      home: 'go home'
     },
     theme: {
       dark: 'dark',
@@ -14,7 +21,6 @@ export const dict = {
     footer: 'Share it once. Access it anywhere.'
   },
   upload: {
-    windowLabel: 'shareit — share',
     panels: {
       fileLabel: 'FILE',
       textLabel: 'TEXT / SNIPPET'
@@ -105,7 +111,6 @@ export const dict = {
     oidcNotConfigured: 'OIDC is not configured.'
   },
   account: {
-    windowLabel: 'shareit — my files',
     notWired: 'Backend listing endpoints are not wired yet.',
     dashboard: {
       empty: 'no uploads yet'

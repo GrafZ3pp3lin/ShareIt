@@ -6,38 +6,43 @@ import { useTheme } from '../shared/theme/theme-context.tsx';
 import IconMoon from '~icons/lucide/moon';
 import IconSun from '~icons/lucide/sun';
 
-export function AppLayout(props: RouteSectionProps) {
+type AppLayoutProps = RouteSectionProps & {
+  variant?: 'app' | 'share';
+};
+
+export function AppLayout(props: AppLayoutProps) {
   const auth = useAuth();
   const { t } = useI18n();
   const theme = useTheme();
+  const isShare = () => props.variant === 'share';
 
   return (
     <div class="min-h-screen flex flex-col">
       <header class="border-b border-border-soft/80 bg-panel/90 sm:sticky sm:top-0 sm:z-50 sm:backdrop-blur-sm">
-        <div class="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+        <div class="mx-auto flex w-full max-w-275 flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div class="flex items-center gap-6">
-            <a class="flex items-center gap-3 text-sm font-semibold tracking-[0.2em] uppercase" href="/">
+            <a class="flex items-center gap-2 text-sm font-semibold text-ink" href="/">
               <span
-                class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border-soft bg-panel text-xs font-semibold"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border-soft bg-panel text-[10px] font-semibold"
                 aria-hidden="true"
               >
                 SI
               </span>
               <span>{t('app.brand')}</span>
             </a>
-            <Show when={auth.isAuthenticated()}>
+            <Show when={!isShare() && auth.isAuthenticated()}>
               <nav class="flex items-center gap-5">
                 <a class="nav-tab" href="/">
                   {t('app.nav.upload')}
                 </a>
-                <a class="nav-tab" href="/account">
-                  {t('app.nav.myFiles')}
+                <a class="nav-tab" href="/links">
+                  {t('app.nav.links')}
                 </a>
               </nav>
             </Show>
           </div>
           <div class="flex items-center gap-3">
-            <Show when={!auth.isAuthenticated() && auth.isEnabled}>
+            <Show when={!isShare() && !auth.isAuthenticated() && auth.isEnabled}>
               <button
                 type="button"
                 class="font-mono text-sm text-muted transition hover:text-ink"
@@ -46,7 +51,7 @@ export function AppLayout(props: RouteSectionProps) {
                 {t('auth.signIn')}
               </button>
             </Show>
-            <Show when={auth.isAuthenticated()}>
+            <Show when={!isShare() && auth.isAuthenticated()}>
               <button
                 type="button"
                 class="font-mono text-sm text-muted transition hover:text-ink"
@@ -69,8 +74,10 @@ export function AppLayout(props: RouteSectionProps) {
           </div>
         </div>
       </header>
-      <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-8 sm:py-10">{props.children}</main>
-      <footer class="mx-auto w-full max-w-5xl px-4 pb-6 text-xs text-muted sm:px-8 sm:pb-8">{t('app.footer')}</footer>
+      <main class="mx-auto w-full max-w-275 flex-1 px-4 py-6 sm:px-8 sm:py-10">{props.children}</main>
+      <footer class="mx-auto hidden w-full max-w-275 px-4 pb-6 text-xs text-muted min-[620px]:block sm:px-8 sm:pb-8">
+        {t('app.footer')}
+      </footer>
     </div>
   );
 }

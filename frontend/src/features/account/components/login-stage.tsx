@@ -19,7 +19,7 @@ export function LoginStage(props: LoginStageProps) {
         <h2 class="font-mono text-sm font-semibold text-ink">{t('account.login.heading')}</h2>
         <p class="font-sans text-xs text-muted">{t('account.login.body')}</p>
       </div>
-      <Show when={props.enabled} fallback={<div class="notice-box font-sans">{t('auth.oidcNotConfiguredLong')}</div>}>
+      <Show when={props.enabled} fallback={<div class="caution font-sans">{t('auth.oidcNotConfiguredLong')}</div>}>
         <button type="button" class="btn btn-primary" onClick={props.onLogin}>
           {t('account.login.cta')}
         </button>

@@ -38,7 +38,7 @@ export function ShareItemCard(props: ShareItemCardProps) {
             </pre>
           }
         >
-          <div class="notice-box">{t('share.encryptedNotice')}</div>
+          <div class="caution">{t('share.encryptedNotice')}</div>
           <div class="grid gap-3">
             <input
               class="text-field"
@@ -51,7 +51,7 @@ export function ShareItemCard(props: ShareItemCardProps) {
               {props.isDecrypting ? t('share.decrypting') : t('share.decrypt')}
             </button>
             <Show when={props.decryptError}>
-              <div class="notice-box">{props.decryptError}</div>
+              <div class="caution">{props.decryptError}</div>
             </Show>
             <Show when={props.decryptedText}>
               <pre class="overflow-x-auto whitespace-pre-wrap wrap-break-word rounded-xl border border-dashed border-border-soft bg-white px-3 py-3 text-sm text-muted">
@@ -65,7 +65,7 @@ export function ShareItemCard(props: ShareItemCardProps) {
       <Show when={!props.item.Text}>
         <div class="grid gap-3">
           <Show when={isEncryptedFile()} fallback={<div class="text-sm text-muted">{props.item.MimeType}</div>}>
-            <div class="notice-box">{t('share.encryptedFileNotice')}</div>
+            <div class="caution">{t('share.encryptedFileNotice')}</div>
           </Show>
           <Show when={isEncryptedFile()}>
             <input
@@ -82,10 +82,10 @@ export function ShareItemCard(props: ShareItemCardProps) {
             </button>
           </Show>
           <Show when={props.downloadError}>
-            <div class="notice-box">{props.downloadError}</div>
+            <div class="caution">{props.downloadError}</div>
           </Show>
           <Show when={!canDownload()}>
-            <div class="notice-box">{t('share.noDownloadToken')}</div>
+            <div class="caution">{t('share.noDownloadToken')}</div>
           </Show>
         </div>
       </Show>
