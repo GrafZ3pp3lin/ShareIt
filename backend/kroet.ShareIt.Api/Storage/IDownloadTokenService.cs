@@ -43,13 +43,28 @@ public interface IDownloadTokenService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Validates a download token and marks it as used if valid.
+    /// Validates a download token without consuming it. Read-only: a storage
+    /// failure after this call leaves the token usable.
     /// </summary>
     /// <param name="token">The token string to validate.</param>
     /// <param name="clientId">The client ID making the request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Validation result with content ID if valid.</returns>
-    Task<TokenValidationResult> ValidateAndConsumeTokenAsync(
+    Task<TokenValidationResult> ValidateTokenAsync(
+        string token,
+        Guid clientId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Atomically marks a validated token as used. Returns invalid when the
+    /// token was already consumed (lost race), expired in between, or belongs
+    /// to another client — in those cases nothing may be streamed.
+    /// </summary>
+    /// <param name="token">The token string to consume.</param>
+    /// <param name="clientId">The client ID making the request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Validation result with content ID if the token was consumed.</returns>
+    Task<TokenValidationResult> ConsumeTokenAsync(
         string token,
         Guid clientId,
         CancellationToken cancellationToken = default);

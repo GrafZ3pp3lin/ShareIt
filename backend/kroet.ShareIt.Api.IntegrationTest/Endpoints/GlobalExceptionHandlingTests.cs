@@ -49,9 +49,10 @@ public sealed class GlobalExceptionHandlingTests : ShareItApiTestBase
         var guestId = Guid.NewGuid();
 
         // Create a package with a text item, then read it back; reading the
-        // text blob is what fails (inlined text must not leak the exception).
+        // text blob is what fails (an inlined payload must not leak the exception).
         var packageId = await CreatePackageAsync(guestId: guestId);
-        Assert.AreEqual(HttpStatusCode.OK, (await SendAddTextAsync(packageId, "some text", guestId)).StatusCode);
+        var upload = await SendUploadItemAsync(packageId, "text", "some text"u8.ToArray(), guestId: guestId);
+        Assert.AreEqual(HttpStatusCode.OK, upload.StatusCode);
 
         var response = await GetPackageAsync(packageId, guestId);
         var body = await response.Content.ReadAsStringAsync();

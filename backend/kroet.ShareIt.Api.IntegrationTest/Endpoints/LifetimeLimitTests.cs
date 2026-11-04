@@ -35,7 +35,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestAboveLifetimeLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), timeToLiveHours: 7);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), timeToLiveHours: 7);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -46,7 +46,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestAtLifetimeLimit_IsAccepted()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), timeToLiveHours: 6);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), timeToLiveHours: 6);
 
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
     }
@@ -54,7 +54,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestWithoutLifetime_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), timeToLiveHours: null);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), timeToLiveHours: null);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -64,7 +64,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_NonPositiveLifetime_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), timeToLiveHours: 0);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), timeToLiveHours: 0);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -74,7 +74,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_AuthenticatedAboveLifetimeLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], userId: Guid.NewGuid(), timeToLiveHours: 25);
+        var response = await SendCreatePackageAsync(userId: Guid.NewGuid(), timeToLiveHours: 25);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -85,7 +85,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_AuthenticatedAtLifetimeLimit_IsAccepted()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], userId: Guid.NewGuid(), timeToLiveHours: 24);
+        var response = await SendCreatePackageAsync(userId: Guid.NewGuid(), timeToLiveHours: 24);
 
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
     }
@@ -94,7 +94,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     public async Task CreatePackage_AuthenticatedWithoutLifetime_IsAccepted()
     {
         // Omitting the lifetime (no expiration) remains allowed for authenticated users.
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], userId: Guid.NewGuid(), timeToLiveHours: null);
+        var response = await SendCreatePackageAsync(userId: Guid.NewGuid(), timeToLiveHours: null);
 
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
     }

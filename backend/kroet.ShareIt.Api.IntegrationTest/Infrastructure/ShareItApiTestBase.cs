@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -20,6 +21,14 @@ namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 public abstract class ShareItApiTestBase
 {
     protected static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    protected static readonly byte[] SmallItemBytes = "hello world"u8.ToArray();
+
+    /// <summary>
+    /// Larger than the default 16 KB inline payload limit, so this item is
+    /// always served through a download token.
+    /// </summary>
+    protected static readonly byte[] LargeItemBytes = new byte[20 * 1024];
 
     private ShareItApiFactory _factory = null!;
     private AmazonS3Client _s3Client = null!;
@@ -87,55 +96,50 @@ public abstract class ShareItApiTestBase
     }
 
     /// <summary>
-    /// Sends a multipart POST to the package creation endpoint.
+    /// JSON body for POST /package.
     /// </summary>
-    protected async Task<HttpResponseMessage> SendCreatePackageAsync(
-        byte[]? fileBytes = null,
-        string fileName = "hello.txt",
-        string? title = null,
+    protected static CreatePackageRequest PackageRequest(
+        Guid? packageId = null,
+        int? maxDownloadCount = 1,
+        bool? isPrivate = null,
+        int? timeToLiveHours = 1,
+        string? unlockVerifier = null)
+        => new()
+        {
+            Id = packageId ?? Guid.NewGuid(),
+            UnlockVerifier = unlockVerifier,
+            MaxDownloadCount = maxDownloadCount,
+            TimeToLiveHours = timeToLiveHours,
+            IsPrivate = isPrivate
+        };
+
+    /// <summary>
+    /// Sends a JSON POST to the package creation endpoint.
+    /// </summary>
+    protected Task<HttpResponseMessage> SendCreatePackageAsync(
+        Guid? packageId = null,
         int? maxDownloadCount = 1,
         bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
-        string[]? texts = null,
-        (byte[] Bytes, string FileName)[]? files = null)
+        string? unlockVerifier = null)
+        => SendCreatePackageAsync(
+            PackageRequest(packageId, maxDownloadCount, isPrivate, timeToLiveHours, unlockVerifier),
+            guestId,
+            userId);
+
+    protected async Task<HttpResponseMessage> SendCreatePackageAsync(
+        CreatePackageRequest request,
+        Guid? guestId = null,
+        Guid? userId = null)
     {
-        using var form = new MultipartFormDataContent();
-        if (title is not null)
+        var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package")
         {
-            form.Add(new StringContent(title), "Title");
-        }
-        if (maxDownloadCount is not null)
-        {
-            form.Add(new StringContent(maxDownloadCount.Value.ToString()), "MaxDownloadCount");
-        }
-        if (isPrivate is not null)
-        {
-            form.Add(new StringContent(isPrivate.Value ? "true" : "false"), "IsPrivate");
-        }
-        if (timeToLiveHours is not null)
-        {
-            form.Add(new StringContent(timeToLiveHours.Value.ToString()), "TimeToLiveHours");
-        }
-        if (texts is not null)
-        {
-            foreach (var text in texts)
-            {
-                form.Add(new StringContent(text), "Texts");
-            }
-        }
-
-        foreach (var file in files ?? (fileBytes is null ? [] : [(fileBytes, fileName)]))
-        {
-            var fileContent = new ByteArrayContent(file.Bytes);
-            fileContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
-            form.Add(fileContent, "Files", file.FileName);
-        }
-
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package") { Content = form };
-        AddIdentity(request, guestId, userId);
-        return await Client.SendAsync(request);
+            Content = JsonContent.Create(request, options: JsonOptions)
+        };
+        AddIdentity(message, guestId, userId);
+        return await Client.SendAsync(message);
     }
 
     /// <summary>
@@ -143,19 +147,16 @@ public abstract class ShareItApiTestBase
     /// Returns the created package ID.
     /// </summary>
     protected async Task<Guid> CreatePackageAsync(
-        byte[]? fileBytes = null,
-        string fileName = "hello.txt",
-        string? title = null,
+        Guid? packageId = null,
         int? maxDownloadCount = 1,
         bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
-        string[]? texts = null,
-        (byte[] Bytes, string FileName)[]? files = null)
+        string? unlockVerifier = null)
     {
         var response = await SendCreatePackageAsync(
-            fileBytes, fileName, title, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours, texts, files);
+            packageId, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
@@ -164,84 +165,144 @@ public abstract class ShareItApiTestBase
     }
 
     /// <summary>
-    /// Sends a multipart POST of a single file to an existing package.
+    /// Creates a package and uploads one item into it.
     /// </summary>
-    protected Task<HttpResponseMessage> SendUploadFilesAsync(
-        Guid packageId,
-        byte[] fileBytes,
-        string fileName = "hello.txt",
+    protected async Task<(Guid PackageId, Guid ContentId)> CreatePackageWithItemAsync(
+        string kind = "file",
+        byte[]? bytes = null,
+        string meta = "bWV0YQ",
+        Guid? packageId = null,
+        Guid? contentId = null,
+        int? maxDownloadCount = 1,
+        bool? isPrivate = null,
         Guid? guestId = null,
-        Guid? userId = null)
-        => SendUploadFilesAsync(packageId, [(fileBytes, fileName)], guestId, userId);
+        Guid? userId = null,
+        int? timeToLiveHours = 1,
+        string? unlockVerifier = null)
+    {
+        var createdPackageId = await CreatePackageAsync(
+            packageId, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
+
+        var createdContentId = contentId ?? Guid.NewGuid();
+        var response = await SendUploadItemAsync(
+            createdPackageId, kind, bytes ?? SmallItemBytes, meta, createdContentId, guestId, userId);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
+
+        return (createdPackageId, createdContentId);
+    }
 
     /// <summary>
-    /// Sends a multipart POST of one or more files to an existing package.
+    /// Sends a multipart POST of one item to an existing package.
     /// </summary>
-    protected async Task<HttpResponseMessage> SendUploadFilesAsync(
+    protected async Task<HttpResponseMessage> SendUploadItemAsync(
         Guid packageId,
-        (byte[] Bytes, string FileName)[] files,
+        string kind,
+        byte[] bytes,
+        string meta = "bWV0YQ",
+        Guid? contentId = null,
         Guid? guestId = null,
-        Guid? userId = null)
+        Guid? userId = null,
+        string fileName = "item.bin")
     {
-        using var form = new MultipartFormDataContent();
-        foreach (var file in files)
+        using var form = new MultipartFormDataContent
         {
-            var fileContent = new ByteArrayContent(file.Bytes);
-            fileContent.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
-            form.Add(fileContent, "files", file.FileName);
-        }
+            { new StringContent((contentId ?? Guid.NewGuid()).ToString()), "Id" },
+            { new StringContent(kind), "Kind" },
+            { new StringContent(meta), "Meta" }
+        };
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload") { Content = form };
+        var fileContent = new ByteArrayContent(bytes);
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(fileContent, "File", fileName);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload")
+        {
+            Content = form
+        };
         AddIdentity(request, guestId, userId);
         return await Client.SendAsync(request);
     }
 
     /// <summary>
-    /// Sends a multipart POST without any file parts to exercise the
-    /// "no files provided" endpoint branch.
+    /// Sends a multipart POST with no content part to exercise validation.
     /// </summary>
-    protected async Task<HttpResponseMessage> SendUploadWithoutFilesAsync(
+    protected async Task<HttpResponseMessage> SendUploadWithoutFileAsync(
         Guid packageId,
         Guid? guestId = null,
         Guid? userId = null)
     {
         using var form = new MultipartFormDataContent
         {
-            { new StringContent("noop"), "Dummy" }
+            { new StringContent(Guid.NewGuid().ToString()), "Id" },
+            { new StringContent("file"), "Kind" },
+            { new StringContent("bWV0YQ"), "Meta" }
         };
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload") { Content = form };
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload")
+        {
+            Content = form
+        };
         AddIdentity(request, guestId, userId);
         return await Client.SendAsync(request);
     }
 
-    protected Task<HttpResponseMessage> SendAddTextAsync(Guid packageId, string text, Guid? guestId = null, Guid? userId = null)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/text")
-        {
-            Content = JsonContent.Create(new CreateTextRequest { Text = text }, options: JsonOptions),
-        };
-        AddIdentity(request, guestId, userId);
-        return Client.SendAsync(request);
-    }
-
-    protected Task<HttpResponseMessage> GetPackageAsync(Guid packageId, Guid? guestId = null, Guid? userId = null)
+    protected Task<HttpResponseMessage> GetPackageAsync(
+        Guid packageId,
+        Guid? guestId = null,
+        Guid? userId = null,
+        string? unlockProof = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/content/package/{packageId}");
         AddIdentity(request, guestId, userId);
+        if (unlockProof is not null)
+        {
+            request.Headers.Add("X-Unlock-Proof", unlockProof);
+        }
+
         return Client.SendAsync(request);
     }
 
     /// <summary>
     /// Fetches a package and asserts the request succeeded.
     /// </summary>
-    protected async Task<ContentPackageDetailsResponse> GetPackageDetailsAsync(Guid packageId, Guid? guestId = null, Guid? userId = null)
+    protected async Task<ContentPackageDetailsResponse> GetPackageDetailsAsync(
+        Guid packageId,
+        Guid? guestId = null,
+        Guid? userId = null,
+        string? unlockProof = null)
     {
-        var response = await GetPackageAsync(packageId, guestId, userId);
+        var response = await GetPackageAsync(packageId, guestId, userId, unlockProof);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
         return await ReadJsonAsync<ContentPackageDetailsResponse>(response);
+    }
+
+    /// <summary>
+    /// Sends GET /packages with an optional page size and cursor.
+    /// </summary>
+    protected Task<HttpResponseMessage> ListPackagesAsync(
+        Guid? guestId = null,
+        Guid? userId = null,
+        int? take = null,
+        string? cursor = null)
+    {
+        var query = new List<string>();
+        if (take.HasValue)
+        {
+            query.Add($"take={take.Value}");
+        }
+
+        if (!string.IsNullOrEmpty(cursor))
+        {
+            query.Add($"cursor={Uri.EscapeDataString(cursor)}");
+        }
+
+        var url = "/api/v1/content/packages" + (query.Count > 0 ? "?" + string.Join("&", query) : string.Empty);
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        AddIdentity(request, guestId, userId);
+        return Client.SendAsync(request);
     }
 
     /// <summary>
@@ -273,8 +334,16 @@ public abstract class ShareItApiTestBase
     /// </summary>
     protected async Task<int> CountStoredObjectsAsync()
     {
-        var response = await S3Client.ListObjectsV2Async(new ListObjectsV2Request { BucketName = BucketName });
-        return response.S3Objects?.Count ?? 0;
+        try
+        {
+            var response = await S3Client.ListObjectsV2Async(new ListObjectsV2Request { BucketName = BucketName });
+            return response.S3Objects?.Count ?? 0;
+        }
+        catch (NoSuchBucketException)
+        {
+            // No upload ever reached S3, so the bucket was never created.
+            return 0;
+        }
     }
 
     /// <summary>
@@ -326,6 +395,20 @@ public abstract class ShareItApiTestBase
 
         return new ProblemBody(status, title, detail);
     }
+
+    /// <summary>
+    /// Base64url-encoded opaque metadata blob used by upload requests.
+    /// </summary>
+    protected static string MetaFor(string? name, string mime)
+        => Base64Url.EncodeToString(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { name, mime })));
+
+    /// <summary>
+    /// Base64url verifier of 32 bytes, e.g. for protected packages.
+    /// </summary>
+    protected static string Verifier(byte fill = 1)
+        => Base64Url.EncodeToString(Enumerable.Repeat(fill, 32).ToArray());
+
+    protected static byte[] DecodePayload(string payload) => Base64Url.DecodeFromChars(payload);
 
     protected sealed record ProblemBody(int Status, string Title, string? Detail);
 }

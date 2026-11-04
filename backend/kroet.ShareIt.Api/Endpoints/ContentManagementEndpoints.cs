@@ -1,5 +1,6 @@
 ﻿using System.Security.Claims;
 using kroet.Permission.AspNetCore;
+using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.User;
@@ -17,6 +18,17 @@ public static class ContentManagementEndpoints
     {
         var packageGroup = group.MapGroup("/packages");
 
+        // The owner's links list: authenticated only, no names server-side.
+        packageGroup
+            .MapGet("", ListPackagesAsync)
+            .RequirePermission("List.Packages")
+            .Produces<ContentPackageListResponse>()
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
+            .WithName("ListPackages")
+            .WithTags("Content", "Package");
+
         // Package endpoints
         packageGroup
             .MapDelete("/{packageId:guid}", DeletePackageAsync)
@@ -29,6 +41,50 @@ public static class ContentManagementEndpoints
             .WithTags("Content", "Package");
 
         return packageGroup;
+    }
+
+    /// <summary>
+    /// Lists the authenticated owner's packages, newest first. Rows carry no
+    /// names — only timestamps, counters and sizes.
+    /// </summary>
+    private static async Task<Results<Ok<ContentPackageListResponse>, ProblemHttpResult>> ListPackagesAsync(
+        [FromQuery] int? take,
+        [FromQuery] string? cursor,
+        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
+        [FromServices] IContentStorageHandler contentStorageHandler,
+        [FromServices] TimeProvider timeProvider,
+        ClaimsPrincipal claimsPrincipal,
+        CancellationToken cancellationToken)
+    {
+        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
+        {
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "User ID required",
+                Detail = "Either an authenticated user or a guest ID must be provided.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        if (userIdentity.IsGuest)
+        {
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Authentication required",
+                Detail = "Only authenticated users can list their packages",
+                Status = StatusCodes.Status401Unauthorized
+            });
+        }
+
+        var pageSize = Math.Clamp(take ?? 50, 1, 100);
+        var page = await contentStorageHandler.ListPackagesAsync(userIdentity.Id, cursor, pageSize, cancellationToken);
+        var now = timeProvider.GetUtcNow();
+
+        return TypedResults.Ok(new ContentPackageListResponse
+        {
+            Items = page.Items.Select(summary => ContentPackageListItem.FromSummary(summary, now)).ToList(),
+            NextCursor = page.NextCursor
+        });
     }
 
     /// <summary>

@@ -24,7 +24,7 @@ public class StorageHandlerTests
         await using var stream = new MemoryStream([1, 2, 3]);
 
         _blobStorageHandler
-            .UploadAsync(stream, content.MimeType, content.FileName, Arg.Any<CancellationToken>())
+            .UploadAsync(stream, "application/octet-stream", content.Id.ToString(), Arg.Any<CancellationToken>())
             .Returns("blob://content");
 
         await subject.StoreContentAsync(content, stream);
@@ -35,8 +35,7 @@ public class StorageHandlerTests
                 stored.PackageId == content.PackageId &&
                 stored.ContentType == content.ContentType &&
                 stored.Size == content.Size &&
-                stored.FileName == content.FileName &&
-                stored.MimeType == content.MimeType &&
+                stored.Meta == content.Meta &&
                 stored.Url == "blob://content"),
             Arg.Any<CancellationToken>());
     }
@@ -49,7 +48,7 @@ public class StorageHandlerTests
         await using var stream = new MemoryStream([1, 2, 3]);
 
         _blobStorageHandler
-            .UploadAsync(stream, content.MimeType, content.FileName, Arg.Any<CancellationToken>())
+            .UploadAsync(stream, "application/octet-stream", content.Id.ToString(), Arg.Any<CancellationToken>())
             .Returns("blob://content");
         _contentStorageHandler
             .StoreContentAsync(Arg.Any<ExternalContent>(), Arg.Any<CancellationToken>())
@@ -68,7 +67,7 @@ public class StorageHandlerTests
         await using var stream = new MemoryStream([1, 2, 3]);
 
         _blobStorageHandler
-            .UploadAsync(stream, content.MimeType, content.FileName, Arg.Any<CancellationToken>())
+            .UploadAsync(stream, "application/octet-stream", content.Id.ToString(), Arg.Any<CancellationToken>())
             .Returns("blob://content");
         _contentStorageHandler
             .StoreContentAsync(Arg.Any<ExternalContent>(), Arg.Any<CancellationToken>())
@@ -164,8 +163,7 @@ public class StorageHandlerTests
             CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
             Size = 3,
             UserId = Guid.NewGuid(),
-            MimeType = "text/plain",
-            FileName = "test.txt"
+            Meta = "bWV0YQ"
         };
     }
 }

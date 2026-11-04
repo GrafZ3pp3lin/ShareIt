@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using Asp.Versioning;
 using kroet.Permissions;
 using kroet.ShareIt.Api;
@@ -12,6 +13,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -59,6 +62,52 @@ try
         .BindConfiguration(UploadSettings.SectionName)
         .ValidateWithFluentValidator<UploadSettings, UploadSettingsValidator>()
         .ValidateOnStart();
+
+    // Rate limiting for package reads: partitioned on (package id, remote IP),
+    // so unlocking counts towards the same budget as failed attempts and one
+    // NAT cannot lock everyone out.
+    builder.Services.AddOptions<RateLimitSettings>()
+        .BindConfiguration(RateLimitSettings.SectionName)
+        .ValidateWithFluentValidator<RateLimitSettings, RateLimitSettingsValidator>()
+        .ValidateOnStart();
+
+    var rateLimitSettings = configuration.GetSection(RateLimitSettings.SectionName).Get<RateLimitSettings>()
+                            ?? new RateLimitSettings();
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.AddPolicy(RateLimitPolicies.PackageRead, httpContext =>
+        {
+            var packageId = httpContext.GetRouteValue("packageId")?.ToString() ?? "unknown";
+            var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                $"{packageId}|{remoteIp}",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = rateLimitSettings.PackageReadPermitLimit,
+                    Window = TimeSpan.FromMinutes(rateLimitSettings.PackageReadWindowMinutes),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
+        options.OnRejected = async (context, cancellationToken) =>
+        {
+            if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+            {
+                context.HttpContext.Response.Headers.RetryAfter =
+                    Math.Ceiling(retryAfter.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await context.HttpContext.Response.WriteAsJsonAsync(new ProblemDetails
+            {
+                Title = "Too many requests",
+                Detail = "Too many attempts for this link. Please try again later.",
+                Status = StatusCodes.Status429TooManyRequests
+            }, cancellationToken);
+        };
+    });
 
     var uploadSettings = configuration.GetSection(UploadSettings.SectionName).Get<UploadSettings>() ?? new UploadSettings();
     var maxRequestBodySizeBytes = uploadSettings.MaxRequestBodySizeMb * 1024L * 1024L;
@@ -245,6 +294,8 @@ try
 
     // Must come after UseCors so problem responses still carry CORS headers.
     app.UseExceptionHandler();
+
+    app.UseRateLimiter();
 
     if (app.Environment.IsDevelopment())
     {

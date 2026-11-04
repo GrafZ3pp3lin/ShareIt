@@ -75,79 +75,84 @@ public class SqlDownloadTokenService : IDownloadTokenService
     }
 
     /// <inheritdoc />
-    public async Task<TokenValidationResult> ValidateAndConsumeTokenAsync(string token, Guid clientId, CancellationToken cancellationToken = default)
+    public async Task<TokenValidationResult> ValidateTokenAsync(string token, Guid clientId, CancellationToken cancellationToken = default)
     {
         var now = _timeProvider.GetUtcNow();
 
+        const string findSql = """
+                               SELECT
+                                   id, content_id, expires_at, client_id, is_used
+                               FROM download_tokens
+                               WHERE token = @Token
+                               """;
+
         await using var connection = new NpgsqlConnection(_settings.ConnectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        try
+        var tokenDoc = await connection.QuerySingleOrDefaultAsync<DownloadTokenDbDto>(findSql, new { Token = token });
+
+        if (tokenDoc is null)
         {
-            // Find and lock the token
-            const string findSql = """
-                                   SELECT 
-                                       id, content_id, token, created_at, expires_at, 
-                                       client_id, is_used, used_at
-                                   FROM download_tokens
-                                   WHERE token = @Token
-                                   FOR UPDATE
-                                   """;
-
-            var tokenDoc = await connection.QuerySingleOrDefaultAsync<DownloadTokenDbDto>(findSql, new { Token = token }, transaction);
-
-            if (tokenDoc == null)
-            {
-                _logger.LogWarning("Invalid download token attempted: {Token}", token[..Math.Min(8, token.Length)] + "...");
-                await transaction.RollbackAsync(cancellationToken);
-                return new TokenValidationResult(false, null, "Invalid token");
-            }
-
-            // Check if already used
-            if (tokenDoc.IsUsed)
-            {
-                _logger.LogWarning("Attempted to reuse download token for content {ContentId}", tokenDoc.ContentId);
-                await transaction.RollbackAsync(cancellationToken);
-                return new TokenValidationResult(false, null, "Token has already been used");
-            }
-
-            // Check if expired
-            if (tokenDoc.ExpiresAt <= now)
-            {
-                _logger.LogWarning("Expired download token attempted for content {ContentId}", tokenDoc.ContentId);
-                await transaction.RollbackAsync(cancellationToken);
-                return new TokenValidationResult(false, null, "Token has expired");
-            }
-
-            // Validate client ID
-            if (tokenDoc.ClientId != clientId)
-            {
-                _logger.LogWarning("Client ID mismatch for token");
-                await transaction.RollbackAsync(cancellationToken);
-                return new TokenValidationResult(false, null, "Token is not valid for this client");
-            }
-
-            // Mark as used
-            const string updateSql = """
-                                     UPDATE download_tokens
-                                     SET is_used = true, used_at = @UsedAt
-                                     WHERE id = @Id
-                                     """;
-
-            await connection.ExecuteAsync(updateSql, new { tokenDoc.Id, UsedAt = now }, transaction);
-
-            await transaction.CommitAsync(cancellationToken);
-
-            _logger.LogDebug("Successfully validated and consumed token for content {ContentId}", tokenDoc.ContentId);
-            return new TokenValidationResult(true, tokenDoc.ContentId, null);
+            _logger.LogWarning("Invalid download token attempted: {TokenPrefix}...", token[..Math.Min(8, token.Length)]);
+            return new TokenValidationResult(false, null, "Invalid token");
         }
-        catch (Exception ex)
+
+        if (tokenDoc.IsUsed)
         {
-            await transaction.RollbackAsync(cancellationToken);
-            _logger.LogError(ex, "Error validating and consuming token");
-            throw;
+            _logger.LogWarning("Attempted to reuse download token for content {ContentId}", tokenDoc.ContentId);
+            return new TokenValidationResult(false, null, "Token has already been used");
         }
+
+        if (tokenDoc.ExpiresAt <= now)
+        {
+            _logger.LogWarning("Expired download token attempted for content {ContentId}", tokenDoc.ContentId);
+            return new TokenValidationResult(false, null, "Token has expired");
+        }
+
+        if (tokenDoc.ClientId != clientId)
+        {
+            _logger.LogWarning("Client ID mismatch for token");
+            return new TokenValidationResult(false, null, "Token is not valid for this client");
+        }
+
+        return new TokenValidationResult(true, tokenDoc.ContentId, null);
+    }
+
+    /// <inheritdoc />
+    public async Task<TokenValidationResult> ConsumeTokenAsync(string token, Guid clientId, CancellationToken cancellationToken = default)
+    {
+        var now = _timeProvider.GetUtcNow();
+
+        // One guarded statement: concurrent requests carrying the same token
+        // can only win once. The expiry/client checks are repeated here so a
+        // token cannot be consumed after validation has gone stale.
+        const string consumeSql = """
+                                  UPDATE download_tokens
+                                  SET is_used = true, used_at = @UsedAt
+                                  WHERE token = @Token
+                                    AND is_used = false
+                                    AND expires_at > @UsedAt
+                                    AND client_id = @ClientId
+                                  RETURNING content_id
+                                  """;
+
+        await using var connection = new NpgsqlConnection(_settings.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var contentId = await connection.QuerySingleOrDefaultAsync<Guid?>(
+            consumeSql,
+            new { Token = token, ClientId = clientId, UsedAt = now });
+
+        if (contentId is null)
+        {
+            // Unlike validation, we no longer know which reason applied without
+            // a second read; this only happens on a lost race or a stale token.
+            _logger.LogWarning("Download token could not be consumed (already used, expired or wrong client)");
+            return new TokenValidationResult(false, null, "Token has already been used");
+        }
+
+        _logger.LogDebug("Consumed download token for content {ContentId}", contentId.Value);
+        return new TokenValidationResult(true, contentId.Value, null);
     }
 
     /// <inheritdoc />
@@ -191,11 +196,8 @@ public class SqlDownloadTokenService : IDownloadTokenService
     {
         public Guid Id { get; init; }
         public Guid ContentId { get; init; }
-        public string Token { get; init; } = string.Empty;
-        public DateTimeOffset CreatedAt { get; init; }
         public DateTimeOffset ExpiresAt { get; init; }
         public Guid ClientId { get; init; }
         public bool IsUsed { get; init; }
-        public DateTimeOffset? UsedAt { get; init; }
     }
 }

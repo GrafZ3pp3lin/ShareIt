@@ -36,6 +36,26 @@ public interface IContentStorageHandler
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Package, or null if not found</returns>
     Task<ContentPackage?> GetPackageAsync(Guid packageId, bool includeContent = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves only the package shell — no items, no tokens, no blob reads.
+    /// Used to check the unlock proof before an access is claimed.
+    /// </summary>
+    /// <param name="packageId">The unique package identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Package without contents, or null if not found.</returns>
+    Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists the packages owned by a user, newest first, with item count and
+    /// total stored size.
+    /// </summary>
+    /// <param name="userId">The authenticated owner.</param>
+    /// <param name="cursor">Opaque cursor from a previous page, or null for the first page.</param>
+    /// <param name="take">Maximum number of rows to return.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The page and the cursor for the next page (null when done).</returns>
+    Task<PackageListPage> ListPackagesAsync(Guid userId, string? cursor, int take, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Retrieves multiple content packages by their IDs.

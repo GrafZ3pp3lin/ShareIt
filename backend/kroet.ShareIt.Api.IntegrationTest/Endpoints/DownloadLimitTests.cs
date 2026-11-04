@@ -16,7 +16,7 @@ public sealed class DownloadLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestAboveDownloadLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), maxDownloadCount: 2);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxDownloadCount: 2);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -27,7 +27,7 @@ public sealed class DownloadLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestAtDownloadLimit_IsAccepted()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), maxDownloadCount: 1);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxDownloadCount: 1);
 
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
     }
@@ -35,7 +35,7 @@ public sealed class DownloadLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestWithoutDownloadLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), maxDownloadCount: null);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxDownloadCount: null);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -45,7 +45,7 @@ public sealed class DownloadLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_NonPositiveDownloadLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], guestId: Guid.NewGuid(), maxDownloadCount: 0);
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxDownloadCount: 0);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -55,7 +55,7 @@ public sealed class DownloadLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_AuthenticatedAboveDownloadLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], userId: Guid.NewGuid(), maxDownloadCount: 11);
+        var response = await SendCreatePackageAsync(userId: Guid.NewGuid(), maxDownloadCount: 11);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -66,7 +66,7 @@ public sealed class DownloadLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_AuthenticatedAtDownloadLimit_IsAccepted()
     {
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], userId: Guid.NewGuid(), maxDownloadCount: 10);
+        var response = await SendCreatePackageAsync(userId: Guid.NewGuid(), maxDownloadCount: 10);
 
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
     }
@@ -75,7 +75,7 @@ public sealed class DownloadLimitTests : ShareItApiTestBase
     public async Task CreatePackage_AuthenticatedWithoutDownloadLimit_IsAccepted()
     {
         // Omitting the access limit (unlimited access) remains allowed for authenticated users.
-        var response = await SendCreatePackageAsync(fileBytes: [1, 2, 3], userId: Guid.NewGuid(), maxDownloadCount: null);
+        var response = await SendCreatePackageAsync(userId: Guid.NewGuid(), maxDownloadCount: null);
 
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
     }

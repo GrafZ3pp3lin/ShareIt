@@ -1,5 +1,5 @@
-﻿using System.Security.Claims;
-using System.Text;
+using System.Buffers.Text;
+using System.Security.Claims;
 using kroet.Permission.AspNetCore;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content.Dtos;
@@ -9,6 +9,7 @@ using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.User;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -42,23 +43,24 @@ public static class ContentEndpoints
             .WithName("GetUploadLimits")
             .WithTags("Content", "Package");
 
-        // Package endpoints
+        // Package creation: metadata only. Content is added one item per
+        // request through /upload, which is the single content write path.
         packageGroup
             .MapPost("", CreatePackageAsync)
-            .Accepts<CreatePackageRequest>("multipart/form-data")
+            .Accepts<CreatePackageRequest>("application/json")
             .RequirePermission("Create.Package")
-            .DisableAntiforgery()
             .Produces<ContentPackageResponse>(StatusCodes.Status201Created)
+            .Produces<ContentPackageResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
-            .Produces<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
             .WithName("CreatePackage")
             .WithTags("Content", "Package");
 
         packageGroup
-            .MapPost("/{packageId:guid}/upload", UploadFilesToPackageAsync)
-            .Accepts<IFormFileCollection>("multipart/form-data")
+            .MapPost("/{packageId:guid}/upload", UploadContentToPackageAsync)
+            .Accepts<UploadContentRequest>("multipart/form-data")
             .RequirePermission("Upload.File")
             .DisableAntiforgery()
             .Produces<ContentPackageResponse>()
@@ -66,30 +68,22 @@ public static class ContentEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
             .WithName("UploadFileToPackage")
             .WithTags("Content", "Package");
 
         packageGroup
-            .MapPost("/{packageId:guid}/text", AddTextToPackageAsync)
-            .Accepts<CreateTextRequest>("application/json")
-            .RequirePermission("Upload.Text")
-            .Produces<ContentPackageResponse>()
-            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
-            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
-            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
-            .WithName("AddTextToPackage")
-            .WithTags("Content", "Package");
-
-        packageGroup
             .MapGet("/{packageId:guid}", GetPackageAsync)
             .RequirePermission("Read.Package")
+            .RequireRateLimiting(RateLimitPolicies.PackageRead)
             .Produces<ContentPackageDetailsResponse>()
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status410Gone)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
             .WithName("GetPackage")
             .WithTags("Content", "Package");
@@ -107,7 +101,7 @@ public static class ContentEndpoints
             .WithName("GetPackagePreview")
             .WithTags("Content", "Package");
 
-        // Content download endpoint (required for package file downloads)
+        // Content download endpoint (required for items above the inline limit)
         packageGroup
             .MapGet("/{packageId:guid}/content/{contentId:guid}/download", DownloadContentWithTokenAsync)
             .RequirePermission("Download.File")
@@ -123,20 +117,21 @@ public static class ContentEndpoints
     }
 
     /// <summary>
-    /// Creates a new content package with optional files and text content.
+    /// Creates a new (empty) content package. The client supplies the id
+    /// because the salt and verifier derive from it; repeating the request
+    /// with the same id is idempotent for its owner.
     /// </summary>
-    private static async Task<Results<Created<ContentPackageResponse>, ProblemHttpResult>> CreatePackageAsync(
-        [FromForm] CreatePackageRequest request,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
-        [FromServices] IContentStorageHandler contentStorageHandler,
-        [FromServices] IStorageHandler storageHandler,
-        [FromServices] TimeProvider timeProvider,
-        [FromServices] LinkGenerator linkGenerator,
-        [FromServices] IOptions<UploadSettings> uploadOptions,
-        ILogger<LogCategory> logger,
-        HttpContext httpContext,
-        ClaimsPrincipal claimsPrincipal,
-        CancellationToken cancellationToken)
+    private static async Task<Results<Created<ContentPackageResponse>, Ok<ContentPackageResponse>, ProblemHttpResult>>
+        CreatePackageAsync(
+            [FromBody] CreatePackageRequest request,
+            [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
+            [FromServices] IContentStorageHandler contentStorageHandler,
+            [FromServices] TimeProvider timeProvider,
+            [FromServices] LinkGenerator linkGenerator,
+            [FromServices] IOptions<UploadSettings> uploadOptions,
+            ClaimsPrincipal claimsPrincipal,
+            HttpContext httpContext,
+            CancellationToken cancellationToken)
     {
         if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
         {
@@ -146,6 +141,18 @@ public static class ContentEndpoints
                 Detail = "Either an authenticated user or a guest ID must be provided.",
                 Status = StatusCodes.Status400BadRequest
             });
+        }
+
+        if (request.Id is not { } packageId || packageId == Guid.Empty)
+        {
+            return BadRequestProblem("Package id required", "The client must supply a non-empty package id.");
+        }
+
+        if (request.UnlockVerifier is not null && !UnlockProof.TryValidateVerifier(request.UnlockVerifier, out _))
+        {
+            return BadRequestProblem(
+                "Invalid unlock verifier",
+                $"UnlockVerifier must be base64url of exactly {UnlockProof.VerifierLength} bytes.");
         }
 
         if (request.IsPrivate.HasValue && request.IsPrivate.Value && userIdentity.IsGuest)
@@ -158,18 +165,7 @@ public static class ContentEndpoints
             });
         }
 
-        // Validate upload sizes and lifetime before anything is stored
         var settings = uploadOptions.Value;
-        var fileLimitBytes = FileLimitBytes(userIdentity, settings);
-        if (request.Files is { Count: > 0 })
-        {
-            var oversized = request.Files.FirstOrDefault(file => file.Length > fileLimitBytes);
-            if (oversized is not null)
-            {
-                return FileTooLargeProblem(oversized.FileName, fileLimitBytes);
-            }
-        }
-
         var lifetimeProblem = ValidateLifetime(userIdentity, settings, request.TimeToLiveHours);
         if (lifetimeProblem is not null)
         {
@@ -182,130 +178,62 @@ public static class ContentEndpoints
             return downloadCountProblem;
         }
 
+        // Idempotent retry: the same owner repeating the create call gets the
+        // existing package back. Another identity must not probe/hijack the id.
+        var existing = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.UserId != userIdentity.Id)
+            {
+                return TypedResults.Problem(new ProblemDetails
+                {
+                    Title = "Package id already in use",
+                    Detail = "A package with this id already exists.",
+                    Status = StatusCodes.Status409Conflict
+                });
+            }
+
+            var existingWithContent = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+            return TypedResults.Ok(ContentPackageResponse.FromPackage(existingWithContent ?? existing));
+        }
+
         var now = timeProvider.GetUtcNow();
         var package = new ContentPackage
         {
-            Id = Guid.CreateVersion7(now),
-            Title = request.Title,
-            Description = request.Description,
+            Id = packageId,
             CreatedAt = now,
             UserId = userIdentity.Id,
             IsPrivate = request.IsPrivate,
             MaxDownloadCount = request.MaxDownloadCount,
             ExpiresAt = request.TimeToLiveHours.HasValue
                 ? now.AddHours(request.TimeToLiveHours.Value)
-                : null
+                : null,
+            UnlockVerifier = request.UnlockVerifier
         };
 
-        // Wrap package + content storage so a failure while storing item N
-        // also reverts items 1..N-1: the upload is atomic from the client's
-        // point of view (either every item is stored, or none remains).
-        var storedContentIds = new List<Guid>();
-        try
-        {
-            await contentStorageHandler.StorePackageAsync(package, cancellationToken);
-
-            // Process optional files
-            if (request.Files is { Count: > 0 })
-            {
-                foreach (var file in request.Files)
-                {
-                    if (file.Length == 0)
-                    {
-                        continue;
-                    }
-
-                    var fileContent = new Api.Models.Content
-                    {
-                        Id = Guid.CreateVersion7(now),
-                        PackageId = package.Id,
-                        ContentType = ContentType.File,
-                        CreatedAt = now,
-                        Size = file.Length,
-                        UserId = userIdentity.Id,
-                        FileName = SanitizeFileName(file.FileName),
-                        MimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
-                    };
-
-                    await using var stream = file.OpenReadStream();
-                    await storageHandler.StoreContentAsync(fileContent, stream, cancellationToken);
-                    storedContentIds.Add(fileContent.Id);
-                }
-            }
-
-            // Process optional text content
-            if (request.Texts is { Length: > 0 })
-            {
-                foreach (var text in request.Texts)
-                {
-                    if (string.IsNullOrWhiteSpace(text))
-                    {
-                        continue;
-                    }
-
-                    var textBytes = Encoding.UTF8.GetBytes(text);
-                    var textContent = new Api.Models.Content
-                    {
-                        Id = Guid.CreateVersion7(now),
-                        PackageId = package.Id,
-                        ContentType = ContentType.Text,
-                        CreatedAt = now,
-                        Size = textBytes.Length,
-                        UserId = userIdentity.Id,
-                        FileName = $"{Guid.NewGuid()}.txt",
-                        MimeType = "text/plain",
-                    };
-
-                    await using var textStream = new MemoryStream(textBytes);
-                    await storageHandler.StoreContentAsync(textContent, textStream, cancellationToken);
-                    storedContentIds.Add(textContent.Id);
-                }
-            }
-        }
-        catch
-        {
-            await RollbackStoredContentAsync(
-                package.Id,
-                storedContentIds,
-                contentStorageHandler,
-                storageHandler,
-                logger,
-                deletePackage: true,
-                cancellationToken);
-            throw;
-        }
-
-        // Reload package with content to get accurate item count
-        var updatedPackage = await contentStorageHandler.GetPackageAsync(package.Id, true, cancellationToken);
+        await contentStorageHandler.StorePackageAsync(package, cancellationToken);
 
         var packageUrl = linkGenerator.GetUriByName(httpContext, "GetPackage", new { packageId = package.Id })!;
 
-        return TypedResults.Created(packageUrl, ContentPackageResponse.FromPackage(updatedPackage ?? package));
+        return TypedResults.Created(packageUrl, ContentPackageResponse.FromPackage(package));
     }
 
     /// <summary>
-    /// Uploads multiple files to an existing package.
+    /// Uploads one item — text bytes or file bytes — to an existing package.
+    /// The bytes and the opaque metadata are stored verbatim; the server never
+    /// parses the metadata.
     /// </summary>
-    private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult>> UploadFilesToPackageAsync(
+    private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult>> UploadContentToPackageAsync(
         [FromRoute] Guid packageId,
-        [FromForm] IFormFileCollection files,
+        [FromForm] UploadContentRequest request,
         [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler contentStorageHandler,
         [FromServices] IStorageHandler storageHandler,
         [FromServices] TimeProvider timeProvider,
         [FromServices] IOptions<UploadSettings> uploadOptions,
-        ILogger<LogCategory> logger,
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
     {
-        if (files.Count == 0)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "No files provided", Detail = "At least one file must be uploaded", Status = StatusCodes.Status400BadRequest
-            });
-        }
-
         if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
         {
             return TypedResults.Problem(new ProblemDetails
@@ -316,13 +244,14 @@ public static class ContentEndpoints
             });
         }
 
-        // Verify package exists
-        var package = await contentStorageHandler.GetPackageAsync(packageId, false, cancellationToken);
+        var package = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
         if (package is null)
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Package not found", Detail = $"Package with ID {packageId} was not found", Status = StatusCodes.Status404NotFound
+                Title = "Package not found",
+                Detail = $"Package with ID {packageId} was not found",
+                Status = StatusCodes.Status404NotFound
             });
         }
 
@@ -330,149 +259,94 @@ public static class ContentEndpoints
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Forbidden", Detail = "Only the owner of the package can add files to it", Status = StatusCodes.Status403Forbidden
+                Title = "Forbidden",
+                Detail = "Only the owner of the package can add content to it",
+                Status = StatusCodes.Status403Forbidden
             });
         }
 
-        // Validate upload sizes before anything is stored
+        if (request.Id is not { } contentId || contentId == Guid.Empty)
+        {
+            return BadRequestProblem("Content id required", "The client must supply a non-empty content id.");
+        }
+
+        if (!TryParseKind(request.Kind, out var contentType))
+        {
+            return BadRequestProblem("Invalid kind", "Kind must be either 'text' or 'file'.");
+        }
+
+        if (!Base64UrlText.TryDecode(request.Meta, out var metaBytes))
+        {
+            return BadRequestProblem("Invalid meta", "Meta must be base64url text.");
+        }
+
+        if (metaBytes.Length > UnlockProof.MaxMetaBytes)
+        {
+            return BadRequestProblem(
+                "Meta too large",
+                $"Meta must decode to at most {UnlockProof.MaxMetaBytes} bytes.");
+        }
+
+        if (request.File is null || request.File.Length == 0)
+        {
+            return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
+        }
+
         var settings = uploadOptions.Value;
         var fileLimitBytes = FileLimitBytes(userIdentity, settings);
-        var oversized = files.FirstOrDefault(file => file.Length > fileLimitBytes);
-        if (oversized is not null)
+        if (request.File.Length > fileLimitBytes)
         {
-            return FileTooLargeProblem(oversized.FileName, fileLimitBytes);
+            return FileTooLargeProblem(contentId, fileLimitBytes);
         }
 
-        var now = timeProvider.GetUtcNow();
-
-        // Wrap content storage so a failure while storing file N also reverts
-        // files 1..N-1 added by this request; previously stored package content
-        // (and the package itself) is intentionally left untouched.
-        var storedContentIds = new List<Guid>();
-        try
+        // Idempotent retry: a repeated upload with the same item id must not
+        // create a duplicate row or fail on the primary key.
+        var existing = await contentStorageHandler.GetContentAsync(contentId, cancellationToken);
+        if (existing is not null)
         {
-            foreach (var file in files)
+            if (existing.PackageId != packageId)
             {
-                if (file.Length == 0)
+                return TypedResults.Problem(new ProblemDetails
                 {
-                    continue;
-                }
-
-                var fileContent = new Api.Models.Content
-                {
-                    Id = Guid.CreateVersion7(now),
-                    PackageId = packageId,
-                    ContentType = ContentType.File,
-                    CreatedAt = now,
-                    Size = file.Length,
-                    UserId = userIdentity.Id,
-                    FileName = SanitizeFileName(file.FileName),
-                    MimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
-                };
-
-                await using var stream = file.OpenReadStream();
-                await storageHandler.StoreContentAsync(fileContent, stream, cancellationToken);
-                storedContentIds.Add(fileContent.Id);
+                    Title = "Content id already in use",
+                    Detail = "Content with this id already exists in another package.",
+                    Status = StatusCodes.Status409Conflict
+                });
             }
-        }
-        catch
-        {
-            await RollbackStoredContentAsync(
-                packageId,
-                storedContentIds,
-                contentStorageHandler,
-                storageHandler,
-                logger,
-                deletePackage: false,
-                cancellationToken);
-            throw;
-        }
 
-        // Get updated package
-        package = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
-
-        return TypedResults.Ok(ContentPackageResponse.FromPackage(package!));
-    }
-
-    /// <summary>
-    /// Adds text content to an existing package.
-    /// </summary>
-    private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult>> AddTextToPackageAsync(
-        [FromRoute] Guid packageId,
-        [FromBody] CreateTextRequest request,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
-        [FromServices] IContentStorageHandler contentStorageHandler,
-        [FromServices] IStorageHandler storageHandler,
-        [FromServices] TimeProvider timeProvider,
-        ClaimsPrincipal claimsPrincipal,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.Text))
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Invalid text", Detail = "Text content cannot be empty", Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        // Verify package exists
-        var package = await contentStorageHandler.GetPackageAsync(packageId, false, cancellationToken);
-        if (package is null)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Package not found", Detail = $"Package with ID {packageId} was not found", Status = StatusCodes.Status404NotFound
-            });
-        }
-
-        if (package.UserId != userIdentity.Id)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Forbidden", Detail = "Only the owner of the package can add text content to it", Status = StatusCodes.Status403Forbidden
-            });
+            var existingPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+            return TypedResults.Ok(ContentPackageResponse.FromPackage(existingPackage ?? package));
         }
 
         var now = timeProvider.GetUtcNow();
-        var textBytes = Encoding.UTF8.GetBytes(request.Text);
-        var textContent = new Api.Models.Content
+        var content = new Api.Models.Content
         {
-            Id = Guid.CreateVersion7(now),
+            Id = contentId,
             PackageId = packageId,
-            ContentType = ContentType.Text,
+            ContentType = contentType,
             CreatedAt = now,
-            Size = textBytes.Length,
+            Size = request.File.Length,
             UserId = userIdentity.Id,
-            FileName = $"{Guid.NewGuid()}.txt",
-            MimeType = "text/plain",
+            Meta = request.Meta
         };
 
-        await using var textStream = new MemoryStream(textBytes);
-        await storageHandler.StoreContentAsync(textContent, textStream, cancellationToken);
+        await using var stream = request.File.OpenReadStream();
+        await storageHandler.StoreContentAsync(content, stream, cancellationToken);
 
-        // Get updated package
-        package = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+        var updatedPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
 
-        return TypedResults.Ok(ContentPackageResponse.FromPackage(package!));
+        return TypedResults.Ok(ContentPackageResponse.FromPackage(updatedPackage ?? package));
     }
 
     /// <summary>
-    /// Gets a package with all its content items.
-    /// Generates download tokens for files.
+    /// Gets a package with all its content items and issues download tokens for
+    /// items above the inline payload limit. A protected package requires a
+    /// valid unlock proof before anything is read or an access is claimed.
     /// </summary>
     private static async Task<Results<Ok<ContentPackageDetailsResponse>, ProblemHttpResult>> GetPackageAsync(
         [FromRoute] Guid packageId,
         [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
+        [FromHeader(Name = "X-Unlock-Proof")] string? unlockProof,
         [FromServices] IContentStorageHandler storageHandler,
         [FromServices] IBlobStorageHandler blobStorageHandler,
         [FromServices] IDownloadTokenService tokenService,
@@ -481,6 +355,7 @@ public static class ContentEndpoints
         [FromServices] TimeProvider timeProvider,
         HttpContext httpContext,
         ClaimsPrincipal claimsPrincipal,
+        ILogger<LogCategory> logger,
         CancellationToken cancellationToken)
     {
         if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
@@ -493,23 +368,41 @@ public static class ContentEndpoints
             });
         }
 
-        var package = await storageHandler.GetPackageAsync(packageId, true, cancellationToken);
+        // Shell first: no items, no names, no tokens, no blob reads.
+        var package = await storageHandler.GetPackageShellAsync(packageId, cancellationToken);
         if (package is null || package.IsPrivate.HasValue && package.IsPrivate.Value && (userIdentity.IsGuest || package.UserId != userIdentity.Id))
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Package not found", Detail = $"Package with ID {packageId} was not found", Status = StatusCodes.Status404NotFound
+                Title = "Package not found",
+                Detail = $"Package with ID {packageId} was not found",
+                Status = StatusCodes.Status404NotFound
             });
         }
 
         var now = timeProvider.GetUtcNow();
 
-        // Check if package has expired
+        // Expiry is not content, so answering 410 before the proof is safe.
         if (package.IsExpired(now))
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Package expired", Detail = "This package has expired and is no longer available", Status = StatusCodes.Status410Gone
+                Title = "Package expired",
+                Detail = "This package has expired and is no longer available",
+                Status = StatusCodes.Status410Gone
+            });
+        }
+
+        // Proof before the access claim: a wrong passphrase costs nothing and
+        // reveals nothing. The header value is never logged.
+        if (package.UnlockVerifier is not null && !UnlockProof.Matches(package.UnlockVerifier, unlockProof))
+        {
+            logger.LogWarning("Failed unlock attempt for package {PackageId}", packageId);
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Unlock required",
+                Detail = "A valid unlock proof is required to view this package.",
+                Status = StatusCodes.Status401Unauthorized
             });
         }
 
@@ -527,54 +420,61 @@ public static class ContentEndpoints
             });
         }
 
-        if (package.Contents == null || package.Contents.Count == 0)
+        var withContent = await storageHandler.GetPackageAsync(packageId, includeContent: true, cancellationToken);
+        if (withContent?.Contents is null || withContent.Contents.Count == 0)
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Package is empty", Detail = "This package contains no content", Status = StatusCodes.Status410Gone
+                Title = "Package is empty",
+                Detail = "This package contains no content",
+                Status = StatusCodes.Status410Gone
             });
         }
 
-        // Get all content items
+        var inlineLimitBytes = downloadOptions.Value.InlinePayloadLimitBytes;
+        var inlineBudgetBytes = downloadOptions.Value.InlinePayloadBudgetBytes;
+        var inlineSpentBytes = 0L;
+
         var items = new List<ContentItemInPackage>();
+        var orderedContents = withContent.Contents
+            .OrderBy(content => content.CreatedAt)
+            .ThenBy(content => content.Id.ToString("N"), StringComparer.Ordinal);
 
-        // Only read text blobs fully into memory up to the configured inline
-        // limit; larger text items are served via a download token like files.
-        var inlineTextLimitBytes = downloadOptions.Value.InlineTextLimitKb * 1024;
-
-        foreach (var content in package.Contents)
+        foreach (var content in orderedContents)
         {
-            if (content.ContentType == ContentType.Text && content.Size <= inlineTextLimitBytes)
+            var inline = content.Size <= inlineLimitBytes
+                         && inlineSpentBytes + content.Size <= inlineBudgetBytes;
+
+            if (inline)
             {
                 var dataStream = await blobStorageHandler.DownloadAsync(content.Url, cancellationToken);
-                using var reader = new StreamReader(dataStream, Encoding.UTF8);
-                var text = await reader.ReadToEndAsync(cancellationToken);
+                using var buffer = new MemoryStream();
+                await dataStream.CopyToAsync(buffer, cancellationToken);
+                inlineSpentBytes += content.Size;
 
                 items.Add(new ContentItemInPackage
                 {
                     Id = content.Id,
-                    Type = "text",
-                    MimeType = content.MimeType,
+                    Kind = KindOf(content.ContentType),
                     Size = content.Size,
-                    Text = text
+                    Meta = content.Meta,
+                    Payload = Base64Url.EncodeToString(buffer.ToArray())
                 });
             }
             else
             {
-                // Generate download token for files and oversized text items
                 var token = await tokenService.GenerateTokenAsync(content.Id, userIdentity.Id, cancellationToken);
                 var downloadUrl = linkGenerator.GetUriByName(
                     httpContext,
                     "DownloadContentWithToken",
-                    new { packageId = package.Id, contentId = content.Id })!;
+                    new { packageId = withContent.Id, contentId = content.Id })!;
 
                 items.Add(new ContentItemInPackage
                 {
                     Id = content.Id,
-                    Type = content.ContentType == ContentType.Text ? "text" : "file",
-                    FileName = content.FileName,
-                    MimeType = content.MimeType,
+                    Kind = KindOf(content.ContentType),
                     Size = content.Size,
+                    Meta = content.Meta,
                     DownloadToken = token.Token,
                     DownloadUrl = downloadUrl,
                     TokenExpiresAt = token.ExpiresAt
@@ -582,14 +482,18 @@ public static class ContentEndpoints
             }
         }
 
-        var response = new ContentPackageDetailsResponse { Package = ContentPackageResponse.FromPackage(package), Items = items };
+        var response = new ContentPackageDetailsResponse
+        {
+            Package = ContentPackageResponse.FromPackage(withContent),
+            Items = items
+        };
 
         return TypedResults.Ok(response);
     }
 
     /// <summary>
     /// Returns basic package information for the authenticated owner only:
-    /// no content items, no download tokens, no inline text, and it never
+    /// no content items, no download tokens, no inline payloads, and it never
     /// consumes an access.
     /// </summary>
     private static async Task<Results<Ok<ContentPackagePreviewResponse>, ProblemHttpResult>> GetPackagePreviewAsync(
@@ -628,15 +532,15 @@ public static class ContentEndpoints
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Package not found", Detail = $"Package with ID {packageId} was not found", Status = StatusCodes.Status404NotFound
+                Title = "Package not found",
+                Detail = $"Package with ID {packageId} was not found",
+                Status = StatusCodes.Status404NotFound
             });
         }
 
         return TypedResults.Ok(new ContentPackagePreviewResponse
         {
             Id = package.Id,
-            Title = package.Title,
-            Description = package.Description,
             CreatedAt = package.CreatedAt,
             ExpiresAt = package.ExpiresAt,
             ItemCount = package.Contents?.Count ?? 0,
@@ -681,8 +585,9 @@ public static class ContentEndpoints
             });
         }
 
-        // Validate the token
-        var validationResult = await tokenService.ValidateAndConsumeTokenAsync(token, userIdentity.Id, cancellationToken);
+        // Read-only validation first: a failing blob read must not burn the
+        // token.
+        var validationResult = await tokenService.ValidateTokenAsync(token, userIdentity.Id, cancellationToken);
         if (!validationResult.IsValid)
         {
             return TypedResults.Problem(new ProblemDetails
@@ -698,7 +603,9 @@ public static class ContentEndpoints
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Token mismatch", Detail = "The download token is not valid for this content", Status = StatusCodes.Status400BadRequest
+                Title = "Token mismatch",
+                Detail = "The download token is not valid for this content",
+                Status = StatusCodes.Status400BadRequest
             });
         }
 
@@ -714,40 +621,44 @@ public static class ContentEndpoints
             });
         }
 
+        var content = package.Contents.Single(c => c.Id == contentId);
+
+        Stream stream;
         try
         {
-            // Get metadata first to determine content type and filename
-            var content = package.Contents.FirstOrDefault(c => c.Id == contentId);
-
-            if (content == null)
-            {
-                return TypedResults.Problem(new ProblemDetails
-                {
-                    Title = "Content not found", Detail = $"Content with ID {contentId} was not found", Status = StatusCodes.Status404NotFound
-                });
-            }
-
-            // No counter interaction here: the access was already claimed when
-            // the package link was opened. Downloads are enforced by the
-            // single-use token only.
-
-            // Retrieve the data stream
-            var stream = await blobStorageHandler.DownloadAsync(content.Url, cancellationToken);
-
-            return TypedResults.Stream(
-                stream,
-                content.MimeType,
-                content.FileName,
-                content.CreatedAt,
-                enableRangeProcessing: true);
+            stream = await blobStorageHandler.DownloadAsync(content.Url, cancellationToken);
         }
         catch (KeyNotFoundException)
         {
+            // The token stays usable: nothing was streamed and nothing consumed.
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Content not found", Detail = $"Content with ID {contentId} was not found", Status = StatusCodes.Status404NotFound
+                Title = "Content not found",
+                Detail = $"Content with ID {contentId} was not found",
+                Status = StatusCodes.Status404NotFound
             });
         }
+
+        // Consume only once the blob is open. Losing the race (another request
+        // used the same token) must not stream anything.
+        var consumed = await tokenService.ConsumeTokenAsync(token, userIdentity.Id, cancellationToken);
+        if (!consumed.IsValid)
+        {
+            await stream.DisposeAsync();
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Invalid download token",
+                Detail = consumed.ErrorMessage ?? "The download token has already been used",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        // No names or MIME types here: both are part of the client-sealed
+        // per-item metadata. The browser saves the bytes as an opaque blob.
+        return TypedResults.Stream(
+            stream,
+            "application/octet-stream",
+            enableRangeProcessing: true);
     }
 
     /// <summary>
@@ -768,6 +679,22 @@ public static class ContentEndpoints
             AuthenticatedMaxDownloadCount = settings.Authenticated.MaxDownloadCount
         });
     }
+
+    private static bool TryParseKind(string? kind, out ContentType contentType)
+    {
+        contentType = ContentType.File;
+
+        if (string.Equals(kind, "text", StringComparison.OrdinalIgnoreCase))
+        {
+            contentType = ContentType.Text;
+            return true;
+        }
+
+        return string.Equals(kind, "file", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string KindOf(ContentType contentType)
+        => contentType == ContentType.Text ? "text" : "file";
 
     /// <summary>
     /// Resolves the per-file upload limit for the given identity.
@@ -858,78 +785,13 @@ public static class ContentEndpoints
         });
     }
 
-    /// <summary>
-    /// Best-effort cleanup of a partially stored upload: deletes every content
-    /// item that was fully stored during this request (blob + metadata) and,
-    /// for package creation, the package metadata row itself. Mirrors the
-    /// single-item cleanup in <see cref="StorageHandler.StoreContentAsync"/>
-    /// at the multi-item level.
-    /// </summary>
-    private static async Task RollbackStoredContentAsync(
-        Guid packageId,
-        IReadOnlyList<Guid> storedContentIds,
-        IContentStorageHandler contentStorageHandler,
-        IStorageHandler storageHandler,
-        ILogger<LogCategory> logger,
-        bool deletePackage,
-        CancellationToken cancellationToken)
-    {
-        foreach (var contentId in storedContentIds)
-        {
-            try
-            {
-                if (await storageHandler.DeleteContentAsync(contentId, cancellationToken))
-                {
-                    logger.LogDebug("Rolled back content {ContentId} after failed upload", contentId);
-                }
-            }
-            catch (Exception cleanupEx)
-            {
-                logger.LogError(cleanupEx, "Failed to roll back content {ContentId} after failed upload", contentId);
-            }
-        }
-
-        if (deletePackage)
-        {
-            try
-            {
-                if (await contentStorageHandler.DeletePackageAsync(packageId, cancellationToken))
-                {
-                    logger.LogInformation("Rolled back package {PackageId} after failed upload", packageId);
-                }
-            }
-            catch (Exception cleanupEx)
-            {
-                logger.LogError(cleanupEx, "Failed to roll back package {PackageId} after failed upload", packageId);
-            }
-        }
-    }
-
-    private static ProblemHttpResult FileTooLargeProblem(string? fileName, long fileLimitBytes)
+    private static ProblemHttpResult FileTooLargeProblem(Guid contentId, long fileLimitBytes)
     {
         return TypedResults.Problem(new ProblemDetails
         {
             Title = "File too large",
-            Detail = $"File '{fileName}' exceeds the upload limit of {fileLimitBytes / (1024d * 1024d):0.#} MB.",
+            Detail = $"Content '{contentId}' exceeds the upload limit of {fileLimitBytes / (1024d * 1024d):0.#} MB.",
             Status = StatusCodes.Status413PayloadTooLarge
         });
-    }
-
-    /// <summary>
-    /// Strips any path information, control characters and excessive length from a
-    /// client-supplied file name before it is persisted or used in response headers.
-    /// </summary>
-    private static string SanitizeFileName(string? fileName)
-    {
-        var name = Path.GetFileName((fileName ?? string.Empty).Replace('\\', '/')).Trim();
-        var sanitized = new string(name.Where(c => !char.IsControl(c)).ToArray()).Trim();
-
-        if (string.IsNullOrEmpty(sanitized))
-        {
-            return "file";
-        }
-
-        const int maxFileNameLength = 200;
-        return sanitized.Length <= maxFileNameLength ? sanitized : sanitized[^maxFileNameLength..];
     }
 }

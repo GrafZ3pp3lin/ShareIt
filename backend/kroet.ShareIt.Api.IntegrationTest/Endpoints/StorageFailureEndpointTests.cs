@@ -9,11 +9,11 @@ using Microsoft.Extensions.Logging;
 namespace kroet.ShareIt.Api.IntegrationTest.Endpoints;
 
 /// <summary>
-/// Endpoint rollback behaviour when a real storage write fails halfway
-/// through a multi-item request.
+/// Endpoint behaviour when a real storage write fails. A single-item upload
+/// leaves no partial row or orphaned blob behind.
 /// </summary>
 [TestClass]
-public sealed class RollbackEndpointTests : ShareItApiTestBase
+public sealed class StorageFailureEndpointTests : ShareItApiTestBase
 {
     protected override Action<IServiceCollection> ConfigureTestServices => services =>
     {
@@ -25,47 +25,47 @@ public sealed class RollbackEndpointTests : ShareItApiTestBase
     };
 
     [TestMethod]
-    public async Task CreatePackage_WhenStorageFailsMidUpload_RollsBackPackageAndStoredObjects()
+    public async Task UploadItem_WhenStorageFails_LeavesNoContentRowOrObject()
     {
+        var guestId = Guid.NewGuid();
+        var packageId = await CreatePackageAsync(guestId: guestId);
+
         var storage = Assert.IsInstanceOfType<ControllableStorageHandler>(
             Services.GetRequiredService<IStorageHandler>());
-        storage.FailOnStoreCall = 2;
+        storage.FailOnStoreCall = 1;
 
-        var response = await SendCreatePackageAsync(
-            guestId: Guid.NewGuid(),
-            files: [([1, 2, 3], "one.bin"), ([4, 5, 6], "two.bin")]);
+        var response = await SendUploadItemAsync(packageId, "file", [1, 2, 3], guestId: guestId);
 
         Assert.AreEqual(HttpStatusCode.InternalServerError, response.StatusCode);
 
         var counts = await GetDatabaseCountsAsync();
-        Assert.AreEqual((0, 0), counts, "The package and all content rows should be rolled back.");
-        Assert.AreEqual(0, await CountStoredObjectsAsync(), "All uploaded blobs should be rolled back.");
+        Assert.AreEqual((1, 0), counts, "The package should remain, but the failed item must not.");
+        Assert.AreEqual(0, await CountStoredObjectsAsync(), "The failed upload must not leave a blob behind.");
     }
 
     [TestMethod]
-    public async Task UploadFilesToPackage_WhenStorageFailsMidUpload_RollsBackOnlyNewContent()
+    public async Task UploadItem_AfterAFailedAttempt_CanBeRetriedWithTheSameIds()
     {
         var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, fileBytes: [9, 9, 9]);
+        var packageId = await CreatePackageAsync(guestId: guestId);
+        var contentId = Guid.NewGuid();
 
         var storage = Assert.IsInstanceOfType<ControllableStorageHandler>(
             Services.GetRequiredService<IStorageHandler>());
-        storage.FailOnStoreCall = 3;
+        storage.FailOnStoreCall = 1;
 
-        var response = await SendUploadFilesAsync(
-            packageId,
-            [([1, 2, 3], "one.bin"), ([4, 5, 6], "two.bin")],
-            guestId);
+        var failed = await SendUploadItemAsync(
+            packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+        Assert.AreEqual(HttpStatusCode.InternalServerError, failed.StatusCode);
 
-        Assert.AreEqual(HttpStatusCode.InternalServerError, response.StatusCode);
+        storage.FailOnStoreCall = null;
+        var retried = await SendUploadItemAsync(
+            packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
 
-        var counts = await GetDatabaseCountsAsync();
-        Assert.AreEqual((1, 1), counts, "Only the pre-existing package and content should remain.");
-        Assert.AreEqual(1, await CountStoredObjectsAsync(), "Only the pre-existing blob should remain.");
-
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
-        Assert.HasCount(1, details.Items);
-        Assert.AreEqual("hello.txt", details.Items[0].FileName);
+        var body = await retried.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.OK, retried.StatusCode, body);
+        Assert.AreEqual((1, 1), await GetDatabaseCountsAsync());
+        Assert.AreEqual(1, await CountStoredObjectsAsync());
     }
 }
 
@@ -87,7 +87,7 @@ public sealed class DeleteFailureEndpointTests : ShareItApiTestBase
     public async Task DeletePackage_WhenStorageDeleteFails_Returns500AndKeepsPackage()
     {
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: ownerId, fileBytes: [1, 2, 3]);
+        var packageId = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
 
         var response = await DeletePackageAsync(packageId, userId: ownerId);
 

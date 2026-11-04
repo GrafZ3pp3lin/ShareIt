@@ -11,12 +11,12 @@ public static class PermissionExtensions
             host.MapPermission(manager =>
             {
                 manager.RegisterPermission("Upload.File", ForEveryone);
-                manager.RegisterPermission("Upload.Text", ForEveryone);
                 manager.RegisterPermission("Download.File", ForEveryone);
                 
                 manager.RegisterPermission("Create.Package", ForEveryone);
                 manager.RegisterPermission("Read.Package", ForEveryone);
                 manager.RegisterPermission("Read.Limits", ForEveryone);
+                manager.RegisterPermission("List.Packages", ForAuthenticatedUsers);
                 manager.RegisterPermission("Preview.Package", ForAuthenticatedUsers);
                 manager.RegisterPermission("Delete.Package", ForAuthenticatedUsers);
             });

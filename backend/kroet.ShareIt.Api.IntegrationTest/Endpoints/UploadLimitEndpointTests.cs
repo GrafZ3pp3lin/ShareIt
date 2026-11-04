@@ -5,7 +5,8 @@ using kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 namespace kroet.ShareIt.Api.IntegrationTest.Endpoints;
 
 /// <summary>
-/// Endpoint-level tests for the per-file upload size limits (413 enforcement).
+/// Endpoint-level tests for the per-file upload size limits (413 enforcement)
+/// on the single-item upload endpoint.
 ///
 /// Limits are tightened to keep bodies small: 1 MB for guests, 2 MB for
 /// authenticated users, 2 MB for the whole request body. Kestrel's request
@@ -40,46 +41,52 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task CreatePackage_FileExceedingGuestLimit_Returns413()
+    public async Task UploadItem_FileExceedingGuestLimit_Returns413()
     {
-        var response = await SendCreatePackageAsync(fileBytes: OversizedFile, guestId: Guid.NewGuid());
+        var guestId = Guid.NewGuid();
+        var packageId = await CreatePackageAsync(guestId: guestId);
+
+        var response = await SendUploadItemAsync(packageId, "file", OversizedFile, guestId: guestId);
 
         Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("File too large", problem.Title);
-        Assert.IsTrue(problem.Detail!.Contains("hello.txt", StringComparison.Ordinal), problem.Detail);
-        Assert.IsTrue(problem.Detail.Contains("1 MB", StringComparison.Ordinal), problem.Detail);
+        Assert.IsTrue(problem.Detail!.Contains("1 MB", StringComparison.Ordinal), problem.Detail);
     }
 
     [TestMethod]
-    public async Task CreatePackage_FileExactlyAtGuestLimit_IsAccepted()
+    public async Task UploadItem_FileExactlyAtGuestLimit_IsAccepted()
     {
         // The endpoint rejects files strictly larger than the limit.
         var guestId = Guid.NewGuid();
+        var packageId = await CreatePackageAsync(guestId: guestId);
 
-        var response = await SendCreatePackageAsync(fileBytes: new byte[1024 * 1024], guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", new byte[1024 * 1024], guestId: guestId);
 
         var body = await response.Content.ReadAsStringAsync();
-        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
         var package = await ReadJsonAsync<ContentPackageResponse>(response);
-        Assert.AreEqual(guestId, package.UserId);
+        Assert.AreEqual(1, package.ItemCount);
     }
 
     [TestMethod]
-    public async Task CreatePackage_FileWithinGuestLimit_Returns201()
-    {
-        var response = await SendCreatePackageAsync(fileBytes: new byte[500_000], guestId: Guid.NewGuid());
-
-        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
-    }
-
-    [TestMethod]
-    public async Task UploadFilesToPackage_FileExceedingGuestLimit_Returns413AndStoresNothing()
+    public async Task UploadItem_FileWithinGuestLimit_Returns200()
     {
         var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, fileBytes: [1, 2, 3]);
+        var packageId = await CreatePackageAsync(guestId: guestId);
 
-        var response = await SendUploadFilesAsync(packageId, OversizedFile, guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", new byte[500_000], guestId: guestId);
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task UploadItem_FileExceedingGuestLimit_StoresNothing()
+    {
+        var guestId = Guid.NewGuid();
+        var (packageId, _) = await CreatePackageWithItemAsync(guestId: guestId);
+
+        var response = await SendUploadItemAsync(packageId, "file", OversizedFile, guestId: guestId);
 
         Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -91,12 +98,12 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task UploadFilesToPackage_FileAboveGuestLimitWithinAuthenticatedLimit_SucceedsForAuthenticatedOwner()
+    public async Task UploadItem_FileAboveGuestLimitWithinAuthenticatedLimit_SucceedsForOwner()
     {
         var userId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: userId, title: "limit test");
+        var packageId = await CreatePackageAsync(userId: userId, maxDownloadCount: 10, timeToLiveHours: 24);
 
-        var response = await SendUploadFilesAsync(packageId, OversizedFile, userId: userId);
+        var response = await SendUploadItemAsync(packageId, "file", OversizedFile, userId: userId);
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);

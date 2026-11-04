@@ -165,7 +165,58 @@ public class InMemoryContentStorageHandlerTests
         Assert.DoesNotContain(activePackage.Id, packagesToDelete);
     }
 
+    [TestMethod]
+    public async Task ListPackagesAsync_ReturnsOwnPackagesNewestFirstWithAggregatesAndCursor()
+    {
+        var ownerId = Guid.NewGuid();
+        var start = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00");
+
+        var oldest = CreatePackage(createdAt: start);
+        oldest = oldest with { UserId = ownerId };
+        var middle = CreatePackage(createdAt: start.AddMinutes(1)) with { UserId = ownerId };
+        var newest = CreatePackage(createdAt: start.AddMinutes(2)) with { UserId = ownerId };
+        var foreign = CreatePackage(createdAt: start.AddMinutes(3)) with { UserId = Guid.NewGuid() };
+
+        foreach (var package in new[] { oldest, middle, newest, foreign })
+        {
+            await _handler.StorePackageAsync(package);
+        }
+
+        await _handler.StoreContentAsync(CreateContent(oldest.Id) with { Size = 10 });
+        await _handler.StoreContentAsync(CreateContent(oldest.Id) with { Size = 20 });
+
+        var firstPage = await _handler.ListPackagesAsync(ownerId, cursor: null, take: 2);
+
+        Assert.HasCount(2, firstPage.Items);
+        Assert.AreEqual(newest.Id, firstPage.Items[0].Id);
+        Assert.AreEqual(middle.Id, firstPage.Items[1].Id);
+        Assert.IsNotNull(firstPage.NextCursor);
+
+        var secondPage = await _handler.ListPackagesAsync(ownerId, firstPage.NextCursor, take: 2);
+        Assert.HasCount(1, secondPage.Items);
+        Assert.AreEqual(oldest.Id, secondPage.Items[0].Id);
+        Assert.AreEqual(2, secondPage.Items[0].ItemCount);
+        Assert.AreEqual(30, secondPage.Items[0].TotalSize);
+        Assert.IsNull(secondPage.NextCursor);
+    }
+
+    [TestMethod]
+    public async Task GetPackageShellAsync_ReturnsPackageWithoutContents()
+    {
+        var package = CreatePackage(unlockVerifier: "verifier");
+        await _handler.StorePackageAsync(package);
+        await _handler.StoreContentAsync(CreateContent(package.Id));
+
+        var shell = await _handler.GetPackageShellAsync(package.Id);
+
+        Assert.IsNotNull(shell);
+        Assert.IsNull(shell.Contents);
+        Assert.AreEqual("verifier", shell.UnlockVerifier);
+    }
+
     private static ContentPackage CreatePackage(
+        DateTimeOffset? createdAt = null,
+        string? unlockVerifier = null,
         int? maxDownloadCount = null,
         int currentDownloadCount = 0,
         DateTimeOffset? expiresAt = null)
@@ -173,10 +224,9 @@ public class InMemoryContentStorageHandlerTests
         return new ContentPackage
         {
             Id = Guid.NewGuid(),
-            Title = "In-memory package",
-            Description = "In-memory storage test",
-            CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
+            CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
             UserId = Guid.NewGuid(),
+            UnlockVerifier = unlockVerifier,
             MaxDownloadCount = maxDownloadCount,
             CurrentDownloadCount = currentDownloadCount,
             ExpiresAt = expiresAt
@@ -194,8 +244,7 @@ public class InMemoryContentStorageHandlerTests
                 CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
                 Size = 3,
                 UserId = Guid.NewGuid(),
-                MimeType = "text/plain",
-                FileName = "test.txt"
+                Meta = "bWV0YQ"
             },
             $"blob://{Guid.NewGuid()}");
     }

@@ -1,21 +1,25 @@
-﻿using kroet.ShareIt.Api.Models;
+using kroet.ShareIt.Api.Models;
 
 namespace kroet.ShareIt.Api.Content.Dtos;
 
 /// <summary>
-/// Request to create a new content package.
+/// Request to create a new content package. Content items are uploaded
+/// separately through <c>POST /package/{id}/upload</c>.
 /// </summary>
 public class CreatePackageRequest
 {
     /// <summary>
-    /// Optional title/name for the package.
+    /// Client-generated package ID (a GUID). The client needs it before
+    /// anything is encrypted because the salt and unlock verifier derive from
+    /// it. Repeating the request with the same id is idempotent for its owner.
     /// </summary>
-    public string? Title { get; set; }
+    public Guid? Id { get; set; }
 
     /// <summary>
-    /// Optional description of the package.
+    /// Base64url HMAC-SHA256 proof of the package passphrase (32 bytes).
+    /// Null when the package is not protected.
     /// </summary>
-    public string? Description { get; set; }
+    public string? UnlockVerifier { get; set; }
 
     /// <summary>
     /// Maximum number of times this package can be accessed.
@@ -28,32 +32,39 @@ public class CreatePackageRequest
     /// Null means no expiration.
     /// </summary>
     public int? TimeToLiveHours { get; set; }
-    
+
     /// <summary>
     /// Whether the package is private (owner-only access).
     /// </summary>
-    public bool? IsPrivate { get; set;  }
-
-    /// <summary>
-    /// Optional text content to include in the package.
-    /// </summary>
-    public string[]? Texts { get; set; }
-
-    /// <summary>
-    /// Optional files to include in the package.
-    /// </summary>
-    public IFormFileCollection? Files { get; set; }
+    public bool? IsPrivate { get; set; }
 }
 
 /// <summary>
-/// Request DTO for creating text content.
+/// Multipart request adding a single item (text or file bytes) to a package.
 /// </summary>
-public class CreateTextRequest
+public class UploadContentRequest
 {
     /// <summary>
-    /// The plain text content.
+    /// Client-generated item ID. Stable across retries; a repeated upload with
+    /// the same id is idempotent for the package owner.
     /// </summary>
-    public required string Text { get; set; }
+    public Guid? Id { get; set; }
+
+    /// <summary>
+    /// Item kind: <c>text</c> or <c>file</c>.
+    /// </summary>
+    public string? Kind { get; set; }
+
+    /// <summary>
+    /// Base64url per-item metadata blob (<c>{name, mime}</c>), sealed
+    /// client-side when the package is protected. Never parsed by the server.
+    /// </summary>
+    public string? Meta { get; set; }
+
+    /// <summary>
+    /// Content bytes: sealed or plaintext, for both text and file items.
+    /// </summary>
+    public IFormFile? File { get; set; }
 }
 
 /// <summary>
@@ -70,6 +81,7 @@ public class UploadLimitsResponse
     /// Maximum size of a single uploaded file for authenticated users, in bytes.
     /// </summary>
     public required long AuthenticatedFileLimitBytes { get; init; }
+
     /// <summary>
     /// Maximum package lifetime for anonymous (guest) users, in hours.
     /// </summary>
@@ -102,24 +114,9 @@ public class ContentPackageResponse
     public required Guid Id { get; init; }
 
     /// <summary>
-    /// Package title.
-    /// </summary>
-    public string? Title { get; init; }
-
-    /// <summary>
-    /// Package description.
-    /// </summary>
-    public string? Description { get; init; }
-
-    /// <summary>
     /// When the package was created.
     /// </summary>
     public required DateTimeOffset CreatedAt { get; init; }
-
-    /// <summary>
-    /// User who created the package.
-    /// </summary>
-    public Guid? UserId { get; init; }
 
     /// <summary>
     /// Number of items in the package.
@@ -130,6 +127,11 @@ public class ContentPackageResponse
     /// Maximum access count.
     /// </summary>
     public int? MaxDownloadCount { get; init; }
+
+    /// <summary>
+    /// Number of accesses consumed so far.
+    /// </summary>
+    public required int CurrentDownloadCount { get; init; }
 
     /// <summary>
     /// Remaining accesses.
@@ -146,12 +148,10 @@ public class ContentPackageResponse
         return new ContentPackageResponse
         {
             Id = package.Id,
-            Title = package.Title,
-            Description = package.Description,
             CreatedAt = package.CreatedAt,
-            UserId = package.UserId,
             ItemCount = package.Contents?.Count ?? 0,
             MaxDownloadCount = package.MaxDownloadCount,
+            CurrentDownloadCount = package.CurrentDownloadCount,
             RemainingDownloads = package.RemainingDownloads,
             ExpiresAt = package.ExpiresAt,
         };
@@ -176,8 +176,8 @@ public class ContentPackageDetailsResponse
 
 /// <summary>
 /// Preview of a package for its authenticated owner: basic information only.
-/// Contains no content items, download tokens or inline text, and claiming a
-/// preview never consumes an access.
+/// Contains no content items, download tokens or inline payloads, and claiming
+/// a preview never consumes an access.
 /// </summary>
 public class ContentPackagePreviewResponse
 {
@@ -185,16 +185,6 @@ public class ContentPackagePreviewResponse
     /// Package ID.
     /// </summary>
     public required Guid Id { get; init; }
-
-    /// <summary>
-    /// Package title.
-    /// </summary>
-    public string? Title { get; init; }
-
-    /// <summary>
-    /// Package description.
-    /// </summary>
-    public string? Description { get; init; }
 
     /// <summary>
     /// When the package was created.
@@ -243,44 +233,123 @@ public class ContentItemInPackage
     public required Guid Id { get; init; }
 
     /// <summary>
-    /// Content type.
+    /// Item kind: <c>text</c> or <c>file</c>. Display only — it never decides
+    /// how the bytes are transported.
     /// </summary>
-    public required string Type { get; init; }
+    public required string Kind { get; init; }
 
     /// <summary>
-    /// File name (for files).
-    /// </summary>
-    public string? FileName { get; init; }
-
-    /// <summary>
-    /// MIME type.
-    /// </summary>
-    public required string MimeType { get; init; }
-
-    /// <summary>
-    /// Size in bytes.
+    /// Size in bytes (stored length, never base64-inflated).
     /// </summary>
     public required long Size { get; init; }
 
     /// <summary>
-    /// Text content (for text items small enough to inline; omitted for text
-    /// items exceeding <see cref="DownloadSettings.InlineTextLimitKb"/>).
+    /// Base64url per-item metadata blob. Always inline and outside the payload
+    /// budget — it is tiny and needed to render names.
     /// </summary>
-    public string? Text { get; init; }
+    public string? Meta { get; init; }
 
     /// <summary>
-    /// Download token (for files and oversized text items).
+    /// Base64url content bytes for items small enough to inline.
+    /// </summary>
+    public string? Payload { get; init; }
+
+    /// <summary>
+    /// Download token for items served through a separate request.
     /// </summary>
     public string? DownloadToken { get; init; }
 
     /// <summary>
-    /// Download URL (for files and oversized text items).
+    /// Download URL for items served through a separate request.
     /// </summary>
     public string? DownloadUrl { get; init; }
 
     /// <summary>
-    /// Token expiration (for files).
+    /// Token expiration.
     /// </summary>
     public DateTimeOffset? TokenExpiresAt { get; init; }
 }
 
+/// <summary>
+/// Response for the authenticated owner's package list.
+/// </summary>
+public class ContentPackageListResponse
+{
+    /// <summary>
+    /// Packages ordered newest first.
+    /// </summary>
+    public required List<ContentPackageListItem> Items { get; init; }
+
+    /// <summary>
+    /// Cursor for the next page, or null when the list is complete.
+    /// </summary>
+    public string? NextCursor { get; init; }
+}
+
+/// <summary>
+/// One row of the owner's package list. Carries no names — names live in the
+/// encrypted per-item metadata.
+/// </summary>
+public class ContentPackageListItem
+{
+    /// <summary>
+    /// Package ID.
+    /// </summary>
+    public required Guid Id { get; init; }
+
+    /// <summary>
+    /// When the package was created.
+    /// </summary>
+    public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// Optional expiration timestamp.
+    /// </summary>
+    public DateTimeOffset? ExpiresAt { get; init; }
+
+    /// <summary>
+    /// Number of items in the package.
+    /// </summary>
+    public required int ItemCount { get; init; }
+
+    /// <summary>
+    /// Sum of the stored item sizes, in bytes.
+    /// </summary>
+    public required long TotalSize { get; init; }
+
+    /// <summary>
+    /// Maximum access count.
+    /// </summary>
+    public int? MaxDownloadCount { get; init; }
+
+    /// <summary>
+    /// Number of accesses consumed so far.
+    /// </summary>
+    public required int CurrentDownloadCount { get; init; }
+
+    /// <summary>
+    /// Remaining accesses.
+    /// </summary>
+    public int? RemainingDownloads { get; init; }
+
+    /// <summary>
+    /// Whether the package has expired.
+    /// </summary>
+    public required bool IsExpired { get; init; }
+
+    public static ContentPackageListItem FromSummary(ContentPackageSummary summary, DateTimeOffset now)
+    {
+        return new ContentPackageListItem
+        {
+            Id = summary.Id,
+            CreatedAt = summary.CreatedAt,
+            ExpiresAt = summary.ExpiresAt,
+            ItemCount = summary.ItemCount,
+            TotalSize = summary.TotalSize,
+            MaxDownloadCount = summary.MaxDownloadCount,
+            CurrentDownloadCount = summary.CurrentDownloadCount,
+            RemainingDownloads = summary.RemainingDownloads,
+            IsExpired = summary.IsExpired(now)
+        };
+    }
+}

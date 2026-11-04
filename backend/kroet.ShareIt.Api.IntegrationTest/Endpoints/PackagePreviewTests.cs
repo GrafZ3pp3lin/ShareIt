@@ -18,7 +18,8 @@ public sealed class PackagePreviewTests : ShareItApiTestBase
         // "Preview.Package" is ForAuthenticatedUsers: guests (consumers) are
         // rejected by the authorization pipeline with a plain 401 challenge.
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: ownerId, fileBytes: "hello"u8.ToArray());
+        var packageId = (await CreatePackageWithItemAsync(
+            userId: ownerId, bytes: "hello"u8.ToArray(), maxDownloadCount: 10, timeToLiveHours: 24)).PackageId;
 
         var request = PreviewRequest(packageId, ownerId, isGuest: true);
         var response = await Client.SendAsync(request);
@@ -31,7 +32,8 @@ public sealed class PackagePreviewTests : ShareItApiTestBase
     {
         // The preview must not reveal other users' packages.
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: ownerId, fileBytes: "hello"u8.ToArray());
+        var packageId = (await CreatePackageWithItemAsync(
+            userId: ownerId, bytes: "hello"u8.ToArray(), maxDownloadCount: 10, timeToLiveHours: 24)).PackageId;
 
         var request = PreviewRequest(packageId, Guid.NewGuid(), isGuest: false);
         var response = await Client.SendAsync(request);
@@ -45,7 +47,8 @@ public sealed class PackagePreviewTests : ShareItApiTestBase
     public async Task GetPackagePreview_AsOwner_ReturnsBasicInfoWithoutContent()
     {
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: ownerId, fileBytes: "hello"u8.ToArray(), maxDownloadCount: 3);
+        var packageId = (await CreatePackageWithItemAsync(
+            userId: ownerId, bytes: "hello"u8.ToArray(), maxDownloadCount: 3, timeToLiveHours: 24)).PackageId;
 
         var request = PreviewRequest(packageId, ownerId, isGuest: false);
         var response = await Client.SendAsync(request);
@@ -72,7 +75,8 @@ public sealed class PackagePreviewTests : ShareItApiTestBase
     public async Task GetPackagePreview_IsRepeatable_AndDoesNotConsumeAccesses()
     {
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: ownerId, fileBytes: "hello"u8.ToArray(), maxDownloadCount: 1);
+        var packageId = (await CreatePackageWithItemAsync(
+            userId: ownerId, bytes: "hello"u8.ToArray(), maxDownloadCount: 1, timeToLiveHours: 24)).PackageId;
 
         for (var call = 0; call < 3; call++)
         {

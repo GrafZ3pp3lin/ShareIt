@@ -9,6 +9,12 @@ namespace kroet.ShareIt.Api.Services.Storage;
 /// </summary>
 public class StorageHandler : IStorageHandler
 {
+    /// <summary>
+    /// Content type written to the blob store for every item. The real MIME
+    /// type is part of the encrypted per-item metadata, never storage metadata.
+    /// </summary>
+    private const string OpaqueBlobContentType = "application/octet-stream";
+
     private readonly IContentStorageHandler _contentStorageHandler;
     private readonly IBlobStorageHandler _blobStorageHandler;
     private readonly ILogger<StorageHandler> _logger;
@@ -29,11 +35,14 @@ public class StorageHandler : IStorageHandler
         string? externalUrl = null;
         try
         {
-            // Store in blob storage
+            // The blob store must not learn the real name or MIME type: both
+            // live in the opaque, client-sealed per-item metadata. Only an
+            // opaque content type and the item id are written as object
+            // metadata.
             externalUrl = await _blobStorageHandler.UploadAsync(
-                dataStream, 
-                content.MimeType, 
-                content.FileName, 
+                dataStream,
+                OpaqueBlobContentType,
+                content.Id.ToString(),
                 cancellationToken);
             _logger.LogDebug(
                 "Stored content {ContentId} ({Size} bytes) in blob storage as {BlobId}",

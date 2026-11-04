@@ -43,6 +43,51 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
         return Task.FromResult<ContentPackage?>(package);
     }
 
+    public Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default)
+        => GetPackageAsync(packageId, includeContent: false, cancellationToken);
+
+    public Task<PackageListPage> ListPackagesAsync(
+        Guid userId,
+        string? cursor,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        var hasCursor = PackageCursor.TryDecode(cursor, out var cursorCreatedAt, out var cursorId);
+
+        var rows = _packages
+            .Where(package => package.UserId == userId)
+            .Where(package => !hasCursor || IsBefore(package, cursorCreatedAt, cursorId))
+            .OrderByDescending(package => package.CreatedAt)
+            .ThenByDescending(package => package.Id.ToString("N"), StringComparer.Ordinal)
+            .Take(take + 1)
+            .ToList();
+
+        string? nextCursor = null;
+        if (rows.Count > take)
+        {
+            rows.RemoveAt(rows.Count - 1);
+            var last = rows[^1];
+            nextCursor = PackageCursor.Encode(last.CreatedAt, last.Id);
+        }
+
+        var items = rows.Select(package =>
+        {
+            var contents = _contents.Where(content => content.PackageId == package.Id).ToList();
+            return new ContentPackageSummary
+            {
+                Id = package.Id,
+                CreatedAt = package.CreatedAt,
+                ExpiresAt = package.ExpiresAt,
+                ItemCount = contents.Count,
+                TotalSize = contents.Sum(content => content.Size),
+                MaxDownloadCount = package.MaxDownloadCount,
+                CurrentDownloadCount = package.CurrentDownloadCount
+            };
+        }).ToList();
+
+        return Task.FromResult(new PackageListPage(items, nextCursor));
+    }
+
     public Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(IEnumerable<Guid> packageIds, bool includeContent = true, CancellationToken cancellationToken = default)
     {
         var packages = _packages.Where(p => packageIds.Contains(p.Id)).ToList();
@@ -141,5 +186,21 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
             .Select(p => p.Id)
             .ToList();
         return Task.FromResult<IReadOnlyList<Guid>>(packageIds);
+    }
+
+    /// <summary>
+    /// Lexicographic <c>(created_at, id)</c> ordering, matching the SQL
+    /// row comparison for the keyset cursor. GUIDs compare by their
+    /// hyphen-free hex text, i.e. byte order — not <see cref="Guid.CompareTo"/>.
+    /// </summary>
+    private static bool IsBefore(ContentPackage package, DateTimeOffset createdAt, Guid id)
+    {
+        var createdComparison = package.CreatedAt.CompareTo(createdAt);
+        if (createdComparison != 0)
+        {
+            return createdComparison < 0;
+        }
+
+        return string.CompareOrdinal(package.Id.ToString("N"), id.ToString("N")) < 0;
     }
 }

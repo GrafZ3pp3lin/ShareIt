@@ -20,12 +20,21 @@ public sealed class DownloadSettings : ISettings
     public int UsedTokenRetentionHours { get; set; } = 24;
 
     /// <summary>
-    /// Maximum size of a text blob (in kilobytes) that GET /package/{id} may
-    /// read fully into memory and inline into the JSON response. Larger text
-    /// items are served through a download token instead.
+    /// Maximum size of a single item (in bytes) that GET /package/{id} may
+    /// read fully into memory and inline as a base64url payload. Larger items
+    /// are served through a download token instead.
+    /// Default: 16 KB.
+    /// </summary>
+    public long InlinePayloadLimitBytes { get; set; } = 16 * 1024;
+
+    /// <summary>
+    /// Total inline payload budget per response (in bytes). Once the budget is
+    /// spent, every remaining item is served through a download token, so a
+    /// package full of small notes cannot turn the details response into a
+    /// megabyte of base64.
     /// Default: 64 KB.
     /// </summary>
-    public long InlineTextLimitKb { get; set; } = 64;
+    public long InlinePayloadBudgetBytes { get; set; } = 64 * 1024;
 
     public static string SectionName => "DownloadSettings";
 }
@@ -38,6 +47,8 @@ public sealed class DownloadSettingsValidator : AbstractValidator<DownloadSettin
 
         RuleFor(x => x.UsedTokenRetentionHours).GreaterThanOrEqualTo(0);
 
-        RuleFor(x => x.InlineTextLimitKb).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.InlinePayloadLimitBytes).GreaterThanOrEqualTo(0);
+
+        RuleFor(x => x.InlinePayloadBudgetBytes).GreaterThanOrEqualTo(0);
     }
 }

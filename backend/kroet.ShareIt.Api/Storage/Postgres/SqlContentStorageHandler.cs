@@ -31,11 +31,13 @@ public class SqlContentStorageHandler : IContentStorageHandler
     {
         const string insertPackageSql = """
                                         INSERT INTO content_packages (
-                                            id, title, description, created_at, user_id, is_private,
-                                            max_download_count, current_download_count, expires_at
+                                            id, created_at, user_id, is_private,
+                                            max_download_count, current_download_count, expires_at,
+                                            unlock_verifier
                                         ) VALUES (
-                                            @Id, @Title, @Description, @CreatedAt, @UserId, @IsPrivate,
-                                            @MaxDownloadCount, 0, @ExpiresAt
+                                            @Id, @CreatedAt, @UserId, @IsPrivate,
+                                            @MaxDownloadCount, 0, @ExpiresAt,
+                                            @UnlockVerifier
                                         );
                                         """;
 
@@ -47,13 +49,12 @@ public class SqlContentStorageHandler : IContentStorageHandler
             new
             {
                 package.Id,
-                package.Title,
-                package.Description,
                 package.CreatedAt,
                 package.UserId,
                 package.IsPrivate,
                 package.MaxDownloadCount,
-                package.ExpiresAt
+                package.ExpiresAt,
+                package.UnlockVerifier
             });
 
         _logger.LogInformation(
@@ -66,11 +67,11 @@ public class SqlContentStorageHandler : IContentStorageHandler
     {
         const string insertSql = """
                                  INSERT INTO contents (
-                                     id, package_id, content_type, created_at, size, user_id, 
-                                     mime_type, file_name, url
+                                     id, package_id, content_type, created_at, size, user_id,
+                                     meta, url
                                  ) VALUES (
                                      @Id, @PackageId, @ContentType, @CreatedAt, @Size, @UserId,
-                                     @MimeType, @FileName, @Url
+                                     @Meta, @Url
                                  );
                                  """;
 
@@ -87,8 +88,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
                 content.CreatedAt,
                 content.Size,
                 content.UserId,
-                content.MimeType,
-                content.FileName,
+                content.Meta,
                 content.Url
             });
 
@@ -109,11 +109,11 @@ public class SqlContentStorageHandler : IContentStorageHandler
 
         const string insertSql = """
                                  INSERT INTO contents (
-                                     id, package_id, content_type, created_at, size, user_id, 
-                                     mime_type, file_name, url
+                                     id, package_id, content_type, created_at, size, user_id,
+                                     meta, url
                                  ) VALUES (
                                      @Id, @PackageId, @ContentType, @CreatedAt, @Size, @UserId,
-                                     @MimeType, @FileName, @Url
+                                     @Meta, @Url
                                  );
                                  """;
 
@@ -128,8 +128,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
             content.CreatedAt,
             content.Size,
             content.UserId,
-            content.MimeType,
-            content.FileName,
+            content.Meta,
             content.Url
         });
 
@@ -142,19 +141,21 @@ public class SqlContentStorageHandler : IContentStorageHandler
     public async Task<ContentPackage?> GetPackageAsync(Guid packageId, bool includeContent = true, CancellationToken cancellationToken = default)
     {
         const string getPackageSql = """
-                                     SELECT 
-                                         id, title, description, created_at, user_id, is_private,
-                                         max_download_count, current_download_count, expires_at
+                                     SELECT
+                                         id, created_at, user_id, is_private,
+                                         max_download_count, current_download_count, expires_at,
+                                         unlock_verifier
                                      FROM content_packages
                                      WHERE id = @PackageId
                                      """;
         
         const string getContentSql = """
-                                        SELECT 
+                                        SELECT
                                             id, package_id, content_type, created_at, size, user_id,
-                                            mime_type, file_name, url
+                                            meta, url
                                         FROM contents
                                         WHERE package_id = @PackageId
+                                        ORDER BY created_at, id
                                         """;
 
         await using var connection = CreateConnection();
@@ -183,6 +184,68 @@ public class SqlContentStorageHandler : IContentStorageHandler
     }
 
     /// <inheritdoc />
+    public Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default)
+        => GetPackageAsync(packageId, includeContent: false, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<PackageListPage> ListPackagesAsync(
+        Guid userId,
+        string? cursor,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        // A malformed cursor is not an error the client can fix; treat it as
+        // the first page instead of leaking a 500.
+        var hasCursor = PackageCursor.TryDecode(cursor, out var cursorCreatedAt, out var cursorId);
+
+        const string listSql = """
+                               SELECT
+                                   p.id, p.created_at, p.expires_at, p.max_download_count, p.current_download_count,
+                                   (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = p.id) AS item_count,
+                                   (SELECT COALESCE(SUM(c.size), 0)::bigint FROM contents c WHERE c.package_id = p.id) AS total_size
+                               FROM content_packages p
+                               WHERE p.user_id = @UserId
+                                 AND (@hasCursor = false OR (p.created_at, p.id) < (@CursorCreatedAt, @CursorId))
+                               ORDER BY p.created_at DESC, p.id DESC
+                               LIMIT @Limit
+                               """;
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // Fetch one extra row to know whether another page exists.
+        var rows = (await connection.QueryAsync<PackageSummaryDbDto>(listSql, new
+        {
+            UserId = userId,
+            hasCursor,
+            CursorCreatedAt = cursorCreatedAt,
+            CursorId = cursorId,
+            Limit = take + 1
+        })).ToList();
+
+        string? nextCursor = null;
+        if (rows.Count > take)
+        {
+            rows.RemoveAt(rows.Count - 1);
+            var last = rows[^1];
+            nextCursor = PackageCursor.Encode(last.CreatedAt, last.Id);
+        }
+
+        var items = rows.Select(row => new ContentPackageSummary
+        {
+            Id = row.Id,
+            CreatedAt = row.CreatedAt,
+            ExpiresAt = row.ExpiresAt,
+            ItemCount = row.ItemCount,
+            TotalSize = row.TotalSize,
+            MaxDownloadCount = row.MaxDownloadCount,
+            CurrentDownloadCount = row.CurrentDownloadCount
+        }).ToList();
+
+        return new PackageListPage(items, nextCursor);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(IEnumerable<Guid> packageIds, bool includeContent = true, CancellationToken cancellationToken = default)
     {
         var packageIdList = packageIds.ToList();
@@ -192,20 +255,21 @@ public class SqlContentStorageHandler : IContentStorageHandler
         }
 
         const string getPackagesSql = """
-                                      SELECT 
-                                          id, title, description, created_at, user_id, is_private,
-                                          max_download_count, current_download_count, expires_at
+                                      SELECT
+                                          id, created_at, user_id, is_private,
+                                          max_download_count, current_download_count, expires_at,
+                                          unlock_verifier
                                       FROM content_packages
                                       WHERE id = ANY(@PackageIds)
                                       """;
 
         const string getContentSql = """
-                                        SELECT 
+                                        SELECT
                                             id, package_id, content_type, created_at, size, user_id,
-                                            mime_type, file_name, url
+                                            meta, url
                                         FROM contents
                                         WHERE package_id = ANY(@PackageIds)
-                                        ORDER BY package_id, created_at
+                                        ORDER BY package_id, created_at, id
                                         """;
 
         await using var connection = CreateConnection();
@@ -245,9 +309,9 @@ public class SqlContentStorageHandler : IContentStorageHandler
     public async Task<ExternalContent?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
         const string selectSql = """
-                                 SELECT 
+                                 SELECT
                                      id, package_id, content_type, created_at, size, user_id,
-                                     mime_type, file_name, url
+                                     meta, url
                                  FROM contents
                                  WHERE id = @ContentId
                                  """;
@@ -275,9 +339,9 @@ public class SqlContentStorageHandler : IContentStorageHandler
         }
 
         const string selectSql = """
-                                 SELECT 
+                                 SELECT
                                      id, package_id, content_type, created_at, size, user_id,
-                                     mime_type, file_name, url
+                                     meta, url
                                  FROM contents
                                  WHERE id = ANY(@ContentIds)
                                  """;
@@ -518,8 +582,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
             CreatedAt = dbDto.CreatedAt,
             Size = dbDto.Size,
             UserId = dbDto.UserId,
-            MimeType = dbDto.MimeType,
-            FileName = dbDto.FileName,
+            Meta = dbDto.Meta,
             Url = dbDto.Url
         };
     }
@@ -532,11 +595,10 @@ public class SqlContentStorageHandler : IContentStorageHandler
         return new ContentPackage
         {
             Id = dbDto.Id,
-            Title = dbDto.Title,
-            Description = dbDto.Description,
             CreatedAt = dbDto.CreatedAt,
             UserId = dbDto.UserId,
             IsPrivate = dbDto.IsPrivate,
+            UnlockVerifier = dbDto.UnlockVerifier,
             MaxDownloadCount = dbDto.MaxDownloadCount,
             CurrentDownloadCount = dbDto.CurrentDownloadCount,
             ExpiresAt = dbDto.ExpiresAt
@@ -549,14 +611,27 @@ public class SqlContentStorageHandler : IContentStorageHandler
     private class PackageDbDto
     {
         public Guid Id { get; init; }
-        public string? Title { get; init; }
-        public string? Description { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public Guid? UserId { get; init; }
         public bool? IsPrivate { get; init; }
         public int? MaxDownloadCount { get; init; }
         public int CurrentDownloadCount { get; init; }
         public DateTimeOffset? ExpiresAt { get; init; }
+        public string? UnlockVerifier { get; init; }
+    }
+
+    /// <summary>
+    /// DTO for mapping package list rows with their aggregate counts.
+    /// </summary>
+    private class PackageSummaryDbDto
+    {
+        public Guid Id { get; init; }
+        public DateTimeOffset CreatedAt { get; init; }
+        public DateTimeOffset? ExpiresAt { get; init; }
+        public int ItemCount { get; init; }
+        public long TotalSize { get; init; }
+        public int? MaxDownloadCount { get; init; }
+        public int CurrentDownloadCount { get; init; }
     }
 
     /// <summary>
@@ -579,8 +654,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
         public DateTimeOffset CreatedAt { get; init; }
         public long Size { get; init; }
         public Guid? UserId { get; init; }
-        public string MimeType { get; init; } = string.Empty;
-        public string FileName { get; init; } = string.Empty;
+        public string? Meta { get; init; }
         public string Url { get; init; } = string.Empty;
     }
 }

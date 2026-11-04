@@ -11,14 +11,11 @@ public record ContentPackage
     public required Guid Id { get; init; }
 
     /// <summary>
-    /// Optional title/name for the package.
+    /// Base64url HMAC-SHA256 proof of the package passphrase, or null when
+    /// the package is not protected. The server only compares it in constant
+    /// time and never logs it.
     /// </summary>
-    public string? Title { get; init; }
-
-    /// <summary>
-    /// Optional description of the package.
-    /// </summary>
-    public string? Description { get; init; }
+    public string? UnlockVerifier { get; init; }
 
     /// <summary>
     /// Timestamp when the package was created.

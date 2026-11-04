@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 
 namespace kroet.ShareIt.Api.Models;
 
@@ -10,11 +10,11 @@ public sealed record ExternalContent : Api.Models.Content
     public ExternalContent() {}
 
     [SetsRequiredMembers]
-    public ExternalContent(Api.Models.Content content, string url) : base(content.Id, content.PackageId, content.ContentType, content.CreatedAt, content.Size, content.UserId, content.MimeType, content.FileName)
+    public ExternalContent(Api.Models.Content content, string url) : base(content.Id, content.PackageId, content.ContentType, content.CreatedAt, content.Size, content.UserId, content.Meta)
     {
         Url = url;
     }
-    
+
     /// <summary>
     /// URL where the external content is located.
     /// </summary>

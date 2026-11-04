@@ -14,7 +14,8 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
     public async Task GetPackage_WhenExpired_Returns410()
     {
         var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, fileBytes: [1, 2, 3], timeToLiveHours: 1);
+        var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
+        await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
 
         TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
 

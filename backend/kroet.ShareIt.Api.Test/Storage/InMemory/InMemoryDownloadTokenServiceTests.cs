@@ -42,17 +42,40 @@ public class InMemoryDownloadTokenServiceTests
     }
 
     [TestMethod]
-    public async Task ValidateAndConsumeTokenAsync_HandlesUnknownWrongClientAndSingleUse()
+    public async Task ValidateTokenAsync_DoesNotConsumeTheToken()
     {
         var subject = CreateService();
         var contentId = Guid.NewGuid();
         var clientId = Guid.NewGuid();
         var token = await subject.GenerateTokenAsync(contentId, clientId);
 
-        var unknown = await subject.ValidateAndConsumeTokenAsync("missing-token", clientId);
-        var wrongClient = await subject.ValidateAndConsumeTokenAsync(token.Token, Guid.NewGuid());
-        var valid = await subject.ValidateAndConsumeTokenAsync(token.Token, clientId);
-        var reused = await subject.ValidateAndConsumeTokenAsync(token.Token, clientId);
+        var first = await subject.ValidateTokenAsync(token.Token, clientId);
+        var second = await subject.ValidateTokenAsync(token.Token, clientId);
+
+        Assert.IsTrue(first.IsValid);
+        Assert.IsTrue(second.IsValid);
+        Assert.AreEqual(contentId, first.ContentId);
+
+        var consumed = await subject.ConsumeTokenAsync(token.Token, clientId);
+        Assert.IsTrue(consumed.IsValid);
+
+        var afterUse = await subject.ValidateTokenAsync(token.Token, clientId);
+        Assert.IsFalse(afterUse.IsValid);
+        Assert.AreEqual("Token not found", afterUse.ErrorMessage);
+    }
+
+    [TestMethod]
+    public async Task ConsumeTokenAsync_HandlesUnknownWrongClientAndSingleUse()
+    {
+        var subject = CreateService();
+        var contentId = Guid.NewGuid();
+        var clientId = Guid.NewGuid();
+        var token = await subject.GenerateTokenAsync(contentId, clientId);
+
+        var unknown = await subject.ConsumeTokenAsync("missing-token", clientId);
+        var wrongClient = await subject.ConsumeTokenAsync(token.Token, Guid.NewGuid());
+        var valid = await subject.ConsumeTokenAsync(token.Token, clientId);
+        var reused = await subject.ConsumeTokenAsync(token.Token, clientId);
 
         Assert.IsFalse(unknown.IsValid);
         Assert.AreEqual("Token not found", unknown.ErrorMessage);
@@ -65,14 +88,14 @@ public class InMemoryDownloadTokenServiceTests
     }
 
     [TestMethod]
-    public async Task ValidateAndConsumeTokenAsync_WhenTokenIsExpired_ReturnsInvalid()
+    public async Task ValidateTokenAsync_WhenTokenIsExpired_ReturnsInvalid()
     {
         var subject = CreateService();
         var token = await subject.GenerateTokenAsync(Guid.NewGuid(), Guid.NewGuid());
 
         _timeProvider.UtcNow = token.ExpiresAt.AddSeconds(1);
 
-        var result = await subject.ValidateAndConsumeTokenAsync(token.Token, token.ClientId);
+        var result = await subject.ValidateTokenAsync(token.Token, token.ClientId);
 
         Assert.IsFalse(result.IsValid);
         Assert.AreEqual("Token has expired", result.ErrorMessage);
@@ -95,8 +118,8 @@ public class InMemoryDownloadTokenServiceTests
 
         Assert.AreEqual(1, deleted);
 
-        var expired = await subject.ValidateAndConsumeTokenAsync(firstToken.Token, clientId);
-        var stillValid = await subject.ValidateAndConsumeTokenAsync(secondToken.Token, clientId);
+        var expired = await subject.ValidateTokenAsync(firstToken.Token, clientId);
+        var stillValid = await subject.ConsumeTokenAsync(secondToken.Token, clientId);
 
         Assert.IsFalse(expired.IsValid);
         Assert.AreEqual("Token not found", expired.ErrorMessage);

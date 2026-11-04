@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 
 namespace kroet.ShareIt.Api.Models;
 
@@ -24,9 +24,9 @@ public enum ContentType
 public record Content
 {
     public Content() {}
-    
+
     [SetsRequiredMembers]
-    public Content(Guid id, Guid packageId, ContentType contentType, DateTimeOffset createdAt, long size, Guid? userId, string mimeType, string fileName)
+    public Content(Guid id, Guid packageId, ContentType contentType, DateTimeOffset createdAt, long size, Guid? userId, string? meta)
     {
         Id = id;
         PackageId = packageId;
@@ -34,15 +34,14 @@ public record Content
         CreatedAt = createdAt;
         Size = size;
         UserId = userId;
-        MimeType = mimeType;
-        FileName = fileName;
+        Meta = meta;
     }
-    
+
     /// <summary>
     /// Unique identifier for the content.
     /// </summary>
     public required Guid Id { get; init; }
-    
+
     /// <summary>
     /// Identifier of the package this content belongs to.
     /// </summary>
@@ -59,11 +58,9 @@ public record Content
     public required DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>
-    /// Size of the content in bytes.
+    /// Size of the content in bytes. This is the stored byte length for both
+    /// text and file items — never inflated by base64 encoding.
     /// </summary>
-    /// <remarks>
-    /// For file content, this is the file size. For text content, this is the UTF-8 byte length.
-    /// </remarks>
     public required long Size { get; init; }
 
     /// <summary>
@@ -75,12 +72,9 @@ public record Content
     public Guid? UserId { get; init; }
 
     /// <summary>
-    /// MIME type of the file (e.g., "image/png", "application/pdf", "text/plain").
+    /// Opaque per-item metadata blob (base64url), carrying the name and MIME
+    /// type. It is sealed client-side when the package is protected. The
+    /// server never parses or interprets it.
     /// </summary>
-    public string MimeType { get; init; } = string.Empty;
-    
-    /// <summary>
-    /// Original name of the uploaded file or auto-generated name for text content.
-    /// </summary>
-    public string FileName { get; init; } = string.Empty;
+    public string? Meta { get; init; }
 }

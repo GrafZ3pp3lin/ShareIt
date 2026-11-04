@@ -36,7 +36,7 @@ public class InMemoryDownloadTokenService : IDownloadTokenService
         return Task.FromResult(token);
     }
 
-    public Task<TokenValidationResult> ValidateAndConsumeTokenAsync(string token, Guid clientId, CancellationToken cancellationToken = default)
+    public Task<TokenValidationResult> ValidateTokenAsync(string token, Guid clientId, CancellationToken cancellationToken = default)
     {
         var tokenEntry = _tokens.Values.FirstOrDefault(t => t.Token == token);
         if (tokenEntry is null)
@@ -51,14 +51,24 @@ public class InMemoryDownloadTokenService : IDownloadTokenService
 
         if (tokenEntry.ExpiresAt < _timeProvider.GetUtcNow())
         {
-            _tokens.Remove(tokenEntry.Id);
             return Task.FromResult(new TokenValidationResult(false, null, "Token has expired"));
         }
 
-        // Consume the token by removing it from the store
+        return Task.FromResult(new TokenValidationResult(true, tokenEntry.ContentId));
+    }
+
+    public async Task<TokenValidationResult> ConsumeTokenAsync(string token, Guid clientId, CancellationToken cancellationToken = default)
+    {
+        var validation = await ValidateTokenAsync(token, clientId, cancellationToken);
+        if (!validation.IsValid)
+        {
+            return validation;
+        }
+
+        var tokenEntry = _tokens.Values.First(t => t.Token == token);
         _tokens.Remove(tokenEntry.Id);
 
-        return Task.FromResult(new TokenValidationResult(true, tokenEntry.ContentId));
+        return new TokenValidationResult(true, tokenEntry.ContentId);
     }
 
     public Task<long> CleanupExpiredTokensAsync(CancellationToken cancellationToken = default)

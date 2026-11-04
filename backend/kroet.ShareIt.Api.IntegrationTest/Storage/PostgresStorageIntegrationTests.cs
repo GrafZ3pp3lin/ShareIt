@@ -71,7 +71,7 @@ public class PostgresStorageIntegrationTests
 
         Assert.IsNotNull(storedPackage);
         Assert.AreEqual(package.Id, storedPackage.Id);
-        Assert.AreEqual(package.Title, storedPackage.Title);
+        Assert.AreEqual(package.UnlockVerifier, storedPackage.UnlockVerifier);
         Assert.AreEqual(package.MaxDownloadCount, storedPackage.MaxDownloadCount);
         Assert.AreEqual(package.IsPrivate, storedPackage.IsPrivate);
         Assert.IsNotNull(storedPackage.Contents);
@@ -116,30 +116,34 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task GenerateTokenAsync_ValidateAndConsumeTokenAsync_AllowsSingleUse()
+    public async Task ValidateTokenAsync_DoesNotConsume_AndConsumeTokenAsync_AllowsSingleUse()
     {
         var contentId = Guid.NewGuid();
         var clientId = Guid.NewGuid();
 
         var token = await _downloadTokenService.GenerateTokenAsync(contentId, clientId);
-        var firstValidation = await _downloadTokenService.ValidateAndConsumeTokenAsync(token.Token, clientId);
-        var secondValidation = await _downloadTokenService.ValidateAndConsumeTokenAsync(token.Token, clientId);
+        var firstValidation = await _downloadTokenService.ValidateTokenAsync(token.Token, clientId);
+        var secondValidation = await _downloadTokenService.ValidateTokenAsync(token.Token, clientId);
+        var consumed = await _downloadTokenService.ConsumeTokenAsync(token.Token, clientId);
+        var reused = await _downloadTokenService.ConsumeTokenAsync(token.Token, clientId);
 
         Assert.IsTrue(firstValidation.IsValid);
+        Assert.IsTrue(secondValidation.IsValid);
         Assert.AreEqual(contentId, firstValidation.ContentId);
-        Assert.IsFalse(secondValidation.IsValid);
-        Assert.AreEqual("Token has already been used", secondValidation.ErrorMessage);
+        Assert.IsTrue(consumed.IsValid);
+        Assert.IsFalse(reused.IsValid);
+        Assert.AreEqual("Token has already been used", reused.ErrorMessage);
     }
 
     [TestMethod]
-    public async Task ValidateAndConsumeTokenAsync_ReturnsInvalidForWrongClient()
+    public async Task ValidateTokenAsync_ReturnsInvalidForWrongClient()
     {
         var contentId = Guid.NewGuid();
         var validClientId = Guid.NewGuid();
         var invalidClientId = Guid.NewGuid();
 
         var token = await _downloadTokenService.GenerateTokenAsync(contentId, validClientId);
-        var validation = await _downloadTokenService.ValidateAndConsumeTokenAsync(token.Token, invalidClientId);
+        var validation = await _downloadTokenService.ValidateTokenAsync(token.Token, invalidClientId);
 
         Assert.IsFalse(validation.IsValid);
         Assert.AreEqual("Token is not valid for this client", validation.ErrorMessage);
@@ -237,22 +241,59 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task ValidateAndConsumeTokenAsync_ReturnsInvalidForUnknownToken()
+    public async Task ListPackagesAsync_ReturnsOwnPackagesNewestFirstWithAggregatesAndCursor()
     {
-        var result = await _downloadTokenService.ValidateAndConsumeTokenAsync("unknown-token", Guid.NewGuid());
+        var ownerId = Guid.NewGuid();
+        var start = DateTimeOffset.UtcNow;
+
+        var oldest = CreatePackage(createdAt: start, userId: ownerId);
+        var middle = CreatePackage(createdAt: start.AddMinutes(1), userId: ownerId);
+        var newest = CreatePackage(createdAt: start.AddMinutes(2), userId: ownerId);
+        var foreign = CreatePackage(createdAt: start.AddMinutes(3), userId: Guid.NewGuid());
+
+        foreach (var package in new[] { oldest, middle, newest, foreign })
+        {
+            await _contentStorageHandler.StorePackageAsync(package);
+        }
+
+        await _contentStorageHandler.StoreContentAsync(
+            new ExternalContent(CreateContent(oldest.Id) with { Size = 10 }, "blob://a"));
+        await _contentStorageHandler.StoreContentAsync(
+            new ExternalContent(CreateContent(oldest.Id) with { Size = 20 }, "blob://b"));
+
+        var firstPage = await _contentStorageHandler.ListPackagesAsync(ownerId, cursor: null, take: 2);
+
+        Assert.HasCount(2, firstPage.Items);
+        Assert.AreEqual(newest.Id, firstPage.Items[0].Id);
+        Assert.AreEqual(middle.Id, firstPage.Items[1].Id);
+        Assert.IsNotNull(firstPage.NextCursor);
+
+        var secondPage = await _contentStorageHandler.ListPackagesAsync(ownerId, firstPage.NextCursor, take: 2);
+
+        Assert.HasCount(1, secondPage.Items);
+        Assert.AreEqual(oldest.Id, secondPage.Items[0].Id);
+        Assert.AreEqual(2, secondPage.Items[0].ItemCount);
+        Assert.AreEqual(30, secondPage.Items[0].TotalSize);
+        Assert.IsNull(secondPage.NextCursor);
+    }
+
+    [TestMethod]
+    public async Task ValidateTokenAsync_ReturnsInvalidForUnknownToken()
+    {
+        var result = await _downloadTokenService.ValidateTokenAsync("unknown-token", Guid.NewGuid());
 
         Assert.IsFalse(result.IsValid);
         Assert.AreEqual("Invalid token", result.ErrorMessage);
     }
 
     [TestMethod]
-    public async Task ValidateAndConsumeTokenAsync_ReturnsInvalidForExpiredToken()
+    public async Task ValidateTokenAsync_ReturnsInvalidForExpiredToken()
     {
         var token = await _downloadTokenService.GenerateTokenAsync(Guid.NewGuid(), Guid.NewGuid());
 
         _timeProvider.UtcNow = token.ExpiresAt.AddSeconds(1);
 
-        var result = await _downloadTokenService.ValidateAndConsumeTokenAsync(token.Token, token.ClientId);
+        var result = await _downloadTokenService.ValidateTokenAsync(token.Token, token.ClientId);
 
         Assert.IsFalse(result.IsValid);
         Assert.AreEqual("Token has expired", result.ErrorMessage);
@@ -272,9 +313,9 @@ public class PostgresStorageIntegrationTests
         var deleted = await _downloadTokenService.CleanupExpiredTokensAsync();
 
         Assert.AreEqual(1, deleted);
-        Assert.IsFalse((await _downloadTokenService.ValidateAndConsumeTokenAsync(firstToken.Token, clientId)).IsValid);
+        Assert.IsFalse((await _downloadTokenService.ValidateTokenAsync(firstToken.Token, clientId)).IsValid);
 
-        var stillValid = await _downloadTokenService.ValidateAndConsumeTokenAsync(secondToken.Token, clientId);
+        var stillValid = await _downloadTokenService.ConsumeTokenAsync(secondToken.Token, clientId);
         Assert.IsTrue(stillValid.IsValid);
         Assert.AreEqual(secondContentId, stillValid.ContentId);
     }
@@ -282,15 +323,16 @@ public class PostgresStorageIntegrationTests
     private static ContentPackage CreatePackage(
         int? maxDownloadCount = null,
         bool? isPrivate = null,
-        DateTimeOffset? expiresAt = null)
+        DateTimeOffset? expiresAt = null,
+        DateTimeOffset? createdAt = null,
+        Guid? userId = null)
     {
         return new ContentPackage
         {
             Id = Guid.NewGuid(),
-            Title = "Integration test package",
-            Description = "Round-trip through PostgreSQL",
-            CreatedAt = DateTimeOffset.UtcNow,
-            UserId = Guid.NewGuid(),
+            UnlockVerifier = "verifier",
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
+            UserId = userId ?? Guid.NewGuid(),
             IsPrivate = isPrivate,
             MaxDownloadCount = maxDownloadCount,
             ExpiresAt = expiresAt
@@ -307,8 +349,7 @@ public class PostgresStorageIntegrationTests
             CreatedAt = DateTimeOffset.UtcNow,
             Size = 128,
             UserId = Guid.NewGuid(),
-            MimeType = "text/plain",
-            FileName = "integration.txt"
+            Meta = "bWV0YQ"
         };
     }
 }

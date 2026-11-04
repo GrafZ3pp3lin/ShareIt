@@ -26,6 +26,16 @@ internal sealed class DelegatingContentStorageHandler(
         CancellationToken cancellationToken = default)
         => inner.GetPackageAsync(packageId, includeContent, cancellationToken);
 
+    public Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default)
+        => inner.GetPackageShellAsync(packageId, cancellationToken);
+
+    public Task<PackageListPage> ListPackagesAsync(
+        Guid userId,
+        string? cursor,
+        int take,
+        CancellationToken cancellationToken = default)
+        => inner.ListPackagesAsync(userId, cursor, take, cancellationToken);
+
     public Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(
         IEnumerable<Guid> packageIds,
         bool includeContent = true,
