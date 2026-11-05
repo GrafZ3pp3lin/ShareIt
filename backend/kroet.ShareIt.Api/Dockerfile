@@ -2,6 +2,7 @@
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
+COPY --link "Directory.Packages.props" .
 COPY --link "kroet.Permission.AspNetCore/kroet.Permission.AspNetCore.csproj" "kroet.Permission.AspNetCore/"
 COPY --link "kroet.Permissions/kroet.Permissions.csproj" "kroet.Permissions/"
 COPY --link "kroet.ShareIt.Api/kroet.ShareIt.Api.csproj" "kroet.ShareIt.Api/"

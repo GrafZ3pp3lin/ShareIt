@@ -31,6 +31,9 @@
   `X-Unlock-Proof` verifier. See `frontend/AGENTS.md` and `docs/crypto-v2.md`.
 
 ### Backend (.NET)
+- NuGet versions are centralized in `backend/Directory.Packages.props` (Central Package Management). Project files list packages without a `Version`; add or bump versions only there. Check for updates with `dotnet list kroet.ShareIt.slnx package --outdated` from `backend/`.
+- The `Aspire.AppHost.Sdk` version sits in `kroet.ShareIt.AppHost/kroet.ShareIt.AppHost.csproj` (SDK references cannot use CPM). Keep it in step with the `Aspire.Hosting.*` versions in `Directory.Packages.props`.
+- `kroet.ShareIt.Api/Dockerfile` copies `Directory.Packages.props` before `dotnet restore`; add any new central build file to that restore layer too.
 - Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`) against the real PostgreSQL and RustFS containers. They share those containers, reset the database per test, and use a unique S3 bucket per test; authentication is provided by the `X-Test-User` header (see `Infrastructure/ShareItApiTestBase.cs`).
 - The endpoint, Postgres, and S3 integration tests require a running Docker daemon (Testcontainers). The S3 tests use a RustFS container.
 
