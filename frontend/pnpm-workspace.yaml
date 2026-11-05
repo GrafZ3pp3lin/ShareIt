@@ -21,15 +21,7 @@ minimumReleaseAgeIgnoreMissingTime: false
 # here when an immature version is approved at the prompt — prune entries once
 # the version they name has aged past the cutoff, or the hole stays open.
 minimumReleaseAgeExclude:
-  [
-    '@oxlint-tsgolint/darwin-arm64@7.0.2005',
-    '@oxlint-tsgolint/darwin-x64@7.0.2005',
-    '@oxlint-tsgolint/linux-arm64@7.0.2005',
-    '@oxlint-tsgolint/linux-x64@7.0.2005',
-    '@oxlint-tsgolint/win32-arm64@7.0.2005',
-    '@oxlint-tsgolint/win32-x64@7.0.2005',
-    oxlint-tsgolint@7.0.2005
-  ]
+  - vite@8.3.6
 
 # Reject a version published with weaker credentials than earlier versions of
 # the same package had — a package that shipped via npm trusted publishing or
