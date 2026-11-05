@@ -337,6 +337,11 @@ public class ContentPackageListItem
     /// </summary>
     public required bool IsExpired { get; init; }
 
+    /// <summary>
+    /// Whether the package requires an unlock proof (has a password).
+    /// </summary>
+    public required bool IsProtected { get; init; }
+
     public static ContentPackageListItem FromSummary(ContentPackageSummary summary, DateTimeOffset now)
     {
         return new ContentPackageListItem
@@ -349,7 +354,8 @@ public class ContentPackageListItem
             MaxDownloadCount = summary.MaxDownloadCount,
             CurrentDownloadCount = summary.CurrentDownloadCount,
             RemainingDownloads = summary.RemainingDownloads,
-            IsExpired = summary.IsExpired(now)
+            IsExpired = summary.IsExpired(now),
+            IsProtected = summary.IsProtected
         };
     }
 }

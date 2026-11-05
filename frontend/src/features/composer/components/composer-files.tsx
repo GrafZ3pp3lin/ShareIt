@@ -1,4 +1,5 @@
 import { For } from 'solid-js';
+import IconX from '~icons/lucide/x';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import { formatBytes } from '../../../shared/format-bytes.ts';
 
@@ -29,11 +30,11 @@ export function ComposerFiles(props: ComposerFilesProps) {
               <span class="shrink-0 text-[10.5px] text-muted">{formatBytes(file.size)}</span>
               <button
                 type="button"
-                class="shrink-0 cursor-pointer px-0.5 text-[13px] leading-none text-muted transition hover:text-ink"
+                class="grid shrink-0 cursor-pointer place-items-center px-0.5 text-muted transition hover:text-ink"
                 aria-label={t('composer.files.remove', { name: file.name })}
                 onClick={() => props.onRemove(index())}
               >
-                ×
+                <IconX class="h-3.5 w-3.5" />
               </button>
             </div>
           )}

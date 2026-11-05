@@ -201,6 +201,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
         const string listSql = """
                                SELECT
                                    p.id, p.created_at, p.expires_at, p.max_download_count, p.current_download_count,
+                                   p.unlock_verifier,
                                    (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = p.id) AS item_count,
                                    (SELECT COALESCE(SUM(c.size), 0)::bigint FROM contents c WHERE c.package_id = p.id) AS total_size
                                FROM content_packages p
@@ -239,7 +240,8 @@ public class SqlContentStorageHandler : IContentStorageHandler
             ItemCount = row.ItemCount,
             TotalSize = row.TotalSize,
             MaxDownloadCount = row.MaxDownloadCount,
-            CurrentDownloadCount = row.CurrentDownloadCount
+            CurrentDownloadCount = row.CurrentDownloadCount,
+            IsProtected = row.UnlockVerifier is not null
         }).ToList();
 
         return new PackageListPage(items, nextCursor);
@@ -632,6 +634,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
         public long TotalSize { get; init; }
         public int? MaxDownloadCount { get; init; }
         public int CurrentDownloadCount { get; init; }
+        public string? UnlockVerifier { get; init; }
     }
 
     /// <summary>

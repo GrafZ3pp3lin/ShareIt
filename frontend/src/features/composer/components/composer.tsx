@@ -1,5 +1,6 @@
 import { clsx } from 'clsx/lite';
 import { Show, createSignal, onSettled } from 'solid-js';
+import IconPlus from '~icons/lucide/plus';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import { ComposerFiles } from './composer-files.tsx';
 
@@ -17,7 +18,7 @@ type ComposerProps = {
 /**
  * One surface for text and files. The textarea keeps a fixed height (long
  * pastes scroll inside), files sit on the right, and every drop target is the
- * whole box. The `+` button stays in the bottom-right corner in every state.
+ * whole box. The add-files button stays in the bottom-right corner in every state.
  */
 export function Composer(props: ComposerProps) {
   const { t } = useI18n();
@@ -99,11 +100,11 @@ export function Composer(props: ComposerProps) {
 
       <button
         type="button"
-        class="absolute right-3 bottom-3 z-20 grid h-10 w-10 cursor-pointer place-items-center rounded-full bg-ink text-xl leading-none text-panel shadow-button transition hover:bg-brand-hover"
+        class="absolute right-3 bottom-3 z-20 grid h-10 w-10 cursor-pointer place-items-center rounded-full bg-ink text-panel shadow-button transition hover:bg-brand-hover"
         aria-label={t('composer.addFiles')}
         onClick={() => fileInput?.click()}
       >
-        +
+        <IconPlus class="h-5 w-5" />
       </button>
 
       <input

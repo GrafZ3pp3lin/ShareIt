@@ -1,5 +1,6 @@
 import { clsx } from 'clsx/lite';
 import { For, Show, createSignal } from 'solid-js';
+import IconRotateCw from '~icons/lucide/rotate-cw';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import { CopyButton } from '../../../shared/components/copy-button.tsx';
 import type { PassphraseStrength } from '../../../shared/crypto/passphrase.ts';
@@ -119,9 +120,10 @@ export function PasswordControl(props: PasswordControlProps) {
             <span>{t('options.password.shownOnce')}</span>
             <button
               type="button"
-              class="cursor-pointer text-muted transition hover:text-ink"
+              class="inline-flex cursor-pointer items-center gap-1 text-muted transition hover:text-ink"
               onClick={props.onRegenerate}
             >
+              <IconRotateCw class="h-3 w-3" />
               {t('options.password.regenerate')}
             </button>
           </div>

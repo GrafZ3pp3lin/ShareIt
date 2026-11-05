@@ -174,7 +174,7 @@ public class InMemoryContentStorageHandlerTests
         var oldest = CreatePackage(createdAt: start);
         oldest = oldest with { UserId = ownerId };
         var middle = CreatePackage(createdAt: start.AddMinutes(1)) with { UserId = ownerId };
-        var newest = CreatePackage(createdAt: start.AddMinutes(2)) with { UserId = ownerId };
+        var newest = CreatePackage(createdAt: start.AddMinutes(2), unlockVerifier: "verifier") with { UserId = ownerId };
         var foreign = CreatePackage(createdAt: start.AddMinutes(3)) with { UserId = Guid.NewGuid() };
 
         foreach (var package in new[] { oldest, middle, newest, foreign })
@@ -190,6 +190,8 @@ public class InMemoryContentStorageHandlerTests
         Assert.HasCount(2, firstPage.Items);
         Assert.AreEqual(newest.Id, firstPage.Items[0].Id);
         Assert.AreEqual(middle.Id, firstPage.Items[1].Id);
+        Assert.IsTrue(firstPage.Items[0].IsProtected);
+        Assert.IsFalse(firstPage.Items[1].IsProtected);
         Assert.IsNotNull(firstPage.NextCursor);
 
         var secondPage = await _handler.ListPackagesAsync(ownerId, firstPage.NextCursor, take: 2);

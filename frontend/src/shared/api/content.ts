@@ -1,11 +1,15 @@
 import {
   createPackage as createPackageGenerated,
+  deletePackage as deletePackageGenerated,
   downloadContentWithToken,
   getPackage as getPackageGenerated,
-  getUploadLimits as getUploadLimitsGenerated
+  getUploadLimits as getUploadLimitsGenerated,
+  listPackages as listPackagesGenerated
 } from '../../client/api.ts';
 import type {
   ContentPackageDetailsResponse,
+  ContentPackageListItem,
+  ContentPackageListResponse,
   ContentPackageResponse,
   CreatePackageRequest
 } from '../../client/model/index.ts';
@@ -46,6 +50,56 @@ const isContentPackageResponse = (value: unknown): value is ContentPackageRespon
 
 const isContentPackageDetailsResponse = (value: unknown): value is ContentPackageDetailsResponse =>
   typeof value === 'object' && value !== null && 'Package' in value && 'Items' in value;
+
+const isContentPackageListItem = (value: unknown): value is ContentPackageListItem =>
+  typeof value === 'object' &&
+  value !== null &&
+  'Id' in value &&
+  'CreatedAt' in value &&
+  'ItemCount' in value &&
+  'TotalSize' in value &&
+  'CurrentDownloadCount' in value &&
+  'IsExpired' in value &&
+  'IsProtected' in value;
+
+const isContentPackageListResponse = (value: unknown): value is ContentPackageListResponse =>
+  typeof value === 'object' &&
+  value !== null &&
+  'Items' in value &&
+  Array.isArray(value.Items) &&
+  value.Items.every(isContentPackageListItem);
+
+/** A list row with its generated int64 fields narrowed to numbers. */
+export type PackageSummary = {
+  Id: string;
+  CreatedAt: string;
+  ExpiresAt?: string;
+  ItemCount: number;
+  TotalSize: number;
+  MaxDownloadCount: number | null;
+  CurrentDownloadCount: number;
+  RemainingDownloads: number | null;
+  IsExpired: boolean;
+  IsProtected: boolean;
+};
+
+export type PackageListPage = {
+  items: PackageSummary[];
+  nextCursor: string | null;
+};
+
+const toPackageSummary = (item: ContentPackageListItem): PackageSummary => ({
+  Id: item.Id,
+  CreatedAt: item.CreatedAt,
+  ExpiresAt: item.ExpiresAt ?? undefined,
+  ItemCount: Number(item.ItemCount),
+  TotalSize: Number(item.TotalSize),
+  MaxDownloadCount: item.MaxDownloadCount == null ? null : Number(item.MaxDownloadCount),
+  CurrentDownloadCount: Number(item.CurrentDownloadCount),
+  RemainingDownloads: item.RemainingDownloads == null ? null : Number(item.RemainingDownloads),
+  IsExpired: item.IsExpired,
+  IsProtected: item.IsProtected
+});
 
 export type UploadProgressCallback = (sentBytes: number, totalBytes: number) => void;
 
@@ -168,6 +222,28 @@ export async function downloadContent(packageId: string, contentId: string, toke
   }
   if (isSuccess(result.status)) {
     return { error: new Error('Download did not return a blob'), status: result.status };
+  }
+  return { error: result.data, status: result.status };
+}
+
+export async function listPackages(cursor?: string): Promise<ApiResult<PackageListPage>> {
+  const result = await listPackagesGenerated(cursor ? { cursor } : undefined);
+  if (isSuccess(result.status) && isContentPackageListResponse(result.data)) {
+    return {
+      data: {
+        items: result.data.Items.map(toPackageSummary),
+        nextCursor: result.data.NextCursor ?? null
+      },
+      status: result.status
+    };
+  }
+  return { error: result.data, status: result.status };
+}
+
+export async function deletePackage(packageId: string): Promise<ApiResult<true>> {
+  const result = await deletePackageGenerated(packageId);
+  if (isSuccess(result.status)) {
+    return { data: true, status: result.status };
   }
   return { error: result.data, status: result.status };
 }

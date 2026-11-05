@@ -27,4 +27,5 @@ export interface ContentPackageListItem {
    */
   RemainingDownloads?: number | string | null;
   IsExpired: boolean;
+  IsProtected: boolean;
 }

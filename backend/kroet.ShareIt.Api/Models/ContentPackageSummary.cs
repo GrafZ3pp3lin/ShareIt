@@ -49,6 +49,11 @@ public sealed record ContentPackageSummary
         : null;
 
     /// <summary>
+    /// Whether the package requires an unlock proof (has a stored verifier).
+    /// </summary>
+    public required bool IsProtected { get; init; }
+
+    /// <summary>
     /// Whether the package has expired.
     /// </summary>
     public bool IsExpired(DateTimeOffset currentTime) => ExpiresAt.HasValue && currentTime >= ExpiresAt.Value;

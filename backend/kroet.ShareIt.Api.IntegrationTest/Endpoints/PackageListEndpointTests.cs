@@ -80,6 +80,25 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         Assert.AreEqual(0, row.CurrentDownloadCount);
         Assert.AreEqual(3, row.RemainingDownloads);
         Assert.IsFalse(row.IsExpired);
+        Assert.IsFalse(row.IsProtected);
+    }
+
+    [TestMethod]
+    public async Task ListPackages_ReportsWhetherThePackageIsProtected()
+    {
+        var ownerId = Guid.NewGuid();
+        var unprotected = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(1);
+        var protectedPackage = await CreatePackageAsync(
+            userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24, unlockVerifier: Verifier());
+
+        var page = await ReadJsonAsync<ContentPackageListResponse>(await ListPackagesAsync(userId: ownerId));
+
+        Assert.HasCount(2, page.Items);
+        var protectedRow = page.Items.Single(item => item.Id == protectedPackage);
+        Assert.IsTrue(protectedRow.IsProtected);
+        var unprotectedRow = page.Items.Single(item => item.Id == unprotected);
+        Assert.IsFalse(unprotectedRow.IsProtected);
     }
 
     [TestMethod]

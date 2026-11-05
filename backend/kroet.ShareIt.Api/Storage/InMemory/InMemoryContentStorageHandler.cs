@@ -81,7 +81,8 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
                 ItemCount = contents.Count,
                 TotalSize = contents.Sum(content => content.Size),
                 MaxDownloadCount = package.MaxDownloadCount,
-                CurrentDownloadCount = package.CurrentDownloadCount
+                CurrentDownloadCount = package.CurrentDownloadCount,
+                IsProtected = package.UnlockVerifier is not null
             };
         }).ToList();
 
