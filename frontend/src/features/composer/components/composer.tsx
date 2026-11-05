@@ -71,7 +71,7 @@ export function Composer(props: ComposerProps) {
       <div class={clsx('grid min-h-0 gap-4', hasFiles() ? 'sm:grid-cols-2' : 'grid-cols-1')}>
         <div class="flex min-h-0 flex-col">
           <textarea
-            class="h-[320px] w-full resize-none overflow-auto rounded-lg bg-transparent p-1 pb-14 text-sm leading-relaxed text-ink outline-none placeholder:text-muted/80 sm:h-[var(--composer-height)]"
+            class="h-80 w-full resize-none overflow-auto rounded-lg bg-transparent p-1 pb-14 text-sm leading-relaxed text-ink outline-none placeholder:text-muted/80 sm:h-(--composer-height)"
             placeholder={t('composer.placeholder')}
             aria-label={t('composer.placeholder')}
             value={props.text}
@@ -119,7 +119,7 @@ export function Composer(props: ComposerProps) {
       />
 
       <Show when={dragging()}>
-        <div class="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-composer border-2 border-dashed border-ink bg-panel font-mono text-xs tracking-[0.1em] text-ink uppercase">
+        <div class="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-composer border-2 border-dashed border-ink bg-panel font-mono text-xs tracking-widest text-ink uppercase">
           {t('composer.drop')}
         </div>
       </Show>
