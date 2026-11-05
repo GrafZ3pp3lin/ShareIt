@@ -1,4 +1,4 @@
-import { Show, createEffect, createUniqueId } from 'solid-js';
+import { Show, createEffect, createUniqueId, untrack } from 'solid-js';
 
 type ConfirmDialogProps = {
   open: boolean;
@@ -42,7 +42,11 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         props.onCancel();
       }}
       onClose={() => {
-        if (props.open) {
+        // The close event is dispatched synchronously by the effect below, so
+        // this read happens inside the effect callback. It is a one-shot
+        // snapshot either way: only tell the parent when the dialog was closed
+        // without it already knowing (props.open still true).
+        if (untrack(() => props.open)) {
           props.onCancel();
         }
       }}
