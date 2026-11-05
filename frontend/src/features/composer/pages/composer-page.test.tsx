@@ -142,4 +142,99 @@ describe('<ComposerPage />', () => {
     await screen.findByText('link ready');
     expect(api.createPackage).toHaveBeenCalledTimes(1);
   });
+
+  it('lets signed-in users pick expiry and download options', async () => {
+    authState.authenticated = true;
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: /expires 7 days/ }));
+    flush();
+
+    const selects = screen.getAllByRole('combobox');
+    expect(selects).toHaveLength(2);
+    fireEvent.change(selects[0], { target: { value: '3' } });
+    fireEvent.change(selects[1], { target: { value: '4' } });
+    flush();
+
+    expect(screen.getByRole('button', { name: /expires 30 days/ })).toHaveTextContent('unlimited');
+
+    fireEvent.input(screen.getByPlaceholderText('paste or type your text'), { target: { value: 'hello' } });
+    flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    await screen.findByText('link ready');
+    const request = api.createPackage.mock.calls[0][0];
+    expect(request.TimeToLiveHours).toBe(720);
+    expect(request.MaxDownloadCount).toBeNull();
+  });
+
+  it('validates a custom passphrase before enabling submit', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /expires 6 hours/ }));
+    flush();
+    fireEvent.click(screen.getByRole('button', { name: 'custom' }));
+    flush();
+
+    fireEvent.input(screen.getByLabelText('custom'), { target: { value: 'too short' } });
+    fireEvent.input(screen.getByPlaceholderText('paste or type your text'), { target: { value: 'hello' } });
+    flush();
+
+    expect(screen.getByText('Use at least 12 characters.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeDisabled();
+
+    fireEvent.input(screen.getByLabelText('custom'), { target: { value: 'long enough passphrase' } });
+    flush();
+
+    expect(screen.queryByText('Use at least 12 characters.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
+  });
+
+  it('shows and regenerates the generated passphrase', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /expires 6 hours/ }));
+    flush();
+    fireEvent.click(screen.getByRole('button', { name: 'generate' }));
+    flush();
+
+    const first = screen.getByText(/^[A-Za-z0-9_-]{22}$/).textContent;
+    expect(first).toHaveLength(22);
+
+    fireEvent.click(screen.getByRole('button', { name: 'regenerate' }));
+    flush();
+
+    expect(screen.getByText(/^[A-Za-z0-9_-]{22}$/).textContent).not.toBe(first);
+  });
+
+  it('offers retry and completes after a failed upload', async () => {
+    api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
+    renderPage();
+    fireEvent.input(screen.getByPlaceholderText('paste or type your text'), { target: { value: 'hello' } });
+    flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(await screen.findByText('storage unreachable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'retry upload' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'show link anyway' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'retry upload' }));
+
+    await screen.findByText('link ready');
+    expect(api.uploadItem).toHaveBeenCalledTimes(2);
+  });
+
+  it('can show the link with an incomplete-upload warning', async () => {
+    api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
+    renderPage();
+    fireEvent.input(screen.getByPlaceholderText('paste or type your text'), { target: { value: 'hello' } });
+    flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByText('storage unreachable');
+
+    fireEvent.click(screen.getByRole('button', { name: 'show link anyway' }));
+
+    await screen.findByText('link ready');
+    expect(screen.getByText(/Some items did not finish uploading/)).toBeInTheDocument();
+  });
 });

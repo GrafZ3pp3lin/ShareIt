@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { toBase64Url } from './base64url.ts';
-import { normalizeId } from './ids.ts';
+import { idBytes, normalizeId } from './ids.ts';
 import { deriveKeyBits, itemAad, metaAad, metaKey, itemKey, packageSalt, unlockProof } from './keys.ts';
 
 const PACKAGE_ID = '0192f3a0-1111-7000-8000-000000000000';
@@ -20,6 +20,18 @@ describe('normalizeId', () => {
 
   it('rejects values that are not UUIDs', () => {
     expect(() => normalizeId('package-1')).toThrow('Invalid UUID');
+  });
+});
+
+describe('idBytes', () => {
+  it('returns the 16 UUID bytes in big-endian order', () => {
+    expect(Array.from(idBytes('0192f3a0-1111-7000-8000-0000000000ff'))).toEqual([
+      0x01, 0x92, 0xf3, 0xa0, 0x11, 0x11, 0x70, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff
+    ]);
+  });
+
+  it('rejects non-UUID ids', () => {
+    expect(() => idBytes('package-1')).toThrow('Invalid UUID');
   });
 });
 

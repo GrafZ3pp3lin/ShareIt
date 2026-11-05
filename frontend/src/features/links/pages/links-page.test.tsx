@@ -222,4 +222,91 @@ describe('<LinksPage />', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(authState.login).toHaveBeenCalledTimes(1);
   });
+
+  it('shows the login skeleton while the auth state is loading', () => {
+    authState.authenticated = false;
+    authState.loading = true;
+
+    renderPage();
+
+    expect(screen.getByText('Loading links...')).toBeInTheDocument();
+    expect(screen.queryByText('Sign in to see your links')).not.toBeInTheDocument();
+    expect(api.listPackages).not.toHaveBeenCalled();
+  });
+
+  it('explains when OIDC is not configured', () => {
+    authState.authenticated = false;
+    authState.enabled = false;
+
+    renderPage();
+
+    expect(screen.getByText(/OIDC is not configured/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the loaded rows when loading more rejects and retries the same cursor', async () => {
+    api.listPackages.mockReset();
+    api.listPackages.mockResolvedValueOnce({
+      status: 200,
+      data: { items: [active], nextCursor: 'cursor-1' }
+    });
+    api.listPackages.mockRejectedValueOnce(new Error('offline'));
+    api.listPackages.mockResolvedValueOnce({
+      status: 200,
+      data: { items: [usedUp], nextCursor: null }
+    });
+
+    renderPage();
+    await screen.findByText('Your links');
+
+    fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+
+    expect(await screen.findByText('offline')).toBeInTheDocument();
+    expect(screen.getByText(shortPackageId(IDS.active))).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'retry' }));
+
+    await vi.waitFor(() => expect(api.listPackages).toHaveBeenCalledTimes(3));
+    expect(api.listPackages.mock.calls[2][0]).toBe('cursor-1');
+    expect(await screen.findByText(shortPackageId(IDS.usedUp))).toBeInTheDocument();
+  });
+
+  it('restores the row and reports a failed delete', async () => {
+    api.deletePackage.mockResolvedValueOnce({ status: 500, error: { detail: 'delete failed' } });
+
+    renderPage();
+    await screen.findByText('Your links');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'delete' })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete package' }));
+
+    expect(await screen.findByText('delete failed')).toBeInTheDocument();
+    expect(screen.getByText(shortPackageId(IDS.active))).toBeInTheDocument();
+  });
+
+  it('treats a missing package on delete as already gone', async () => {
+    api.deletePackage.mockResolvedValueOnce({ status: 404, error: { title: 'Not found' } });
+
+    renderPage();
+    await screen.findByText('Your links');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'delete' })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete package' }));
+
+    await vi.waitFor(() => expect(api.deletePackage).toHaveBeenCalledWith(IDS.active));
+    expect(screen.queryByText(shortPackageId(IDS.active))).not.toBeInTheDocument();
+    expect(screen.queryByText('Could not delete the link.')).not.toBeInTheDocument();
+  });
+
+  it('shows the filter-empty message when no link matches', async () => {
+    api.listPackages.mockResolvedValue({ status: 200, data: { items: [usedUp], nextCursor: null } });
+
+    renderPage();
+    await screen.findByText('Your links');
+
+    fireEvent.click(screen.getByRole('button', { name: /^active/ }));
+    flush();
+
+    expect(screen.getByText('No links in this filter.')).toBeInTheDocument();
+  });
 });

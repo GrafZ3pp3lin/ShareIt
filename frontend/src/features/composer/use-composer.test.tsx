@@ -47,6 +47,15 @@ const renderComposer = () => {
 
 const makeFile = (name = 'photo.jpg') => new File(['file-bytes'], name, { type: 'image/jpeg' });
 
+const uploadLimits = (anonymousFileLimitBytes: number) => ({
+  AnonymousFileLimitBytes: anonymousFileLimitBytes,
+  AuthenticatedFileLimitBytes: 10 * 1024 * 1024,
+  AnonymousMaxLifetimeHours: 6,
+  AuthenticatedMaxLifetimeHours: 720,
+  AnonymousMaxDownloadCount: 1,
+  AuthenticatedMaxDownloadCount: 10
+});
+
 const addedItem = (callIndex: number) => api.uploadItem.mock.calls[callIndex][1];
 
 const decodedMeta = (meta: string) => JSON.parse(new TextDecoder().decode(fromBase64Url(meta)));
@@ -165,5 +174,164 @@ describe('createComposer', () => {
     expect(composer.isAuthenticated()).toBe(true);
     expect(composer.downloadsLabel()).toBe('once');
     expect(composer.expiryLabel()).toBe('7 days');
+  });
+
+  it('applies the per-file limit and reports skipped files', async () => {
+    api.getUploadLimits.mockResolvedValue({ data: uploadLimits(2 * 1024 * 1024) });
+    const composer = renderComposer();
+    await vi.waitFor(() => expect(composer.limitLabel()).toBe('limit 2 MB/file'));
+
+    const oversized = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'big.bin', {
+      type: 'application/octet-stream'
+    });
+    composer.addFiles([oversized, makeFile('small.jpg')]);
+    flush();
+
+    expect(composer.files().map((file) => file.name)).toEqual(['small.jpg']);
+    expect(composer.error()).toContain('big.bin');
+    expect(composer.error()).toContain('2 MB');
+  });
+
+  it('deduplicates the same file selected repeatedly', () => {
+    const composer = renderComposer();
+    const file = makeFile('same.jpg');
+
+    composer.addFiles([file, file, makeFile('same.jpg')]);
+    flush();
+    expect(composer.files()).toHaveLength(1);
+
+    composer.addFiles([makeFile('same.jpg')]);
+    flush();
+    expect(composer.files()).toHaveLength(1);
+  });
+
+  it('reports a package creation failure and retries on the next submit', async () => {
+    api.createPackage.mockResolvedValueOnce({ error: { detail: 'quota exceeded' } });
+    const composer = renderComposer();
+    composer.setText('hello');
+    flush();
+
+    composer.handleSubmit();
+
+    await vi.waitFor(() => expect(composer.error()).toContain('quota exceeded'));
+    expect(composer.stage()).toBe('form');
+    expect(composer.partial()).toBeNull();
+    expect(api.uploadItem).not.toHaveBeenCalled();
+
+    composer.handleSubmit();
+
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+    expect(api.createPackage).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels an in-flight upload and keeps a retryable partial package', async () => {
+    api.uploadItem.mockImplementation(
+      (_packageId, _item, _onProgress, signal: AbortSignal) =>
+        new Promise((resolve) => {
+          signal.addEventListener('abort', () => resolve({ canceled: true }), { once: true });
+        })
+    );
+    const composer = renderComposer();
+    composer.setText('hello');
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(api.uploadItem).toHaveBeenCalledTimes(1));
+
+    composer.handleCancel();
+
+    await vi.waitFor(() => expect(composer.error()).toBe('Upload canceled.'));
+    expect(composer.progress()).toBeNull();
+    expect(composer.partial()).not.toBeNull();
+    expect(composer.submitting()).toBe(false);
+    expect(composer.stage()).toBe('form');
+  });
+
+  it('shows the link anyway after a failed upload', async () => {
+    api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
+    const composer = renderComposer();
+    composer.setText('hello');
+    composer.setPasswordMode('generate');
+    flush();
+    const passphrase = composer.generatedPassphrase();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.error()).toContain('storage unreachable'));
+
+    composer.showLinkAnyway();
+    flush();
+
+    expect(composer.stage()).toBe('result');
+    expect(composer.result()?.incomplete).toBe(true);
+    expect(composer.result()?.passphrase).toBe(passphrase);
+    expect(composer.result()?.linkWithPassphrase).toContain('#s=');
+  });
+
+  it('resets all form state after a successful upload', async () => {
+    const composer = renderComposer();
+    composer.setText('hello');
+    composer.addFiles([makeFile()]);
+    composer.setPasswordMode('custom');
+    composer.setCustomPassphrase('long enough passphrase');
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+
+    composer.resetForm();
+    flush();
+
+    expect(composer.stage()).toBe('form');
+    expect(composer.text()).toBe('');
+    expect(composer.files()).toEqual([]);
+    expect(composer.passwordMode()).toBe('off');
+    expect(composer.customPassphrase()).toBe('');
+    expect(composer.error()).toBeNull();
+    expect(composer.progress()).toBeNull();
+    expect(composer.result()).toBeNull();
+  });
+
+  it('submits the options picked by an authenticated user', async () => {
+    authState.authenticated = true;
+    const composer = renderComposer();
+    composer.setExpiry(3);
+    composer.setDownloads(4);
+    composer.setText('hello');
+    flush();
+
+    expect(composer.expiryLabel()).toBe('30 days');
+    expect(composer.downloadsLabel()).toBe('unlimited');
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+
+    const request = api.createPackage.mock.calls[0][0];
+    expect(request.TimeToLiveHours).toBe(720);
+    expect(request.MaxDownloadCount).toBeNull();
+    expect(composer.result()?.expiryLabel).toBe('30 days');
+    expect(composer.result()?.downloadsLabel).toBe('unlimited');
+  });
+
+  it('reports upload progress from the XHR callback', async () => {
+    let resolveUpload: ((result: { data: { Id: string } }) => void) | undefined;
+    api.uploadItem.mockImplementation(
+      (_packageId, _item, onProgress: (sent: number, total: number) => void) =>
+        new Promise((resolve) => {
+          onProgress(5, 10);
+          resolveUpload = resolve;
+        })
+    );
+    const composer = renderComposer();
+    composer.setText('hello');
+    flush();
+
+    composer.handleSubmit();
+
+    await vi.waitFor(() => expect(composer.progressLabel()).toBe('Uploading 1/1: 50%'));
+    expect(composer.progress()).toMatchObject({ phase: 'uploading', sentBytes: 5, totalBytes: 10 });
+
+    resolveUpload?.({ data: { Id: 'package-1' } });
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+    expect(composer.progress()).toBeNull();
   });
 });

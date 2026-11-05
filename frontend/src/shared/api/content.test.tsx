@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeXhr } from '../../tests/fake-xhr.ts';
-import { getUploadLimits, uploadItem } from './content.ts';
+import {
+  createPackage,
+  deletePackage,
+  downloadContent,
+  getPackageDetails,
+  getUploadLimits,
+  listPackages,
+  uploadItem
+} from './content.ts';
 
 const originalXhr = globalThis.XMLHttpRequest;
 const originalFetch = globalThis.fetch;
@@ -9,7 +17,7 @@ const originalFetch = globalThis.fetch;
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-const stubFetch = (handler: (input: RequestInfo | URL) => Promise<Response>) => {
+const stubFetch = (handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) => {
   const fetchMock = vi.fn(handler);
   globalThis.fetch = fetchMock;
   return fetchMock;
@@ -60,6 +68,213 @@ describe('getUploadLimits', () => {
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(new Error('Unexpected upload limits response'));
+  });
+});
+
+describe('createPackage', () => {
+  it('posts the request as JSON and returns the created package', async () => {
+    const request = {
+      Id: 'pkg-1',
+      UnlockVerifier: null,
+      TimeToLiveHours: 24,
+      MaxDownloadCount: 1
+    };
+    const fetchMock = stubFetch(async () => jsonResponse(201, { Id: 'pkg-1', ItemCount: 0 }));
+
+    const result = await createPackage(request);
+
+    expect(result.data).toEqual({ Id: 'pkg-1', ItemCount: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:5155/api/v1/content/package');
+    expect(init?.method).toBe('POST');
+    expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
+    expect(init?.body).toBe(JSON.stringify(request));
+  });
+
+  it('returns the ProblemDetails body on an error response', async () => {
+    const body = { title: 'Conflict', detail: 'package already exists' };
+    stubFetch(async () => jsonResponse(409, body));
+
+    const result = await createPackage({ Id: 'pkg-1' });
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+  });
+});
+
+describe('getPackageDetails', () => {
+  it('fetches the package with the unlock proof and returns status', async () => {
+    const body = { Package: { Id: 'pkg-1' }, Items: [] };
+    const fetchMock = stubFetch(async () => jsonResponse(200, body));
+
+    const result = await getPackageDetails('pkg-1', 'proof-1');
+
+    expect(result.data).toEqual(body);
+    expect(result.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1');
+    expect(new Headers(init?.headers).get('X-Unlock-Proof')).toBe('proof-1');
+  });
+
+  it('omits the unlock proof for a plain link', async () => {
+    const fetchMock = stubFetch(async () => jsonResponse(200, { Package: { Id: 'pkg-1' }, Items: [] }));
+
+    await getPackageDetails('pkg-1');
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Unlock-Proof')).toBeNull();
+  });
+
+  it('returns the response status and error for a rejected unlock', async () => {
+    const body = { title: 'Unlock required', detail: 'A valid proof is required' };
+    stubFetch(async () => jsonResponse(401, body));
+
+    const result = await getPackageDetails('pkg-1', 'wrong-proof');
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(401);
+  });
+
+  it('rejects a success payload with the wrong shape', async () => {
+    stubFetch(async () => jsonResponse(200, { Items: [] }));
+
+    const result = await getPackageDetails('pkg-1');
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual({ Items: [] });
+    expect(result.status).toBe(200);
+  });
+});
+
+describe('downloadContent', () => {
+  it('downloads through the file token and returns the blob', async () => {
+    const fetchMock = stubFetch(
+      async () =>
+        new Response(new Blob(['file-bytes']), {
+          status: 200,
+          headers: { 'content-type': 'application/octet-stream' }
+        })
+    );
+
+    const result = await downloadContent('pkg-1', 'item-1', 'file-token');
+
+    expect(result.data).toBeInstanceOf(Blob);
+    expect(result.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1/content/item-1/download');
+    expect(new Headers(init?.headers).get('X-File-Token')).toBe('file-token');
+  });
+
+  it('returns the ProblemDetails body for a failed download', async () => {
+    const body = { title: 'Gone', detail: 'token already used' };
+    stubFetch(async () => jsonResponse(404, body));
+
+    const result = await downloadContent('pkg-1', 'item-1', 'stale-token');
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(404);
+  });
+
+  it('rejects a successful response that is not a blob', async () => {
+    stubFetch(async () => jsonResponse(200, { not: 'a blob' }));
+
+    const result = await downloadContent('pkg-1', 'item-1', 'file-token');
+
+    expect(result.error).toEqual(new Error('Download did not return a blob'));
+    expect(result.status).toBe(200);
+  });
+});
+
+describe('listPackages', () => {
+  const listItem = {
+    Id: 'pkg-1',
+    CreatedAt: '2026-11-04T12:00:00Z',
+    ExpiresAt: null,
+    ItemCount: '2',
+    TotalSize: '4096',
+    MaxDownloadCount: '3',
+    CurrentDownloadCount: '1',
+    RemainingDownloads: '2',
+    IsExpired: false,
+    IsProtected: true
+  };
+
+  it('narrows int64 fields, maps nullable values and keeps the cursor', async () => {
+    const fetchMock = stubFetch(async () => jsonResponse(200, { Items: [listItem], NextCursor: 'cursor-2' }));
+
+    const result = await listPackages('cursor-1');
+
+    expect(result.data).toEqual({
+      items: [
+        {
+          Id: 'pkg-1',
+          CreatedAt: '2026-11-04T12:00:00Z',
+          ExpiresAt: undefined,
+          ItemCount: 2,
+          TotalSize: 4096,
+          MaxDownloadCount: 3,
+          CurrentDownloadCount: 1,
+          RemainingDownloads: 2,
+          IsExpired: false,
+          IsProtected: true
+        }
+      ],
+      nextCursor: 'cursor-2'
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:5155/api/v1/content/packages?cursor=cursor-1');
+  });
+
+  it('maps a missing cursor to null', async () => {
+    stubFetch(async () => jsonResponse(200, { Items: [] }));
+
+    const result = await listPackages();
+
+    expect(result.data).toEqual({ items: [], nextCursor: null });
+  });
+
+  it('returns the response status and body on failure', async () => {
+    const body = { title: 'Unauthorized', detail: 'sign in first' };
+    stubFetch(async () => jsonResponse(401, body));
+
+    const result = await listPackages();
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(401);
+  });
+
+  it('rejects a response whose items do not match the row shape', async () => {
+    stubFetch(async () => jsonResponse(200, { Items: [{ Id: 'pkg-1' }] }));
+
+    const result = await listPackages();
+
+    expect(result.data).toBeUndefined();
+    expect(result.status).toBe(200);
+  });
+});
+
+describe('deletePackage', () => {
+  it('resolves data on a 204 response', async () => {
+    const fetchMock = stubFetch(async () => new Response(null, { status: 204 }));
+
+    const result = await deletePackage('pkg-1');
+
+    expect(result).toMatchObject({ data: true, status: 204 });
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:5155/api/v1/content/packages/pkg-1');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE');
+  });
+
+  it('returns the ProblemDetails body when deletion fails', async () => {
+    const body = { title: 'Not found', detail: 'package does not exist' };
+    stubFetch(async () => jsonResponse(404, body));
+
+    const result = await deletePackage('pkg-1');
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(404);
   });
 });
 
@@ -130,6 +345,15 @@ describe('uploadItem', () => {
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(new Error('Network error during upload'));
+  });
+
+  it('rejects a success response with the wrong shape', async () => {
+    FakeXhr.responses = [{ status: 200, body: { not: 'a package' } }];
+
+    const result = await uploadItem('pkg-1', uploadRequest());
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(new Error('Unexpected upload response (status 200)'));
   });
 
   it('resolves with canceled when the signal aborts before completion', async () => {
