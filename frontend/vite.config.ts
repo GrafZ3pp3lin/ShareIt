@@ -21,12 +21,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
+    isolate: false,
     projects: [
       {
         test: {
           include: ['src/**/*.{test,spec}.ts'],
           name: 'unit',
-          environment: 'node'
+          environment: 'node',
+          isolate: false
         }
       },
       {
@@ -34,6 +36,7 @@ export default defineConfig({
           include: ['src/**/*.{test,spec}.tsx'],
           name: 'components',
           environment: 'happy-dom',
+          isolate: false,
           setupFiles: './src/tests/vitest-setup.ts'
         }
       }
