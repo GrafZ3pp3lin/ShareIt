@@ -122,6 +122,56 @@ describe('<LinksPage />', () => {
     expect(screen.queryByText(shortPackageId(IDS.expiring))).not.toBeInTheDocument();
   });
 
+  it('loads the next page with the cursor and appends its rows', async () => {
+    api.listPackages.mockReset();
+    api.listPackages.mockResolvedValueOnce({
+      status: 200,
+      data: { items: [active], nextCursor: 'cursor-1' }
+    });
+    api.listPackages.mockResolvedValueOnce({
+      status: 200,
+      data: { items: [usedUp], nextCursor: null }
+    });
+
+    renderPage();
+    await screen.findByText('Your links');
+    expect(screen.queryByText(shortPackageId(IDS.usedUp))).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+
+    await vi.waitFor(() => expect(api.listPackages).toHaveBeenCalledTimes(2));
+    expect(api.listPackages.mock.calls[1][0]).toBe('cursor-1');
+    expect(await screen.findByText(shortPackageId(IDS.usedUp))).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'load more' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the loaded rows when a page fails and retries the same cursor', async () => {
+    api.listPackages.mockReset();
+    api.listPackages.mockResolvedValueOnce({
+      status: 200,
+      data: { items: [active], nextCursor: 'cursor-1' }
+    });
+    api.listPackages.mockResolvedValueOnce({ status: 500, error: { detail: 'page failed' } });
+    api.listPackages.mockResolvedValueOnce({
+      status: 200,
+      data: { items: [usedUp], nextCursor: null }
+    });
+
+    renderPage();
+    await screen.findByText('Your links');
+
+    fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+
+    expect(await screen.findByText('page failed')).toBeInTheDocument();
+    expect(screen.getByText(shortPackageId(IDS.active))).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'retry' }));
+
+    await vi.waitFor(() => expect(api.listPackages).toHaveBeenCalledTimes(3));
+    expect(api.listPackages.mock.calls[2][0]).toBe('cursor-1');
+    expect(await screen.findByText(shortPackageId(IDS.usedUp))).toBeInTheDocument();
+  });
+
   it('deletes a link after confirmation and removes the row', async () => {
     renderPage();
     await screen.findByText('Your links');

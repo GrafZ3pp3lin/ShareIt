@@ -130,6 +130,9 @@ export const dict = {
     loadFailed: 'Could not load your links.',
     loadFailedTitle: 'Unable to load your links',
     retry: 'retry',
+    loadMore: 'load more',
+    loadingMore: 'loading…',
+    loadMoreFailed: 'Could not load more links.',
     filterEmpty: 'No links in this filter.',
     copyNote:
       "Only the plain link can be copied here — the passphrase was shown once and isn't stored. Send it from the same place you saved it.",

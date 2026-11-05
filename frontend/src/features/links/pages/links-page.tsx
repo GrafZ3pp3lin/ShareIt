@@ -119,6 +119,32 @@ export function LinksPage() {
                     {(item) => <LinkRow item={item} status={links.statusOf(item)} onDelete={links.requestDelete} />}
                   </For>
                 </Show>
+
+                <Show when={links.nextCursor() !== null || links.loadMoreError()}>
+                  <div class="grid justify-items-center gap-2 border-t border-border-soft p-3">
+                    <Show when={links.loadMoreError()}>
+                      {(message) => (
+                        <div class="caution w-full text-center" role="alert">
+                          {message()}
+                        </div>
+                      )}
+                    </Show>
+                    <Show when={links.nextCursor() !== null}>
+                      <button
+                        type="button"
+                        class="btn btn-secondary"
+                        disabled={links.loadingMore()}
+                        onClick={() => void links.loadMore()}
+                      >
+                        {links.loadingMore()
+                          ? t('links.loadingMore')
+                          : links.loadMoreError()
+                            ? t('links.retry')
+                            : t('links.loadMore')}
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
               </div>
 
               <p class="font-mono text-[10.5px] leading-relaxed text-muted">{t('links.copyNote')}</p>

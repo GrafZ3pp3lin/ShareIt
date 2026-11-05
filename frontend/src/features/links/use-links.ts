@@ -11,8 +11,11 @@ export function createLinks() {
 
   const [packages, setPackages] = createSignal<PackageSummary[]>([]);
   const [loading, setLoading] = createSignal(false);
+  const [loadingMore, setLoadingMore] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = createSignal<string | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
+  const [nextCursor, setNextCursor] = createSignal<string | null>(null);
   const [filter, setFilter] = createSignal<LinkFilter>('all');
   const [pendingDelete, setPendingDelete] = createSignal<PackageSummary | null>(null);
 
@@ -26,7 +29,9 @@ export function createLinks() {
     const current = ++loadRequest;
     setLoading(true);
     setError(null);
+    setLoadMoreError(null);
     setActionError(null);
+    setNextCursor(null);
 
     try {
       const outcome = await listPackages();
@@ -36,6 +41,7 @@ export function createLinks() {
 
       if (outcome.data) {
         setPackages(outcome.data.items);
+        setNextCursor(outcome.data.nextCursor);
       } else {
         setError(getErrorMessage(outcome.error, t('links.loadFailed')));
       }
@@ -54,8 +60,11 @@ export function createLinks() {
     loadRequest += 1;
     setPackages([]);
     setLoading(false);
+    setLoadingMore(false);
     setError(null);
+    setLoadMoreError(null);
     setActionError(null);
+    setNextCursor(null);
     setFilter('all');
     setPendingDelete(null);
   };
@@ -70,6 +79,44 @@ export function createLinks() {
       }
     }
   );
+
+  const loadMore = async () => {
+    const cursor = nextCursor();
+    if (!cursor || loadingMore()) {
+      return;
+    }
+
+    const generation = loadRequest;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+
+    try {
+      const outcome = await listPackages(cursor);
+      if (generation !== loadRequest) {
+        return;
+      }
+
+      if (!outcome.data) {
+        setLoadMoreError(getErrorMessage(outcome.error, t('links.loadMoreFailed')));
+        return;
+      }
+
+      const page = outcome.data;
+      setPackages((current) => {
+        const loadedIds = new Set(current.map((item) => item.Id));
+        return [...current, ...page.items.filter((item) => !loadedIds.has(item.Id))];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      if (generation === loadRequest) {
+        setLoadMoreError(getErrorMessage(err, t('links.loadMoreFailed')));
+      }
+    } finally {
+      if (generation === loadRequest) {
+        setLoadingMore(false);
+      }
+    }
+  };
 
   const counts = createMemo<Record<LinkFilter, number>>(() => {
     const statuses = packages().map((item) => linkStatus(item));
@@ -137,8 +184,12 @@ export function createLinks() {
     visiblePackages,
     counts,
     loading,
+    loadingMore,
     error,
+    loadMoreError,
     actionError,
+    nextCursor,
+    loadMore,
     filter,
     setFilter,
     pendingDelete,

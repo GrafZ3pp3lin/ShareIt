@@ -1,5 +1,5 @@
 import { clsx } from 'clsx/lite';
-import { For } from 'solid-js';
+import { For, createMemo } from 'solid-js';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import type { LinkFilter } from '../link-status.ts';
 
@@ -21,20 +21,28 @@ const LABEL_KEYS = {
 export function LinkFilters(props: LinkFiltersProps) {
   const { t } = useI18n();
 
+  const items = createMemo(() =>
+    FILTERS.map((filter) => ({
+      filter,
+      label: t(LABEL_KEYS[filter]),
+      count: props.counts[filter]
+    }))
+  );
+
   return (
     <div class="flex flex-wrap items-center gap-4 px-0.5 font-mono text-[11.5px] text-muted">
-      <For each={FILTERS}>
-        {(filter) => (
+      <For each={items()}>
+        {(item) => (
           <button
             type="button"
             class={clsx(
               'cursor-pointer border-b pb-0.5 transition',
-              props.active === filter ? 'border-ink text-ink' : 'border-transparent hover:text-ink'
+              props.active === item.filter ? 'border-ink text-ink' : 'border-transparent hover:text-ink'
             )}
-            aria-pressed={props.active === filter ? 'true' : 'false'}
-            onClick={() => props.onChange(filter)}
+            aria-pressed={props.active === item.filter ? 'true' : 'false'}
+            onClick={() => props.onChange(item.filter)}
           >
-            {t(LABEL_KEYS[filter])} <span class="opacity-70">{props.counts[filter]}</span>
+            {item.label} <span class="opacity-70">{item.count}</span>
           </button>
         )}
       </For>
