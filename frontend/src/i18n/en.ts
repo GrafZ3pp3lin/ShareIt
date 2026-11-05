@@ -34,6 +34,7 @@ export const dict = {
       remove: 'remove {{ name }}'
     },
     limit: 'limit {{ limit }}/file',
+    guestListNote: "Sign in to keep links in your list. Guest links can't be listed later — copy it when it's ready.",
     submit: 'Create link',
     submitting: 'Creating link…',
     cancel: 'Cancel',

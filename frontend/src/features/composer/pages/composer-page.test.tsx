@@ -70,6 +70,19 @@ describe('<ComposerPage />', () => {
     expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
   });
 
+  it('warns guests that the link will not be listed later', () => {
+    renderPage();
+
+    expect(screen.getByText(/can't be listed later/)).toBeInTheDocument();
+  });
+
+  it('does not show the guest listing warning to signed-in users', () => {
+    authState.authenticated = true;
+    renderPage();
+
+    expect(screen.queryByText(/can't be listed later/)).not.toBeInTheDocument();
+  });
+
   it('adds files through the input, shows their rows and removes them', () => {
     renderPage();
     addFilesThroughInput([makeFile('photo.jpg')]);

@@ -37,6 +37,10 @@ export function ComposerPage() {
             onSubmitShortcut={() => composer.handleSubmit()}
           />
 
+          <Show when={!composer.isAuthenticated()}>
+            <p class="px-1 font-mono text-[10.5px] leading-relaxed text-muted">{t('composer.guestListNote')}</p>
+          </Show>
+
           <Show when={composer.optionsOpen()}>
             <OptionsPanel
               isAuthenticated={composer.isAuthenticated()}
