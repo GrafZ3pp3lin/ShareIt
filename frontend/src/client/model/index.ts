@@ -9,7 +9,6 @@ export * from './contentItemInPackage';
 export * from './contentPackageDetailsResponse';
 export * from './contentPackageListItem';
 export * from './contentPackageListResponse';
-export * from './contentPackagePreviewResponse';
 export * from './contentPackageResponse';
 export * from './createPackageRequest';
 export * from './entityTagHeaderValue';

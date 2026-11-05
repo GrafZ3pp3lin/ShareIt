@@ -88,19 +88,6 @@ public static class ContentEndpoints
             .WithName("GetPackage")
             .WithTags("Content", "Package");
 
-        // Owner preview: basic information only, no content, no tokens,
-        // consumes no access. Authenticated owners only.
-        packageGroup
-            .MapGet("/{packageId:guid}/preview", GetPackagePreviewAsync)
-            .RequirePermission("Preview.Package")
-            .Produces<ContentPackagePreviewResponse>()
-            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
-            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
-            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
-            .WithName("GetPackagePreview")
-            .WithTags("Content", "Package");
-
         // Content download endpoint (required for items above the inline limit)
         packageGroup
             .MapGet("/{packageId:guid}/content/{contentId:guid}/download", DownloadContentWithTokenAsync)
@@ -489,66 +476,6 @@ public static class ContentEndpoints
         };
 
         return TypedResults.Ok(response);
-    }
-
-    /// <summary>
-    /// Returns basic package information for the authenticated owner only:
-    /// no content items, no download tokens, no inline payloads, and it never
-    /// consumes an access.
-    /// </summary>
-    private static async Task<Results<Ok<ContentPackagePreviewResponse>, ProblemHttpResult>> GetPackagePreviewAsync(
-        [FromRoute] Guid packageId,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
-        [FromServices] IContentStorageHandler storageHandler,
-        [FromServices] TimeProvider timeProvider,
-        ClaimsPrincipal claimsPrincipal,
-        CancellationToken cancellationToken)
-    {
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        // Guests are consumers and must never be able to preview packages.
-        if (userIdentity.IsGuest)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Authentication required",
-                Detail = "Only authenticated users can preview their packages",
-                Status = StatusCodes.Status401Unauthorized
-            });
-        }
-
-        var package = await storageHandler.GetPackageAsync(packageId, true, cancellationToken);
-
-        // Owner-only; a non-owner gets a 404 so other users' packages are not revealed.
-        if (package is null || package.UserId != userIdentity.Id)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Package not found",
-                Detail = $"Package with ID {packageId} was not found",
-                Status = StatusCodes.Status404NotFound
-            });
-        }
-
-        return TypedResults.Ok(new ContentPackagePreviewResponse
-        {
-            Id = package.Id,
-            CreatedAt = package.CreatedAt,
-            ExpiresAt = package.ExpiresAt,
-            ItemCount = package.Contents?.Count ?? 0,
-            MaxDownloadCount = package.MaxDownloadCount,
-            CurrentDownloadCount = package.CurrentDownloadCount,
-            RemainingDownloads = package.RemainingDownloads,
-            IsExpired = package.IsExpired(timeProvider.GetUtcNow())
-        });
     }
 
     /// <summary>
