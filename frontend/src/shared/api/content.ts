@@ -16,6 +16,8 @@ export type ApiResult<T> = {
   data?: T;
   error?: unknown;
   response?: Response;
+  /** HTTP status of the response, when the wrapper has one. */
+  status?: number;
 };
 
 const isSuccess = (status: number): boolean => status >= 200 && status < 300;
@@ -152,9 +154,9 @@ export async function getPackageDetails(
     unlockProof ? { headers: { 'X-Unlock-Proof': unlockProof } } : undefined
   );
   if (isSuccess(result.status) && isContentPackageDetailsResponse(result.data)) {
-    return { data: result.data };
+    return { data: result.data, status: result.status };
   }
-  return { error: result.data };
+  return { error: result.data, status: result.status };
 }
 
 export async function downloadContent(packageId: string, contentId: string, token: string): Promise<ApiResult<Blob>> {
@@ -162,10 +164,10 @@ export async function downloadContent(packageId: string, contentId: string, toke
     headers: { 'X-File-Token': token }
   });
   if (result.data instanceof Blob) {
-    return { data: result.data };
+    return { data: result.data, status: result.status };
   }
   if (isSuccess(result.status)) {
-    return { error: new Error('Download did not return a blob') };
+    return { error: new Error('Download did not return a blob'), status: result.status };
   }
-  return { error: result.data };
+  return { error: result.data, status: result.status };
 }

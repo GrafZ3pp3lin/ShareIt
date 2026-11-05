@@ -1,6 +1,6 @@
 import { For } from 'solid-js';
 import { useI18n } from '../../../i18n/i18n.tsx';
-import { formatBytes } from './format-bytes.ts';
+import { formatBytes } from '../../../shared/format-bytes.ts';
 
 type ComposerFilesProps = {
   files: File[];

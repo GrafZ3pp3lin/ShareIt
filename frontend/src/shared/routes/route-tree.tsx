@@ -4,7 +4,7 @@ import { AppLayout } from '../../app/layout.tsx';
 import { AccountPage } from '../../features/account/pages/account-page.tsx';
 import { AuthCallbackPage } from '../../features/auth/pages/auth-callback-page.tsx';
 import { NotFoundPage } from '../../features/not-found/pages/not-found-page.tsx';
-import { SharePage } from '../../features/content/pages/share-page.tsx';
+import { SharePage } from '../../features/share/pages/share-page.tsx';
 import { ComposerPage } from '../../features/composer/pages/composer-page.tsx';
 
 const AppShell = (props: RouteSectionProps) => <AppLayout {...props} variant="app" />;
