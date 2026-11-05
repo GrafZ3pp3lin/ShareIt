@@ -1,3 +1,5 @@
+import IconChevronDown from '~icons/lucide/chevron-down';
+import IconChevronUp from '~icons/lucide/chevron-up';
 import { useI18n } from '../../../i18n/i18n.tsx';
 
 type CommitBarProps = {
@@ -23,11 +25,12 @@ export function CommitBar(props: CommitBarProps) {
         type="button"
         class="flex cursor-pointer flex-wrap items-center gap-1.5 text-left font-mono text-[11.5px] text-muted"
         aria-expanded={props.optionsOpen ? 'true' : 'false'}
+        aria-controls="composer-options"
         onClick={props.onToggleOptions}
       >
         <span>{props.summary}</span>
-        <span class="text-[9px] opacity-70" aria-hidden="true">
-          {props.optionsOpen ? '▴' : '▾'}
+        <span class="opacity-70" aria-hidden="true">
+          {props.optionsOpen ? <IconChevronUp class="h-3 w-3" /> : <IconChevronDown class="h-3 w-3" />}
         </span>
       </button>
 

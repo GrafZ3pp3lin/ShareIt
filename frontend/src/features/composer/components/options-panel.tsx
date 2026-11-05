@@ -36,7 +36,7 @@ export function OptionsPanel(props: OptionsPanelProps) {
   };
 
   return (
-    <div class="grid gap-2 rounded-xl border border-border-soft bg-panel p-3.5">
+    <div id="composer-options" class="grid gap-2 rounded-xl border border-border-soft bg-panel p-3.5">
       <Show when={props.isAuthenticated}>
         <label class="option-row">
           <span>{t('options.expiry.label')}</span>

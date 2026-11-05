@@ -185,6 +185,21 @@ describe('<SharePage />', () => {
     expect(screen.queryByText('This link is protected')).not.toBeInTheDocument();
   });
 
+  it('keeps the access-used copy for a rate-limited unlock', async () => {
+    api.getPackageDetails.mockResolvedValueOnce({
+      status: 429,
+      error: { title: 'Too many requests', detail: 'Too many attempts for this link.' }
+    });
+
+    renderPage();
+    await submitPassphrase('');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Too many attempts.');
+    expect(alert).toHaveTextContent('No access was used.');
+    expect(screen.queryByText('Shared content')).not.toBeInTheDocument();
+  });
+
   it('shows the gone state when the package is expired or used up', async () => {
     api.getPackageDetails.mockResolvedValueOnce({
       status: 410,

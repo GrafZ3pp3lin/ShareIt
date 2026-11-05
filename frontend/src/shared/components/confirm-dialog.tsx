@@ -12,6 +12,7 @@ type ConfirmDialogProps = {
 
 export function ConfirmDialog(props: ConfirmDialogProps) {
   const titleId = createUniqueId();
+  const bodyId = createUniqueId();
   let dialog: HTMLDialogElement | undefined;
 
   createEffect(
@@ -35,6 +36,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       }}
       class="m-auto w-[min(92vw,26rem)] rounded-2xl border border-border-soft bg-panel p-5 text-ink shadow-card backdrop:bg-ink/25"
       aria-labelledby={titleId}
+      aria-describedby={props.body ? bodyId : undefined}
       onCancel={(event) => {
         event.preventDefault();
         props.onCancel();
@@ -49,7 +51,13 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         <h2 id={titleId} class="text-base font-semibold text-ink">
           {props.title}
         </h2>
-        <Show when={props.body}>{(body) => <p class="text-sm text-muted">{body()}</p>}</Show>
+        <Show when={props.body}>
+          {(body) => (
+            <p id={bodyId} class="text-sm text-muted">
+              {body()}
+            </p>
+          )}
+        </Show>
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" class="btn btn-secondary" onClick={props.onCancel}>
             {props.cancelLabel}

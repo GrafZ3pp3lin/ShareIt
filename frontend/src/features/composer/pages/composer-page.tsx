@@ -66,7 +66,11 @@ export function ComposerPage() {
           />
 
           <Show when={composer.progress()}>
-            <div class="flex items-center justify-between gap-3 font-mono text-xs text-muted">
+            <div
+              class="flex items-center justify-between gap-3 font-mono text-xs text-muted"
+              role="status"
+              aria-live="polite"
+            >
               <span>{composer.progressLabel()}</span>
             </div>
           </Show>
@@ -74,7 +78,9 @@ export function ComposerPage() {
           <Show when={composer.error()}>
             {(message) => (
               <div class="grid gap-2">
-                <div class="caution">{message()}</div>
+                <div class="caution" role="alert">
+                  {message()}
+                </div>
                 <Show when={composer.partial()}>
                   <div class="flex flex-wrap gap-2">
                     <button type="button" class="btn btn-secondary" onClick={() => composer.handleSubmit()}>

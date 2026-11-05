@@ -32,6 +32,7 @@ describe('ConfirmDialog', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Delete link?' });
     expect(dialog).toHaveAttribute('open');
+    expect(dialog).toHaveAccessibleDescription('This cannot be undone.');
     expect(screen.getByText('This cannot be undone.')).toBeInTheDocument();
   });
 

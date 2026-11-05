@@ -21,7 +21,14 @@
 
 ### Frontend (SolidJS + Vite)
 - Tailwind CSS is the primary styling system; prefer utility classes over custom CSS when possible.
-- Prefer native browser elements for UI primitives where possible.
+- Prefer native browser elements for UI primitives where possible; use the Lucide icon set
+  (`~icons/lucide/*`) instead of text glyphs as icons.
+- Routes: `/` composer, `/links` owner links list (authenticated), `/s/:packageId` share gate +
+  document, `*` not found. Route wiring lives in `src/shared/routes/route-tree.tsx`.
+- Guests can create links, but only authenticated users can list or delete them.
+- Optional client-side encryption uses one passphrase per package, a salt derived from the package id,
+  `SIE2` sealed envelopes and per-item sealed `meta`; the API only ever sees opaque bytes and the
+  `X-Unlock-Proof` verifier. See `frontend/AGENTS.md` and `docs/crypto-v2.md`.
 
 ### Backend (.NET)
 - Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`) against the real PostgreSQL and RustFS containers. They share those containers, reset the database per test, and use a unique S3 bucket per test; authentication is provided by the `X-Test-User` header (see `Infrastructure/ShareItApiTestBase.cs`).
@@ -36,7 +43,7 @@
 
 ### Data and API boundaries
 - The backend exposes REST endpoints under `/api/v1/content`.
-- The frontend can generate an api client by calling `npm generate:open-api`
+- The frontend can generate an api client by calling `pnpm generate:open-api`
 
 ## What to do when uncertain
 - Read a nearby file and follow its patterns instead of inventing new ones.

@@ -239,10 +239,7 @@ export const dict = {
   },
   auth: {
     signIn: 'Sign in',
-    signInDescription: 'Log in to see and manage the content you uploaded.',
     oidcNotConfiguredLong: 'OIDC is not configured. Set VITE_OIDC_* variables to enable login.',
-    alreadySignedIn: 'You are already signed in.',
-    continueWithOidc: 'Continue with OIDC',
     finishingSignIn: 'Finishing sign-in...',
     oidcNotConfigured: 'OIDC is not configured.'
   }
