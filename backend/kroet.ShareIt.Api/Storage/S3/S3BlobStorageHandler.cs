@@ -42,6 +42,10 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
     }
 
     /// <inheritdoc />
+    public Task InitializeAsync(CancellationToken cancellationToken = default)
+        => EnsureBucketExistsAsync(cancellationToken);
+
+    /// <inheritdoc />
     public async Task<string> UploadAsync(
         Stream stream,
         string contentType,
@@ -50,9 +54,6 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
     {
         try
         {
-            // Ensure bucket exists
-            await EnsureBucketExistsAsync(cancellationToken);
-
             // Generate a unique object key. The original file name is kept in the
             // object metadata below, never in the key itself, so the key stays
             // opaque and free of client-derived characters.
@@ -169,6 +170,34 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
         {
             _logger.LogError(ex, "Failed to check existence of object {ObjectKey}", blobId);
             throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+
+            await _s3Client.HeadBucketAsync(
+                new HeadBucketRequest
+                {
+                    BucketName = _bucketName
+                },
+                timeout.Token);
+
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "S3 health check failed for bucket {BucketName}", _bucketName);
+            return false;
         }
     }
 

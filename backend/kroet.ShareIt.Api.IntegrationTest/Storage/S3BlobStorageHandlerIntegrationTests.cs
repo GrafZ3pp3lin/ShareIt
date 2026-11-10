@@ -38,10 +38,11 @@ public class S3BlobStorageHandlerIntegrationTests
     }
 
     [TestInitialize]
-    public void TestInitialize()
+    public async Task TestInitialize()
     {
         _bucketName = $"shareit-tests-{Guid.NewGuid():N}";
         _handler = CreateHandler();
+        await _handler.InitializeAsync();
         _inspectionClient = _rustFs.CreateClient();
     }
 
@@ -53,7 +54,21 @@ public class S3BlobStorageHandlerIntegrationTests
     }
 
     [TestMethod]
-    public async Task UploadAsync_CreatesBucketAndStoresObjectWithMetadata()
+    public async Task InitializeAsync_CreatesBucket()
+    {
+        var bucketName = $"shareit-tests-{Guid.NewGuid():N}";
+        using var handler = CreateHandler(bucketName: bucketName);
+
+        await handler.InitializeAsync();
+
+        var buckets = await _inspectionClient.ListBucketsAsync();
+        Assert.IsTrue(
+            buckets.Buckets.Any(bucket => bucket.BucketName == bucketName),
+            "InitializeAsync should create the configured bucket when it does not exist.");
+    }
+
+    [TestMethod]
+    public async Task UploadAsync_StoresObjectWithMetadata()
     {
         var content = Encoding.UTF8.GetBytes("hello from rustfs");
         var uploadedAtLowerBound = DateTimeOffset.UtcNow;
@@ -62,11 +77,6 @@ public class S3BlobStorageHandlerIntegrationTests
         var blobId = await _handler.UploadAsync(stream, DefaultContentType, "../report final.txt");
 
         Assert.IsTrue(Guid.TryParse(blobId, out _), $"Expected a GUID blob id but got '{blobId}'.");
-
-        var buckets = await _inspectionClient.ListBucketsAsync();
-        Assert.IsTrue(
-            buckets.Buckets.Any(bucket => bucket.BucketName == _bucketName),
-            "UploadAsync should create the configured bucket when it does not exist.");
 
         var metadata = await _inspectionClient.GetObjectMetadataAsync(new GetObjectMetadataRequest
         {
@@ -234,14 +244,37 @@ public class S3BlobStorageHandlerIntegrationTests
             () => _handler.ExistsAsync(Guid.NewGuid().ToString(), cancellationTokenSource.Token));
     }
 
-    private S3BlobStorageHandler CreateHandler(string? serviceUrl = null)
+    [TestMethod]
+    public async Task CheckHealthAsync_WhenBucketExists_ReturnsTrue()
+    {
+        Assert.IsTrue(await _handler.CheckHealthAsync());
+    }
+
+    [TestMethod]
+    public async Task CheckHealthAsync_WhenBucketDoesNotExist_ReturnsFalse()
+    {
+        var bucketName = $"shareit-tests-{Guid.NewGuid():N}";
+        using var handler = CreateHandler(bucketName: bucketName);
+
+        Assert.IsFalse(await handler.CheckHealthAsync());
+    }
+
+    [TestMethod]
+    public async Task CheckHealthAsync_WhenServiceIsUnavailable_ReturnsFalse()
+    {
+        using var handler = CreateHandler(serviceUrl: UnreachableServiceUrl);
+
+        Assert.IsFalse(await handler.CheckHealthAsync());
+    }
+
+    private S3BlobStorageHandler CreateHandler(string? serviceUrl = null, string? bucketName = null)
     {
         var settings = new S3BlobStorageSettings
         {
             AccessKeyId = _rustFs.AccessKeyId,
             SecretAccessKey = _rustFs.SecretAccessKey,
             ServiceUrl = serviceUrl ?? _rustFs.ServiceUrl,
-            BucketName = _bucketName
+            BucketName = bucketName ?? _bucketName
         };
 
         return new S3BlobStorageHandler(

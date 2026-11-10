@@ -36,6 +36,7 @@
 - `kroet.ShareIt.Api/Dockerfile` copies `Directory.Packages.props` before `dotnet restore`; add any new central build file to that restore layer too.
 - Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`) against the real PostgreSQL and RustFS containers. They share those containers, reset the database per test, and use a unique S3 bucket per test; authentication is provided by the `X-Test-User` header (see `Infrastructure/ShareItApiTestBase.cs`).
 - The endpoint, Postgres, and S3 integration tests require a running Docker daemon (Testcontainers). The S3 tests use a RustFS container.
+- When an OTLP endpoint is configured, the API pushes OpenTelemetry metrics and traces via `OTEL_EXPORTER_OTLP_ENDPOINT` and Serilog logs via the `OpenTelemetry` sink in `appsettings.Production.json` (see `docs/observability.md`). It exposes no metrics endpoint. Database-derived gauges come from the SQL store only and refresh only when metrics export is enabled. Metric labels are aggregate-only: never add package, user or content identifiers as labels. Traces and logs may contain opaque package/content IDs from request URLs, but never tokens, unlock proofs, user/guest IDs, filenames or content.
 
 ## Code Style Guidelines
 

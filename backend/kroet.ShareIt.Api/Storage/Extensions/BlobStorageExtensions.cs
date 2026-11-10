@@ -51,4 +51,29 @@ public static class BlobStorageExtensions
             return services;
         }
     }
+
+    extension(WebApplication app)
+    {
+        /// <summary>
+        /// Initializes the configured blob store before the app starts serving
+        /// requests. Implementations that have no external resources use the
+        /// default no-op initialization.
+        /// </summary>
+        public async Task InitializeBlobStorageAsync()
+        {
+            var handler = app.Services.GetRequiredService<IBlobStorageHandler>();
+            var logger = app.Services.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                await handler.InitializeAsync(app.Lifetime.ApplicationStopping);
+                logger.LogDebug("Blob storage initialized");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to initialize blob storage");
+                throw;
+            }
+        }
+    }
 }

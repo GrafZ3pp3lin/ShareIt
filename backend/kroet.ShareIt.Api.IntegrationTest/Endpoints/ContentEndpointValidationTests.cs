@@ -119,8 +119,10 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
             .GetPackageAsync(packageId, includeContent: true);
 
         Assert.IsNotNull(stored);
-        Assert.HasCount(1, stored.Contents!);
-        var storedContent = stored.Contents.Single();
+        var storedContents = stored.Contents;
+        Assert.IsNotNull(storedContents);
+        Assert.HasCount(1, storedContents);
+        var storedContent = storedContents.Single();
         Assert.AreEqual(contentId, storedContent.Id);
         Assert.AreEqual(meta, storedContent.Meta, "The server must store the opaque metadata verbatim.");
         Assert.IsFalse(string.IsNullOrWhiteSpace(storedContent.Url));

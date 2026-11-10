@@ -1,8 +1,13 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Text;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 using kroet.ShareIt.Api.Models;
+using kroet.ShareIt.Api.Services.Metrics;
+using kroet.ShareIt.Api.Services.Observability;
 using kroet.ShareIt.Api.Storage;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -86,6 +91,28 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         Assert.IsNotNull(location);
         Assert.IsTrue(location.Contains("/api/v1/content/package/", StringComparison.Ordinal), location);
         Assert.IsTrue(location.Contains(package.Id.ToString(), StringComparison.Ordinal), location);
+    }
+
+    [TestMethod]
+    public async Task CreatePackage_AsGuest_EmitsPackageCreateSpan()
+    {
+        var activities = new ConcurrentBag<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == ShareItActivitySource.Name,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            SampleUsingParentId = (ref ActivityCreationOptions<string> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStarted = activities.Add
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid());
+        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
+
+        var span = activities.Single(activity => activity.OperationName == "package.create");
+        Assert.AreEqual("guest", span.GetTagItem("shareit.identity.type"));
+        Assert.AreEqual("created", span.GetTagItem("shareit.package.result"));
+        Assert.AreEqual(false, span.GetTagItem("shareit.package.private"));
     }
 
     [TestMethod]
@@ -356,8 +383,12 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
             Key = blobKey
         });
 
+        using var metrics = new MetricsCapture();
+
         var failed = await SendDownloadAsync(fileItem.DownloadUrl!, fileItem.DownloadToken!, guestId);
         Assert.AreEqual(HttpStatusCode.NotFound, failed.StatusCode);
+        Assert.AreEqual(0, metrics.Count("shareit.tokens.consumed"));
+        Assert.AreEqual(0L, metrics.Sum("shareit.bytes.authorized"));
 
         // Put an object back under the same key: the token was not burned.
         await S3Client.PutObjectAsync(new Amazon.S3.Model.PutObjectRequest
@@ -370,6 +401,8 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var retried = await SendDownloadAsync(fileItem.DownloadUrl!, fileItem.DownloadToken!, guestId);
         var retriedBody = await retried.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retried.StatusCode, retriedBody);
+        Assert.AreEqual(1, metrics.Count("shareit.tokens.consumed"));
+        Assert.AreEqual((long)LargeItemBytes.Length, metrics.Sum("shareit.bytes.authorized"));
     }
 
     // ---------------------------------------------------------------
@@ -491,5 +524,34 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Package not found", problem.Title);
+    }
+
+    private sealed class MetricsCapture : IDisposable
+    {
+        private readonly MeterListener _listener = new();
+        private readonly List<(string Name, long Value)> _measurements = [];
+
+        public MetricsCapture()
+        {
+            _listener.InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == ShareItMetrics.MeterName)
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            };
+            _listener.SetMeasurementEventCallback<long>((instrument, value, _, _) =>
+                _measurements.Add((instrument.Name, value)));
+            _listener.Start();
+        }
+
+        public int Count(string name)
+            => _measurements.Count(measurement => measurement.Name == name);
+
+        public long Sum(string name)
+            => _measurements.Where(measurement => measurement.Name == name).Sum(measurement => measurement.Value);
+
+        public void Dispose()
+            => _listener.Dispose();
     }
 }

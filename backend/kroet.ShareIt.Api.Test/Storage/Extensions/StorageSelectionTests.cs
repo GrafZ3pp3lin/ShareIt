@@ -37,11 +37,30 @@ public class StorageSelectionTests
     [TestMethod]
     public void AddContentStorage_WithPostgresConfigured_RegistersSqlHandler()
     {
-        var descriptor = GetSingleDescriptor(
-            services => services.AddContentStorage(CreateConfiguration(PostgresSettings)),
-            typeof(IContentStorageHandler));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(CreateConfiguration(PostgresSettings));
+        services.AddContentStorage(CreateConfiguration(PostgresSettings));
+        using var provider = services.BuildServiceProvider();
 
-        Assert.AreEqual(typeof(SqlContentStorageHandler), descriptor.ImplementationType);
+        Assert.IsInstanceOfType<SqlContentStorageHandler>(
+            provider.GetRequiredService<IContentStorageHandler>());
+    }
+
+    [TestMethod]
+    public void AddContentStorage_WithPostgresConfigured_RegistersMetricsSnapshotProviderUsingSameHandler()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(CreateConfiguration(PostgresSettings));
+        services.AddContentStorage(CreateConfiguration(PostgresSettings));
+        using var provider = services.BuildServiceProvider();
+
+        var contentStorage = provider.GetRequiredService<IContentStorageHandler>();
+        var snapshotProvider = provider.GetRequiredService<IMetricsSnapshotProvider>();
+
+        Assert.IsInstanceOfType<SqlContentStorageHandler>(snapshotProvider);
+        Assert.IsTrue(ReferenceEquals(contentStorage, snapshotProvider));
     }
 
     [TestMethod]
@@ -52,6 +71,16 @@ public class StorageSelectionTests
             typeof(IContentStorageHandler));
 
         Assert.AreEqual(typeof(InMemoryContentStorageHandler), descriptor.ImplementationType);
+    }
+
+    [TestMethod]
+    public void AddContentStorage_WithInMemoryConfigured_DoesNotRegisterMetricsSnapshotProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddContentStorage(CreateConfiguration(InMemorySettings));
+
+        Assert.IsFalse(services.Any(descriptor =>
+            descriptor.ServiceType == typeof(IMetricsSnapshotProvider)));
     }
 
     [TestMethod]

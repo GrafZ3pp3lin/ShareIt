@@ -7,6 +7,8 @@ using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Services;
 using kroet.ShareIt.Api.Services.Cleanup;
+using kroet.ShareIt.Api.Services.Metrics;
+using kroet.ShareIt.Api.Services.Observability;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage.Extensions;
 using Microsoft.AspNetCore.Authentication;
@@ -20,8 +22,8 @@ using Microsoft.IdentityModel.Tokens;
 using Serilog;
 
 // The initial "bootstrap" logger is able to log errors during start-up. It's completely replaced by the
-// logger configured in `AddSerilog()` below, once configuration and dependency-injection have both been
-// set up successfully.
+// logger configured by `AddObservability()` below, once configuration and dependency-injection
+// have both been set up successfully.
 Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateBootstrapLogger();
 
 try
@@ -29,7 +31,7 @@ try
     var builder = WebApplication.CreateBuilder(args);
     var configuration = builder.Configuration;
     
-    builder.Services.AddSerilog((_, lc) => { lc.ReadFrom.Configuration(configuration); });
+    builder.AddObservability();
     
     builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
     {
@@ -100,6 +102,7 @@ try
             }
 
             context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.HttpContext.RequestServices.GetRequiredService<ShareItMetrics>().RateLimited();
             await context.HttpContext.Response.WriteAsJsonAsync(new ProblemDetails
             {
                 Title = "Too many requests",
@@ -266,6 +269,11 @@ try
 
     var app = builder.Build();
 
+    var metrics = app.Services.GetRequiredService<ShareItMetrics>();
+    metrics.SetBuildInfo(
+        ObservabilityExtensions.ResolveServiceVersion(),
+        app.Environment.EnvironmentName);
+
     app.UseForwardedHeaders();
 
     app.UseSerilogRequestLogging();
@@ -323,6 +331,7 @@ try
     app.MapPermissions();
 
     await app.InitializePackageStorageAsync();
+    await app.InitializeBlobStorageAsync();
 
     app.Run();
     return 0;

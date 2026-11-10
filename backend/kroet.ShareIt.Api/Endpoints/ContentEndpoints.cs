@@ -1,9 +1,12 @@
 using System.Buffers.Text;
+using System.Diagnostics;
 using System.Security.Claims;
 using kroet.Permission.AspNetCore;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Models;
+using kroet.ShareIt.Api.Services.Metrics;
+using kroet.ShareIt.Api.Services.Observability;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.User;
@@ -116,10 +119,13 @@ public static class ContentEndpoints
             [FromServices] TimeProvider timeProvider,
             [FromServices] LinkGenerator linkGenerator,
             [FromServices] IOptions<UploadSettings> uploadOptions,
+            [FromServices] ShareItMetrics metrics,
             ClaimsPrincipal claimsPrincipal,
             HttpContext httpContext,
             CancellationToken cancellationToken)
     {
+        using var activity = ShareItActivitySource.Instance.StartActivity("package.create");
+
         if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
         {
             return TypedResults.Problem(new ProblemDetails
@@ -129,6 +135,8 @@ public static class ContentEndpoints
                 Status = StatusCodes.Status400BadRequest
             });
         }
+
+        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
         if (request.Id is not { } packageId || packageId == Guid.Empty)
         {
@@ -181,6 +189,7 @@ public static class ContentEndpoints
             }
 
             var existingWithContent = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+            activity?.SetTag("shareit.package.result", "existing");
             return TypedResults.Ok(ContentPackageResponse.FromPackage(existingWithContent ?? existing));
         }
 
@@ -199,6 +208,9 @@ public static class ContentEndpoints
         };
 
         await contentStorageHandler.StorePackageAsync(package, cancellationToken);
+        metrics.PackageCreated();
+        activity?.SetTag("shareit.package.result", "created");
+        activity?.SetTag("shareit.package.private", request.IsPrivate ?? false);
 
         var packageUrl = linkGenerator.GetUriByName(httpContext, "GetPackage", new { packageId = package.Id })!;
 
@@ -218,9 +230,12 @@ public static class ContentEndpoints
         [FromServices] IStorageHandler storageHandler,
         [FromServices] TimeProvider timeProvider,
         [FromServices] IOptions<UploadSettings> uploadOptions,
+        [FromServices] ShareItMetrics metrics,
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
     {
+        using var activity = ShareItActivitySource.Instance.StartActivity("package.upload");
+
         if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
         {
             return TypedResults.Problem(new ProblemDetails
@@ -230,6 +245,8 @@ public static class ContentEndpoints
                 Status = StatusCodes.Status400BadRequest
             });
         }
+
+        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
         var package = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
         if (package is null)
@@ -279,6 +296,9 @@ public static class ContentEndpoints
             return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
         }
 
+        activity?.SetTag("shareit.content.kind", KindOf(contentType));
+        activity?.SetTag("shareit.content.size_bytes", request.File.Length);
+
         var settings = uploadOptions.Value;
         var fileLimitBytes = FileLimitBytes(userIdentity, settings);
         if (request.File.Length > fileLimitBytes)
@@ -302,6 +322,7 @@ public static class ContentEndpoints
             }
 
             var existingPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+            activity?.SetTag("shareit.package.result", "existing");
             return TypedResults.Ok(ContentPackageResponse.FromPackage(existingPackage ?? package));
         }
 
@@ -319,6 +340,8 @@ public static class ContentEndpoints
 
         await using var stream = request.File.OpenReadStream();
         await storageHandler.StoreContentAsync(content, stream, cancellationToken);
+        metrics.ItemUploaded(contentType, request.File.Length);
+        activity?.SetTag("shareit.package.result", "uploaded");
 
         var updatedPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
 
@@ -340,11 +363,14 @@ public static class ContentEndpoints
         [FromServices] IOptions<DownloadSettings> downloadOptions,
         [FromServices] LinkGenerator linkGenerator,
         [FromServices] TimeProvider timeProvider,
+        [FromServices] ShareItMetrics metrics,
         HttpContext httpContext,
         ClaimsPrincipal claimsPrincipal,
         ILogger<LogCategory> logger,
         CancellationToken cancellationToken)
     {
+        using var activity = ShareItActivitySource.Instance.StartActivity("package.open");
+
         if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
         {
             return TypedResults.Problem(new ProblemDetails
@@ -354,6 +380,8 @@ public static class ContentEndpoints
                 Status = StatusCodes.Status400BadRequest
             });
         }
+
+        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
         // Shell first: no items, no names, no tokens, no blob reads.
         var package = await storageHandler.GetPackageShellAsync(packageId, cancellationToken);
@@ -368,6 +396,7 @@ public static class ContentEndpoints
         }
 
         var now = timeProvider.GetUtcNow();
+        activity?.SetTag("shareit.package.protected", package.UnlockVerifier is not null);
 
         // Expiry is not content, so answering 410 before the proof is safe.
         if (package.IsExpired(now))
@@ -385,6 +414,7 @@ public static class ContentEndpoints
         if (package.UnlockVerifier is not null && !UnlockProof.Matches(package.UnlockVerifier, unlockProof))
         {
             logger.LogWarning("Failed unlock attempt for package {PackageId}", packageId);
+            metrics.UnlockFailed();
             return TypedResults.Problem(new ProblemDetails
             {
                 Title = "Unlock required",
@@ -407,6 +437,8 @@ public static class ContentEndpoints
             });
         }
 
+        metrics.AccessClaimed();
+
         var withContent = await storageHandler.GetPackageAsync(packageId, includeContent: true, cancellationToken);
         if (withContent?.Contents is null || withContent.Contents.Count == 0)
         {
@@ -418,11 +450,15 @@ public static class ContentEndpoints
             });
         }
 
+        activity?.SetTag("shareit.package.items", withContent.Contents.Count);
+
         var inlineLimitBytes = downloadOptions.Value.InlinePayloadLimitBytes;
         var inlineBudgetBytes = downloadOptions.Value.InlinePayloadBudgetBytes;
         var inlineSpentBytes = 0L;
 
         var items = new List<ContentItemInPackage>();
+        var inlineItemCount = 0;
+        var tokenItemCount = 0;
         var orderedContents = withContent.Contents
             .OrderBy(content => content.CreatedAt)
             .ThenBy(content => content.Id.ToString("N"), StringComparer.Ordinal);
@@ -438,6 +474,7 @@ public static class ContentEndpoints
                 using var buffer = new MemoryStream();
                 await dataStream.CopyToAsync(buffer, cancellationToken);
                 inlineSpentBytes += content.Size;
+                inlineItemCount++;
 
                 items.Add(new ContentItemInPackage
                 {
@@ -451,6 +488,8 @@ public static class ContentEndpoints
             else
             {
                 var token = await tokenService.GenerateTokenAsync(content.Id, userIdentity.Id, cancellationToken);
+                metrics.TokenIssued();
+                tokenItemCount++;
                 var downloadUrl = linkGenerator.GetUriByName(
                     httpContext,
                     "DownloadContentWithToken",
@@ -475,6 +514,11 @@ public static class ContentEndpoints
             Items = items
         };
 
+        activity?.SetTag("shareit.package.inline_items", inlineItemCount);
+        activity?.SetTag("shareit.package.token_items", tokenItemCount);
+        activity?.SetTag("shareit.package.inline_bytes", inlineSpentBytes);
+        activity?.SetTag("shareit.package.result", "opened");
+
         return TypedResults.Ok(response);
     }
 
@@ -489,9 +533,12 @@ public static class ContentEndpoints
         [FromServices] IContentStorageHandler storageHandler,
         [FromServices] IBlobStorageHandler blobStorageHandler,
         [FromServices] IDownloadTokenService tokenService,
+        [FromServices] ShareItMetrics metrics,
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
     {
+        using var activity = ShareItActivitySource.Instance.StartActivity("package.download");
+
         if (string.IsNullOrWhiteSpace(token))
         {
             return TypedResults.Problem(new ProblemDetails
@@ -511,6 +558,8 @@ public static class ContentEndpoints
                 Status = StatusCodes.Status400BadRequest
             });
         }
+
+        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
         // Read-only validation first: a failing blob read must not burn the
         // token.
@@ -550,6 +599,9 @@ public static class ContentEndpoints
 
         var content = package.Contents.Single(c => c.Id == contentId);
 
+        activity?.SetTag("shareit.content.kind", KindOf(content.ContentType));
+        activity?.SetTag("shareit.content.size_bytes", content.Size);
+
         Stream stream;
         try
         {
@@ -557,6 +609,7 @@ public static class ContentEndpoints
         }
         catch (KeyNotFoundException)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, "content not found");
             // The token stays usable: nothing was streamed and nothing consumed.
             return TypedResults.Problem(new ProblemDetails
             {
@@ -579,6 +632,12 @@ public static class ContentEndpoints
                 Status = StatusCodes.Status400BadRequest
             });
         }
+
+        // The token is consumed and the download is authorized here. The
+        // response body is streamed after this method returns, so this is not
+        // a completed-transfer measurement.
+        metrics.DownloadAuthorized(content.Size);
+        activity?.SetTag("shareit.download.authorized", true);
 
         // No names or MIME types here: both are part of the client-sealed
         // per-item metadata. The browser saves the bytes as an opaque blob.

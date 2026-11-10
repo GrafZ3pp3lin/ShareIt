@@ -41,8 +41,12 @@ public static class ContentStorageExtensions
                 .BindConfiguration(SqlStorageSettings.SectionName)
                 .ValidateWithFluentValidator<SqlStorageSettings, PostgreSqlDbSettingsValidator>()
                 .ValidateOnStart();
-        
-            services.AddSingleton<IContentStorageHandler, SqlContentStorageHandler>();
+
+            services.AddSingleton<SqlContentStorageHandler>();
+            services.AddSingleton<IContentStorageHandler>(provider =>
+                provider.GetRequiredService<SqlContentStorageHandler>());
+            services.AddSingleton<IMetricsSnapshotProvider>(provider =>
+                provider.GetRequiredService<SqlContentStorageHandler>());
 
             return services;
         }

@@ -40,5 +40,23 @@ public interface IBlobStorageHandler
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if the blob exists, false otherwise.</returns>
     Task<bool> ExistsAsync(string blobId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Initializes backend resources required before serving requests. The
+    /// in-memory implementation uses the default no-op initialization.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task InitializeAsync(CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Performs a lightweight health check against the backing blob store.
+    /// Implementations that cannot fail (for example the in-memory store) use
+    /// the default healthy result.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if the store is reachable, false otherwise.</returns>
+    Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
 }
 

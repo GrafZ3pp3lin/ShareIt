@@ -145,14 +145,36 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 
     public Task<int> DeletePackagesAsync(IEnumerable<Guid> packageIds, CancellationToken cancellationToken = default)
     {
-        var removed = _packages.RemoveAll(p => packageIds.Contains(p.Id));
+        var requestedIds = packageIds.ToHashSet();
+        var deletedIds = _packages
+            .Where(package => requestedIds.Contains(package.Id))
+            .Select(package => package.Id)
+            .ToHashSet();
+
+        var removed = _packages.RemoveAll(package => deletedIds.Contains(package.Id));
+
+        // Match the PostgreSQL ON DELETE CASCADE behaviour: package deletion
+        // also removes the package's contents.
+        if (removed > 0)
+        {
+            _contents.RemoveAll(content => deletedIds.Contains(content.PackageId));
+        }
+
         return Task.FromResult(removed);
     }
 
     public Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default)
     {
         var package = _packages.FirstOrDefault(p => p.Id == packageId);
-        return Task.FromResult(package is not null && _packages.Remove(package));
+        if (package is null || !_packages.Remove(package))
+        {
+            return Task.FromResult(false);
+        }
+
+        // Match the PostgreSQL ON DELETE CASCADE behaviour: package deletion
+        // also removes the package's contents.
+        _contents.RemoveAll(content => content.PackageId == packageId);
+        return Task.FromResult(true);
     }
 
     public Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)

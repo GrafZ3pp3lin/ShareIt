@@ -146,6 +146,67 @@ public class InMemoryContentStorageHandlerTests
     }
 
     [TestMethod]
+    public async Task DeletePackageAsync_RemovesContents()
+    {
+        var package = CreatePackage();
+        var content = CreateContent(package.Id) with { Size = 7 };
+
+        await _handler.StorePackageAsync(package);
+        await _handler.StoreContentAsync(content);
+
+        Assert.IsTrue(await _handler.DeletePackageAsync(package.Id));
+
+        Assert.IsFalse(await _handler.ExistsPackageAsync(package.Id));
+        Assert.IsFalse(await _handler.ExistsContentAsync(content.Id));
+    }
+
+    [TestMethod]
+    public async Task DeletePackagesAsync_RemovesContentsOfDeletedPackagesOnly()
+    {
+        var keptPackage = CreatePackage();
+        var deletedPackage = CreatePackage();
+        var alsoDeletedPackage = CreatePackage();
+        var keptContent = CreateContent(keptPackage.Id) with { Size = 5 };
+        var deletedContent = CreateContent(deletedPackage.Id) with { Size = 7 };
+        var alsoDeletedContent = CreateContent(alsoDeletedPackage.Id) with { Size = 11 };
+
+        await _handler.StorePackageAsync(keptPackage);
+        await _handler.StorePackageAsync(deletedPackage);
+        await _handler.StorePackageAsync(alsoDeletedPackage);
+        await _handler.StoreContentsAsync([keptContent, deletedContent, alsoDeletedContent]);
+
+        var removed = await _handler.DeletePackagesAsync(
+            [deletedPackage.Id, alsoDeletedPackage.Id, Guid.NewGuid()]);
+
+        Assert.AreEqual(2, removed);
+        Assert.IsTrue(await _handler.ExistsContentAsync(keptContent.Id));
+        Assert.IsTrue(await _handler.ExistsPackageAsync(keptPackage.Id));
+        Assert.IsFalse(await _handler.ExistsContentAsync(deletedContent.Id));
+        Assert.IsFalse(await _handler.ExistsContentAsync(alsoDeletedContent.Id));
+
+        var kept = await _handler.GetPackageAsync(keptPackage.Id);
+        Assert.IsNotNull(kept);
+        Assert.HasCount(1, kept.Contents!);
+        Assert.AreEqual(keptContent.Id, kept.Contents![0].Id);
+    }
+
+    [TestMethod]
+    public async Task DeletePackagesAsync_WithNoDeletedPackages_LeavesContentsUntouched()
+    {
+        var package = CreatePackage();
+        var content = CreateContent(package.Id);
+
+        await _handler.StorePackageAsync(package);
+        await _handler.StoreContentAsync(content);
+
+        var removed = await _handler.DeletePackagesAsync([Guid.NewGuid()]);
+
+        Assert.AreEqual(0, removed);
+        Assert.IsTrue(await _handler.ExistsPackageAsync(package.Id));
+        Assert.IsTrue(await _handler.ExistsContentAsync(content.Id));
+    }
+
+    [TestMethod]
     public async Task GetPackagesToDeleteAsync_ReturnsExpiredAndAccessLimitedPackages()
     {
         var activePackage = CreatePackage();

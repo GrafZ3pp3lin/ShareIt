@@ -8,7 +8,7 @@ namespace kroet.ShareIt.Api.Storage.Postgres;
 /// <summary>
 /// PostgreSQL implementation of content package storage using Dapper.
 /// </summary>
-public class SqlContentStorageHandler : IContentStorageHandler
+public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshotProvider
 {
     static SqlContentStorageHandler()
     {
@@ -546,7 +546,7 @@ public class SqlContentStorageHandler : IContentStorageHandler
                                              FROM content_packages
                                              WHERE 
                                                  (max_download_count IS NOT NULL AND current_download_count >= max_download_count)
-                                                 OR (expires_at IS NOT NULL AND expires_at < @Now)
+                                                 OR (expires_at IS NOT NULL AND expires_at <= @Now)
                                              """;
 
         await using var connection = CreateConnection();
@@ -564,6 +564,51 @@ public class SqlContentStorageHandler : IContentStorageHandler
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<ApplicationMetricsSnapshot> GetMetricsSnapshotAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        const string snapshotSql = """
+                                   SELECT
+                                       COUNT(*)::int AS total_packages,
+                                       COUNT(*) FILTER (WHERE NOT (
+                                           (expires_at IS NOT NULL AND expires_at <= @Now)
+                                           OR (max_download_count IS NOT NULL AND current_download_count >= max_download_count)
+                                       ))::int AS active_packages,
+                                       COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= @Now)::int AS expired_packages,
+                                       COUNT(*) FILTER (WHERE max_download_count IS NOT NULL AND current_download_count >= max_download_count)::int AS exhausted_packages,
+                                       COUNT(*) FILTER (WHERE unlock_verifier IS NOT NULL)::int AS protected_packages,
+                                       COUNT(*) FILTER (WHERE is_private IS TRUE)::int AS private_packages,
+                                       COUNT(*) FILTER (WHERE NOT EXISTS (
+                                           SELECT 1 FROM contents c WHERE c.package_id = p.id
+                                       ))::int AS empty_packages,
+                                       (SELECT COUNT(*)::int FROM contents) AS total_items,
+                                       (SELECT COALESCE(SUM(size), 0)::bigint FROM contents) AS total_bytes
+                                   FROM content_packages p
+                                   """;
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var row = await connection.QuerySingleAsync<MetricsSnapshotDbDto>(
+            new CommandDefinition(snapshotSql, new { Now = now }, cancellationToken: cancellationToken));
+
+        return new ApplicationMetricsSnapshot
+        {
+            TotalPackages = row.TotalPackages,
+            ActivePackages = row.ActivePackages,
+            ExpiredPackages = row.ExpiredPackages,
+            ExhaustedPackages = row.ExhaustedPackages,
+            ProtectedPackages = row.ProtectedPackages,
+            PrivatePackages = row.PrivatePackages,
+            EmptyPackages = row.EmptyPackages,
+            TotalItems = row.TotalItems,
+            TotalBytes = row.TotalBytes,
+            CleanupPending = row.TotalPackages - row.ActivePackages
+        };
     }
     
     private NpgsqlConnection CreateConnection()
@@ -644,6 +689,22 @@ public class SqlContentStorageHandler : IContentStorageHandler
     {
         public int CurrentDownloadCount { get; init; }
         public int? MaxDownloadCount { get; init; }
+    }
+
+    /// <summary>
+    /// DTO for mapping application metrics aggregate rows.
+    /// </summary>
+    private class MetricsSnapshotDbDto
+    {
+        public int TotalPackages { get; init; }
+        public int ActivePackages { get; init; }
+        public int ExpiredPackages { get; init; }
+        public int ExhaustedPackages { get; init; }
+        public int ProtectedPackages { get; init; }
+        public int PrivatePackages { get; init; }
+        public int EmptyPackages { get; init; }
+        public int TotalItems { get; init; }
+        public long TotalBytes { get; init; }
     }
 
     /// <summary>

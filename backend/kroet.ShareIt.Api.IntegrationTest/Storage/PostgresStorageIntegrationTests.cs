@@ -15,6 +15,7 @@ public class PostgresStorageIntegrationTests
     private static PostgresIntegrationDatabase _database = null!;
 
     private SqlContentStorageHandler _contentStorageHandler = null!;
+    private IMetricsSnapshotProvider _metricsSnapshotProvider = null!;
     private SqlDownloadTokenService _downloadTokenService = null!;
     private MutableTimeProvider _timeProvider = null!;
 
@@ -51,6 +52,7 @@ public class PostgresStorageIntegrationTests
 
         _timeProvider = new MutableTimeProvider(DateTimeOffset.UtcNow);
         _contentStorageHandler = new SqlContentStorageHandler(sqlSettings, NullLogger<SqlContentStorageHandler>.Instance);
+        _metricsSnapshotProvider = _contentStorageHandler;
         _downloadTokenService = new SqlDownloadTokenService(
             sqlSettings,
             downloadSettings,
@@ -238,6 +240,35 @@ public class PostgresStorageIntegrationTests
             new[] { expiredPackage.Id, limitedPackage.Id },
             packagesToDelete.ToArray());
         Assert.DoesNotContain(activePackage.Id, packagesToDelete);
+    }
+
+    [TestMethod]
+    public async Task GetMetricsSnapshotAsync_ReportsPackageAndContentAggregates()
+    {
+        var now = _timeProvider.GetUtcNow();
+        var activePackage = CreatePackage(expiresAt: now.AddHours(1), isPrivate: true);
+        var expiredPackage = CreatePackage(expiresAt: now.AddHours(-1)) with { UnlockVerifier = null };
+        var exhaustedPackage = CreatePackage(maxDownloadCount: 1) with { UnlockVerifier = null };
+
+        await _contentStorageHandler.StorePackageAsync(activePackage);
+        await _contentStorageHandler.StorePackageAsync(expiredPackage);
+        await _contentStorageHandler.StorePackageAsync(exhaustedPackage);
+        await _contentStorageHandler.StoreContentAsync(
+            new ExternalContent(CreateContent(activePackage.Id), "https://blob.example/file-1"));
+        await _contentStorageHandler.IncrementPackageAccessCountAsync(exhaustedPackage.Id);
+
+        var snapshot = await _metricsSnapshotProvider.GetMetricsSnapshotAsync(now);
+
+        Assert.AreEqual(3, snapshot.TotalPackages);
+        Assert.AreEqual(1, snapshot.ActivePackages);
+        Assert.AreEqual(1, snapshot.ExpiredPackages);
+        Assert.AreEqual(1, snapshot.ExhaustedPackages);
+        Assert.AreEqual(1, snapshot.ProtectedPackages);
+        Assert.AreEqual(1, snapshot.PrivatePackages);
+        Assert.AreEqual(2, snapshot.EmptyPackages);
+        Assert.AreEqual(1, snapshot.TotalItems);
+        Assert.AreEqual(128, snapshot.TotalBytes);
+        Assert.AreEqual(2, snapshot.CleanupPending);
     }
 
     [TestMethod]

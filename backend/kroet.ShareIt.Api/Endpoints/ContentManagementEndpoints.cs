@@ -1,6 +1,9 @@
-﻿using System.Security.Claims;
+﻿using System.Diagnostics;
+using System.Security.Claims;
 using kroet.Permission.AspNetCore;
 using kroet.ShareIt.Api.Content.Dtos;
+using kroet.ShareIt.Api.Services.Metrics;
+using kroet.ShareIt.Api.Services.Observability;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.User;
@@ -95,9 +98,12 @@ public static class ContentManagementEndpoints
         [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler contentStorageHandler,
         [FromServices] IStorageHandler storageHandler,
+        [FromServices] ShareItMetrics metrics,
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
     {
+        using var activity = ShareItActivitySource.Instance.StartActivity("package.delete");
+
         if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
         {
             return TypedResults.Problem(new ProblemDetails
@@ -107,6 +113,8 @@ public static class ContentManagementEndpoints
                 Status = StatusCodes.Status400BadRequest
             });
         }
+
+        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
         var package = await contentStorageHandler.GetPackageAsync(packageId, false, cancellationToken);
         if (package is null)
@@ -129,6 +137,7 @@ public static class ContentManagementEndpoints
 
         if (!success)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, "delete failed");
             return TypedResults.Problem(new ProblemDetails
             {
                 Title = "Failed to delete package",
@@ -137,6 +146,8 @@ public static class ContentManagementEndpoints
             });
         }
 
+        metrics.PackageDeleted("owner");
+        activity?.SetTag("shareit.package.result", "deleted");
         return TypedResults.NoContent();
     }
 }

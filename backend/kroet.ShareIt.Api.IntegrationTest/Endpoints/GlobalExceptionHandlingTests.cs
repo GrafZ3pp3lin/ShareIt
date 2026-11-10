@@ -25,6 +25,12 @@ public sealed class GlobalExceptionHandlingTests : ShareItApiTestBase
         public Task<string> UploadAsync(Stream stream, string contentType, string fileName, CancellationToken cancellationToken = default)
             => inner.UploadAsync(stream, contentType, fileName, cancellationToken);
 
+        public Task InitializeAsync(CancellationToken cancellationToken = default)
+            => inner.InitializeAsync(cancellationToken);
+
+        public Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
+            => inner.CheckHealthAsync(cancellationToken);
+
         public Task<Stream> DownloadAsync(string blobId, CancellationToken cancellationToken = default)
             => throw new FileNotFoundException($"Blob with ID {blobId} not found.");
 
