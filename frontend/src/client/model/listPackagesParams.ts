@@ -6,9 +6,7 @@
  */
 
 export type ListPackagesParams = {
-  /**
-   * @pattern ^-?(?:0|[1-9]\d*)$
-   */
+  /** @pattern ^-?(?:0|[1-9]\d*)$ */
   take?: number | string;
   cursor?: string;
 };

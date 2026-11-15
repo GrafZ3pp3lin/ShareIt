@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Text;
 
 namespace kroet.ShareIt.Api.Content;
@@ -17,14 +18,17 @@ internal static class Base64UrlText
             return false;
         }
 
-        try
-        {
-            bytes = Base64Url.DecodeFromChars(value);
-            return true;
-        }
-        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        // .NET 11's OperationStatus overload reports malformed input without
+        // throwing, so attacker-controlled values stay off the exception path.
+        var buffer = new byte[Base64Url.GetMaxDecodedLength(value.Length)];
+        var status = Base64Url.DecodeFromChars(value, buffer, out _, out var written, isFinalBlock: true);
+        if (status != OperationStatus.Done)
         {
             return false;
         }
+
+        Array.Resize(ref buffer, written);
+        bytes = buffer;
+        return true;
     }
 }

@@ -215,10 +215,11 @@ try
                         authorization[(separator + 1)..].Trim(),
                         context.Principal?.FindFirst("cnf")?.Value,
                         context.Request);
-                    if (!result.Succeeded)
+                    // C# 15 union: exactly one of the two cases is present.
+                    if (result.Value is DpopFailure failure)
                     {
-                        context.HttpContext.Items[DpopProofValidator.DpopErrorItemKey] = result.ErrorCode;
-                        context.Fail(result.ErrorDescription ?? "DPoP validation failed.");
+                        context.HttpContext.Items[DpopProofValidator.DpopErrorItemKey] = failure.ErrorCode;
+                        context.Fail(failure.ErrorDescription);
                     }
                 },
                 OnChallenge = context =>

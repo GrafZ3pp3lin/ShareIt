@@ -14,10 +14,9 @@ public static class UserExtensions
                 return null;
             }
 
-            return new UserIdentity
+            return new AuthenticatedUserIdentity
             {
                 Id = userId,
-                IsGuest = false,
             };
         }
         
@@ -32,10 +31,9 @@ public static class UserExtensions
 
             if (guestId.HasValue)
             {
-                userIdentity = new UserIdentity
+                userIdentity = new GuestUserIdentity
                 {
-                    Id = guestId.Value,
-                    IsGuest = true
+                    Id = guestId.Value
                 };
                 return true;
             }

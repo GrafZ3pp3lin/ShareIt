@@ -8,12 +8,28 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace kroet.ShareIt.Api.Authentication;
 
-public sealed record DpopValidationResult(bool Succeeded, string? ErrorCode = null, string? ErrorDescription = null)
+/// <summary>The proof was valid.</summary>
+public sealed record DpopSuccess;
+
+/// <summary>The proof was rejected with an RFC 9449 error code and description.</summary>
+public sealed record DpopFailure(string ErrorCode, string ErrorDescription);
+
+/// <summary>
+/// Result of DPoP proof validation. The C# 15 union makes the two outcomes
+/// exclusive: a failure always carries an error, a success never does.
+/// </summary>
+public union DpopValidationResult(DpopSuccess, DpopFailure)
 {
-    public static DpopValidationResult Success() => new(true);
+    public bool Succeeded => Value is DpopSuccess;
+
+    public string? ErrorCode => Value is DpopFailure failure ? failure.ErrorCode : null;
+
+    public string? ErrorDescription => Value is DpopFailure failure ? failure.ErrorDescription : null;
+
+    public static DpopValidationResult Success() => new DpopSuccess();
 
     public static DpopValidationResult Failure(string errorCode, string errorDescription) =>
-        new(false, errorCode, errorDescription);
+        new DpopFailure(errorCode, errorDescription);
 }
 
 /// <summary>

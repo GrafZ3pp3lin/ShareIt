@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace kroet.ShareIt.Api.Content;
 
@@ -95,7 +96,8 @@ public static class ContentEndpoints
         packageGroup
             .MapGet("/{packageId:guid}/content/{contentId:guid}/download", DownloadContentWithTokenAsync)
             .RequirePermission("Download.File")
-            .Produces<FileStreamHttpResult>()
+            // .NET 11 describes FileStreamHttpResult as a binary string schema.
+            .Produces<FileStreamHttpResult>(contentType: Application.Octet)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
@@ -456,7 +458,9 @@ public static class ContentEndpoints
         var inlineBudgetBytes = downloadOptions.Value.InlinePayloadBudgetBytes;
         var inlineSpentBytes = 0L;
 
-        var items = new List<ContentItemInPackage>();
+        // C# 15 collection expression argument: pre-size the list because the
+        // number of items is already known.
+        List<ContentItemInPackage> items = [with(capacity: withContent.Contents.Count)];
         var inlineItemCount = 0;
         var tokenItemCount = 0;
         var orderedContents = withContent.Contents
@@ -470,7 +474,7 @@ public static class ContentEndpoints
 
             if (inline)
             {
-                var dataStream = await blobStorageHandler.DownloadAsync(content.Url, cancellationToken);
+                await using var dataStream = await blobStorageHandler.DownloadAsync(content.Url, cancellationToken);
                 using var buffer = new MemoryStream();
                 await dataStream.CopyToAsync(buffer, cancellationToken);
                 inlineSpentBytes += content.Size;
@@ -482,7 +486,9 @@ public static class ContentEndpoints
                     Kind = KindOf(content.ContentType),
                     Size = content.Size,
                     Meta = content.Meta,
-                    Payload = Base64Url.EncodeToString(buffer.ToArray())
+                    // Encode directly from the buffer instead of copying it
+                    // into another array first.
+                    Payload = Base64Url.EncodeToString(buffer.GetBuffer().AsSpan(0, (int)buffer.Length))
                 });
             }
             else

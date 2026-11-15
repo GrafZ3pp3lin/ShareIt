@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Text;
 using System.Text;
 
@@ -32,23 +33,27 @@ public static class PackageCursor
             return false;
         }
 
-        try
-        {
-            var decoded = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(cursor));
-            var parts = decoded.Split(':');
-            if (parts.Length != 2 ||
-                !long.TryParse(parts[0], out var ticks) ||
-                !Guid.TryParseExact(parts[1], "N", out id))
-            {
-                return false;
-            }
-
-            createdAt = new DateTimeOffset(ticks, TimeSpan.Zero);
-            return true;
-        }
-        catch (FormatException)
+        // .NET 11's OperationStatus overload reports malformed input without
+        // throwing, so a hostile cursor stays off the exception path.
+        var buffer = new byte[Base64Url.GetMaxDecodedLength(cursor.Length)];
+        var status = Base64Url.DecodeFromChars(cursor, buffer, out _, out var written, isFinalBlock: true);
+        if (status != OperationStatus.Done)
         {
             return false;
         }
+
+        var decoded = Encoding.UTF8.GetString(buffer, 0, written);
+        var parts = decoded.Split(':');
+        if (parts.Length != 2 ||
+            !long.TryParse(parts[0], out var ticks) ||
+            !Guid.TryParseExact(parts[1], "N", out id) ||
+            ticks < DateTimeOffset.MinValue.UtcTicks ||
+            ticks > DateTimeOffset.MaxValue.UtcTicks)
+        {
+            return false;
+        }
+
+        createdAt = new DateTimeOffset(ticks, TimeSpan.Zero);
+        return true;
     }
 }

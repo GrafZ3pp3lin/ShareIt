@@ -9,7 +9,6 @@ import type {
   ContentPackageListResponse,
   ContentPackageResponse,
   CreatePackageRequest,
-  FileStreamHttpResult,
   ListPackagesParams,
   ProblemDetails,
   UploadContentRequest,
@@ -282,7 +281,7 @@ export const getPackage = async (
 };
 
 export type downloadContentWithTokenResponse200 = {
-  data: FileStreamHttpResult;
+  data: Blob;
   status: 200;
 };
 

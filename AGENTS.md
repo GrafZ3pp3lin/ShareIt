@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Scope
-- Repo has two major areas: `backend/` (.NET 10, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript).
+- Repo has two major areas: `backend/` (.NET 11, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript).
 
 ### Run everything with Aspire
 - `dotnet run --project backend/kroet.ShareIt.AppHost` starts the AuthTwin, API, frontend

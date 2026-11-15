@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.Buffers.Text;
+using System.Security.Cryptography;
 using Dapper;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
@@ -186,7 +187,7 @@ public class SqlDownloadTokenService : IDownloadTokenService
     private static string GenerateSecureToken()
     {
         var bytes = RandomNumberGenerator.GetBytes(32);
-        return Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").Replace("=", "");
+        return Base64Url.EncodeToString(bytes);
     }
 
     /// <summary>

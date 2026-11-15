@@ -4,21 +4,5 @@
  * kroet.ShareIt.Api | v1
  * OpenAPI spec version: 1.0.0
  */
-import type { EntityTagHeaderValue } from './entityTagHeaderValue';
-import type { Stream } from './stream';
 
-export interface FileStreamHttpResult {
-  ContentType?: string;
-  /** @nullable */
-  FileDownloadName?: string | null;
-  /** @nullable */
-  LastModified?: string | null;
-  EntityTag?: null | EntityTagHeaderValue;
-  EnableRangeProcessing?: boolean;
-  /**
-   * @nullable
-   * @pattern ^-?(?:0|[1-9]\d*)$
-   */
-  FileLength?: number | string | null;
-  FileStream?: Stream | null;
-}
+export type FileStreamHttpResult = Blob;
