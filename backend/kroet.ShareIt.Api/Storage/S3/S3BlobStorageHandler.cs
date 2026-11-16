@@ -74,9 +74,6 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
 
             await _s3Client.PutObjectAsync(putRequest, cancellationToken);
 
-            _logger.LogInformation("Uploaded object {ObjectKey} with content type {ContentType}",
-                objectKey, contentType);
-
             return objectKey;
         }
         catch (Exception ex)
@@ -98,8 +95,6 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
             };
 
             var response = await _s3Client.GetObjectAsync(getRequest, cancellationToken);
-
-            _logger.LogDebug("Downloaded object {ObjectKey}", blobId);
 
             // Return the response stream - caller is responsible for disposing
             return response.ResponseStream;
@@ -126,7 +121,6 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
 
             if (!exists)
             {
-                _logger.LogDebug("Object {ObjectKey} not found for deletion", blobId);
                 return false;
             }
 
@@ -138,7 +132,6 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
 
             await _s3Client.DeleteObjectAsync(deleteRequest, cancellationToken);
 
-            _logger.LogInformation("Deleted object {ObjectKey}", blobId);
             return true;
         }
         catch (Exception ex)
@@ -194,9 +187,8 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.LogDebug(ex, "S3 health check failed for bucket {BucketName}", _bucketName);
             return false;
         }
     }

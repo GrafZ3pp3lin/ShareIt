@@ -85,13 +85,11 @@ public static class ContentStorageExtensions
             var logger = app.Services.GetRequiredService<ILogger<Program>>();
             if (!settings.AutoInitializeSchema)
             {
-                logger.LogDebug("Skipping SQL package storage schema initialization as per configuration");
                 return;
             }
         
             try
             {
-                logger.LogDebug("Initializing SQL package storage schema...");
                 await InitializeDatabaseAsync(settings.ConnectionString, app.Lifetime.ApplicationStopping);
                 logger.LogInformation("SQL package storage schema initialized successfully");
             }

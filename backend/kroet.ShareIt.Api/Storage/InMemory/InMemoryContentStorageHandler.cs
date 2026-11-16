@@ -1,4 +1,6 @@
-﻿using kroet.ShareIt.Api.Models;
+﻿using kroet.ShareIt.Api.Configuration;
+using kroet.ShareIt.Api.Models;
+using Microsoft.Extensions.Options;
 
 namespace kroet.ShareIt.Api.Storage.InMemory;
 
@@ -6,6 +8,17 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 {
     private readonly List<ContentPackage> _packages = [];
     private readonly List<ExternalContent> _contents = [];
+    private readonly List<string> _pendingBlobDeletions = [];
+    private readonly TimeProvider _timeProvider;
+    private readonly DownloadSettings _downloadSettings;
+
+    public InMemoryContentStorageHandler(
+        TimeProvider? timeProvider = null,
+        IOptions<DownloadSettings>? downloadSettings = null)
+    {
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _downloadSettings = downloadSettings?.Value ?? new DownloadSettings();
+    }
 
     public Task StorePackageAsync(ContentPackage package, CancellationToken cancellationToken = default)
     {
@@ -137,7 +150,11 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
         }
 
         var newCount = package.CurrentDownloadCount + 1;
-        _packages[index] = package with { CurrentDownloadCount = newCount };
+        _packages[index] = package with
+        {
+            CurrentDownloadCount = newCount,
+            LastAccessAt = _timeProvider.GetUtcNow()
+        };
 
         var limitReached = package.MaxDownloadCount.HasValue && newCount >= package.MaxDownloadCount.Value;
         return Task.FromResult(new DownloadIncrementResult(true, newCount, package.MaxDownloadCount, limitReached));
@@ -150,6 +167,8 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
             .Where(package => requestedIds.Contains(package.Id))
             .Select(package => package.Id)
             .ToHashSet();
+
+        QueueBlobDeletions(_contents.Where(content => deletedIds.Contains(content.PackageId)));
 
         var removed = _packages.RemoveAll(package => deletedIds.Contains(package.Id));
 
@@ -171,6 +190,8 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
             return Task.FromResult(false);
         }
 
+        QueueBlobDeletions(_contents.Where(content => content.PackageId == packageId));
+
         // Match the PostgreSQL ON DELETE CASCADE behaviour: package deletion
         // also removes the package's contents.
         _contents.RemoveAll(content => content.PackageId == packageId);
@@ -179,14 +200,22 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 
     public Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
     {
-        var removed = _contents.RemoveAll(c => contentIds.Contains(c.Id));
+        var requestedIds = contentIds.ToHashSet();
+        QueueBlobDeletions(_contents.Where(content => requestedIds.Contains(content.Id)));
+        var removed = _contents.RemoveAll(c => requestedIds.Contains(c.Id));
         return Task.FromResult(removed);
     }
 
     public Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
         var content = _contents.FirstOrDefault(c => c.Id == contentId);
-        return Task.FromResult(content is not null && _contents.Remove(content));
+        if (content is null || !_contents.Remove(content))
+        {
+            return Task.FromResult(false);
+        }
+
+        QueueBlobDeletions([content]);
+        return Task.FromResult(true);
     }
 
     public Task<bool> ExistsPackageAsync(Guid packageId, CancellationToken cancellationToken = default)
@@ -203,12 +232,43 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 
     public Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
+        var exhaustedBefore = now.AddMinutes(-_downloadSettings.ExhaustedPackageRetentionMinutes);
         var packageIds = _packages
-            .Where(p => p.IsAccessLimitReached || p.IsExpired(now))
-            .Select(p => p.Id)
+            .Where(package => package.IsExpired(now) || IsExhaustedBeyondRetention(package, exhaustedBefore))
+            .Select(package => package.Id)
             .ToList();
         return Task.FromResult<IReadOnlyList<Guid>>(packageIds);
+    }
+
+    public Task<IReadOnlyList<string>> GetPendingBlobDeletionsAsync(
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        var blobIds = _pendingBlobDeletions.Take(Math.Clamp(take, 1, 1000)).ToList();
+        return Task.FromResult<IReadOnlyList<string>>(blobIds);
+    }
+
+    public Task CompleteBlobDeletionAsync(string blobId, CancellationToken cancellationToken = default)
+    {
+        _pendingBlobDeletions.Remove(blobId);
+        return Task.CompletedTask;
+    }
+
+    private static bool IsExhaustedBeyondRetention(ContentPackage package, DateTimeOffset exhaustedBefore)
+        => package.IsAccessLimitReached
+           && package.LastAccessAt is { } lastAccessAt
+           && lastAccessAt <= exhaustedBefore;
+
+    private void QueueBlobDeletions(IEnumerable<ExternalContent> contents)
+    {
+        foreach (var blobId in contents.Select(content => content.Url).Distinct(StringComparer.Ordinal))
+        {
+            if (!_pendingBlobDeletions.Contains(blobId, StringComparer.Ordinal))
+            {
+                _pendingBlobDeletions.Add(blobId);
+            }
+        }
     }
 
     /// <summary>

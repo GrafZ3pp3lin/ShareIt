@@ -12,7 +12,9 @@ public sealed record ApplicationMetricsSnapshot
     public required int TotalPackages { get; init; }
 
     /// <summary>
-    /// Packages that are neither expired nor have reached their access limit.
+    /// Packages that are not cleanup-eligible: not expired, and not exhausted
+    /// beyond the download-retention window. Exhausted packages still inside
+    /// that window count as active.
     /// </summary>
     public required int ActivePackages { get; init; }
 
@@ -24,7 +26,7 @@ public sealed record ApplicationMetricsSnapshot
 
     /// <summary>
     /// Packages that have reached their access limit. They may still be
-    /// present until the cleanup service removes them.
+    /// present after retention elapses until the cleanup service removes them.
     /// </summary>
     public required int ExhaustedPackages { get; init; }
 
@@ -54,7 +56,8 @@ public sealed record ApplicationMetricsSnapshot
     public required long TotalBytes { get; init; }
 
     /// <summary>
-    /// Packages the cleanup service should remove: expired or out of accesses.
+    /// Packages eligible for cleanup at snapshot time: expired, or exhausted
+    /// beyond the download-retention window. This is not the blob-queue depth.
     /// </summary>
     public required int CleanupPending { get; init; }
 }

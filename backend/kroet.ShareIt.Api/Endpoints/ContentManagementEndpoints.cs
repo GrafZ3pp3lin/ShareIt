@@ -133,7 +133,7 @@ public static class ContentManagementEndpoints
             });
         }
 
-        var success = await contentStorageHandler.DeletePackageAsync(packageId, cancellationToken);
+        var success = await storageHandler.DeletePackageAsync(packageId, cancellationToken);
 
         if (!success)
         {

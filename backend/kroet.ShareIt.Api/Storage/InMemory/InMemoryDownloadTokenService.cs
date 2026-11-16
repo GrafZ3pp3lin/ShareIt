@@ -9,13 +9,11 @@ public class InMemoryDownloadTokenService : IDownloadTokenService
     private readonly Dictionary<Guid, DownloadToken> _tokens = new();
     private readonly DownloadSettings _downloadSettings;
     private readonly TimeProvider _timeProvider;
-    private readonly ILogger<InMemoryDownloadTokenService> _logger;
 
-    public InMemoryDownloadTokenService(IOptions<DownloadSettings> downloadSettings, TimeProvider timeProvider, ILogger<InMemoryDownloadTokenService> logger)
+    public InMemoryDownloadTokenService(IOptions<DownloadSettings> downloadSettings, TimeProvider timeProvider)
     {
         _downloadSettings = downloadSettings.Value;
         _timeProvider = timeProvider;
-        _logger = logger;
     }
 
     public Task<DownloadToken> GenerateTokenAsync(Guid contentId, Guid clientId, CancellationToken cancellationToken = default)
@@ -73,7 +71,6 @@ public class InMemoryDownloadTokenService : IDownloadTokenService
 
     public Task<long> CleanupExpiredTokensAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Starting cleanup of expired download tokens. Current token count: {TokenCount}", _tokens.Count);
         var now = _timeProvider.GetUtcNow();
         var expiredTokens = _tokens.Values.Where(t => t.ExpiresAt < now).ToList();
         foreach (var token in expiredTokens)

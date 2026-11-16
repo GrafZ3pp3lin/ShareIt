@@ -49,6 +49,12 @@ public record ContentPackage
     public int CurrentDownloadCount { get; init; }
 
     /// <summary>
+    /// Timestamp of the most recent successful access claim. Cleanup uses this
+    /// to keep an exhausted package available to its outstanding downloads.
+    /// </summary>
+    public DateTimeOffset? LastAccessAt { get; init; }
+
+    /// <summary>
     /// Optional expiration timestamp for the package.
     /// Null means no expiration.
     /// </summary>

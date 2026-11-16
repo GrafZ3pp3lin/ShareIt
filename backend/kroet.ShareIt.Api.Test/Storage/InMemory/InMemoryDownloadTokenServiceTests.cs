@@ -1,6 +1,5 @@
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Storage.InMemory;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace kroet.ShareIt.Api.Test.Storage.InMemory;
@@ -20,8 +19,7 @@ public class InMemoryDownloadTokenServiceTests
                 DefaultTokenExpirationMinutes = 15,
                 UsedTokenRetentionHours = 24
             }),
-            _timeProvider,
-            NullLogger<InMemoryDownloadTokenService>.Instance);
+            _timeProvider);
     }
 
     [TestMethod]

@@ -425,6 +425,21 @@ public static class ContentEndpoints
             });
         }
 
+        // Content metadata is safe to read after expiry/proof validation. Check
+        // it before claiming so an unfinished package cannot burn its only view.
+        var withContent = await storageHandler.GetPackageAsync(packageId, includeContent: true, cancellationToken);
+        if (withContent?.Contents is null || withContent.Contents.Count == 0)
+        {
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Package is empty",
+                Detail = "This package contains no content",
+                Status = StatusCodes.Status410Gone
+            });
+        }
+
+        activity?.SetTag("shareit.package.items", withContent.Contents.Count);
+
         // Purely accessing the link consumes one access, claimed atomically:
         // once the package's access limit is reached, any further view —
         // another person, a second tab, or a refresh — is rejected here.
@@ -441,18 +456,9 @@ public static class ContentEndpoints
 
         metrics.AccessClaimed();
 
-        var withContent = await storageHandler.GetPackageAsync(packageId, includeContent: true, cancellationToken);
-        if (withContent?.Contents is null || withContent.Contents.Count == 0)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Package is empty",
-                Detail = "This package contains no content",
-                Status = StatusCodes.Status410Gone
-            });
-        }
-
-        activity?.SetTag("shareit.package.items", withContent.Contents.Count);
+        // The response must reflect the access that was just claimed. The
+        // package was loaded before the claim, so the counters are stale.
+        withContent = withContent with { CurrentDownloadCount = claim.NewCount };
 
         var inlineLimitBytes = downloadOptions.Value.InlinePayloadLimitBytes;
         var inlineBudgetBytes = downloadOptions.Value.InlinePayloadBudgetBytes;

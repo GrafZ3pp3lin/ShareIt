@@ -41,8 +41,7 @@ public union DpopValidationResult(DpopSuccess, DpopFailure)
 /// </summary>
 public sealed class DpopProofValidator(
     IOptions<DpopSettings> settings,
-    TimeProvider timeProvider,
-    ILogger<DpopProofValidator> logger)
+    TimeProvider timeProvider)
 {
     private const string ReplayCachePrefix = "dpop:jti:";
 
@@ -278,9 +277,8 @@ public sealed class DpopProofValidator(
                 ? DpopValidationResult.Success()
                 : DpopValidationResult.Failure("invalid_dpop_proof", "The DPoP proof signature is invalid.");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            logger.LogDebug(ex, "DPoP proof signature validation failed");
             return DpopValidationResult.Failure("invalid_dpop_proof", "The DPoP proof signature is invalid.");
         }
     }

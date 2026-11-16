@@ -18,6 +18,7 @@ public class PostgresStorageIntegrationTests
     private IMetricsSnapshotProvider _metricsSnapshotProvider = null!;
     private SqlDownloadTokenService _downloadTokenService = null!;
     private MutableTimeProvider _timeProvider = null!;
+    private DownloadSettings _downloadSettings = null!;
 
     [ClassInitialize]
     public static async Task ClassInitialize(TestContext _)
@@ -47,11 +48,17 @@ public class PostgresStorageIntegrationTests
         var downloadSettings = Options.Create(new DownloadSettings
         {
             DefaultTokenExpirationMinutes = 15,
-            UsedTokenRetentionHours = 24
+            UsedTokenRetentionHours = 24,
+            ExhaustedPackageRetentionMinutes = 30
         });
+        _downloadSettings = downloadSettings.Value;
 
         _timeProvider = new MutableTimeProvider(DateTimeOffset.UtcNow);
-        _contentStorageHandler = new SqlContentStorageHandler(sqlSettings, NullLogger<SqlContentStorageHandler>.Instance);
+        _contentStorageHandler = new SqlContentStorageHandler(
+            sqlSettings,
+            NullLogger<SqlContentStorageHandler>.Instance,
+            _timeProvider,
+            downloadSettings);
         _metricsSnapshotProvider = _contentStorageHandler;
         _downloadTokenService = new SqlDownloadTokenService(
             sqlSettings,
@@ -63,7 +70,11 @@ public class PostgresStorageIntegrationTests
     [TestMethod]
     public async Task StorePackageAsync_AndGetPackageAsync_RoundTripsPackageWithContent()
     {
-        var package = CreatePackage(maxDownloadCount: 3, isPrivate: true);
+        var lastAccessAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var package = CreatePackage(maxDownloadCount: 3, isPrivate: true) with
+        {
+            LastAccessAt = lastAccessAt
+        };
         var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
 
         await _contentStorageHandler.StorePackageAsync(package);
@@ -76,6 +87,10 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual(package.UnlockVerifier, storedPackage.UnlockVerifier);
         Assert.AreEqual(package.MaxDownloadCount, storedPackage.MaxDownloadCount);
         Assert.AreEqual(package.IsPrivate, storedPackage.IsPrivate);
+        Assert.IsNotNull(storedPackage.LastAccessAt);
+        Assert.IsTrue(
+            Math.Abs((storedPackage.LastAccessAt.Value - lastAccessAt).TotalMilliseconds) < 1,
+            "PostgreSQL stores timestamps at microsecond precision.");
         Assert.IsNotNull(storedPackage.Contents);
         Assert.HasCount(1, storedPackage.Contents);
         Assert.AreEqual(content.Id, storedPackage.Contents[0].Id);
@@ -223,7 +238,7 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task GetPackagesToDeleteAsync_ReturnsExpiredAndLimitReachedPackages()
+    public async Task GetPackagesToDeleteAsync_ReturnsExpiredImmediatelyAndExhaustedAfterRetention()
     {
         var activePackage = CreatePackage();
         var expiredPackage = CreatePackage(expiresAt: DateTimeOffset.UtcNow.AddHours(-1));
@@ -234,12 +249,78 @@ public class PostgresStorageIntegrationTests
         await _contentStorageHandler.StorePackageAsync(limitedPackage);
         await _contentStorageHandler.IncrementPackageAccessCountAsync(limitedPackage.Id);
 
-        var packagesToDelete = await _contentStorageHandler.GetPackagesToDeleteAsync();
+        // The exhausted package keeps serving its outstanding downloads for
+        // the retention period and must not be cleanup-eligible yet.
+        var retained = await _contentStorageHandler.GetPackagesToDeleteAsync();
+        CollectionAssert.AreEquivalent(new[] { expiredPackage.Id }, retained.ToArray());
+        Assert.DoesNotContain(limitedPackage.Id, retained);
 
+        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(_downloadSettings.ExhaustedPackageRetentionMinutes + 1);
+
+        var eligible = await _contentStorageHandler.GetPackagesToDeleteAsync();
         CollectionAssert.AreEquivalent(
             new[] { expiredPackage.Id, limitedPackage.Id },
-            packagesToDelete.ToArray());
-        Assert.DoesNotContain(activePackage.Id, packagesToDelete);
+            eligible.ToArray());
+        Assert.DoesNotContain(activePackage.Id, eligible);
+    }
+
+    [TestMethod]
+    public async Task DeletePackageAsync_QueuesContentBlobsTransactionally()
+    {
+        var package = CreatePackage();
+        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
+
+        await _contentStorageHandler.StorePackageAsync(package);
+        await _contentStorageHandler.StoreContentAsync(content);
+
+        var deleted = await _contentStorageHandler.DeletePackageAsync(package.Id);
+
+        Assert.IsTrue(deleted);
+        Assert.IsNull(await _contentStorageHandler.GetPackageAsync(package.Id, false));
+        Assert.IsNull(await _contentStorageHandler.GetContentAsync(content.Id));
+
+        var pending = await _contentStorageHandler.GetPendingBlobDeletionsAsync(10);
+        CollectionAssert.AreEqual(new[] { content.Url }, pending.ToArray());
+
+        await _contentStorageHandler.CompleteBlobDeletionAsync(content.Url);
+        Assert.IsEmpty(await _contentStorageHandler.GetPendingBlobDeletionsAsync(10));
+    }
+
+    [TestMethod]
+    public async Task DeleteContentAsync_QueuesItsBlob()
+    {
+        var package = CreatePackage();
+        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
+
+        await _contentStorageHandler.StorePackageAsync(package);
+        await _contentStorageHandler.StoreContentAsync(content);
+
+        Assert.IsTrue(await _contentStorageHandler.DeleteContentAsync(content.Id));
+
+        var pending = await _contentStorageHandler.GetPendingBlobDeletionsAsync(10);
+        CollectionAssert.AreEqual(new[] { content.Url }, pending.ToArray());
+    }
+
+    [TestMethod]
+    public async Task DeletePackagesAsync_DeduplicatesSharedBlobKeys()
+    {
+        var firstPackage = CreatePackage();
+        var secondPackage = CreatePackage();
+        var sharedUrl = "https://blob.example/shared";
+
+        await _contentStorageHandler.StorePackageAsync(firstPackage);
+        await _contentStorageHandler.StorePackageAsync(secondPackage);
+        await _contentStorageHandler.StoreContentsAsync(
+        [
+            new ExternalContent(CreateContent(firstPackage.Id), sharedUrl),
+            new ExternalContent(CreateContent(secondPackage.Id), sharedUrl)
+        ]);
+
+        Assert.AreEqual(2, await _contentStorageHandler.DeletePackagesAsync([firstPackage.Id, secondPackage.Id]));
+
+        var pending = await _contentStorageHandler.GetPendingBlobDeletionsAsync(10);
+        Assert.HasCount(1, pending);
+        Assert.AreEqual(sharedUrl, pending[0]);
     }
 
     [TestMethod]
@@ -260,7 +341,7 @@ public class PostgresStorageIntegrationTests
         var snapshot = await _metricsSnapshotProvider.GetMetricsSnapshotAsync(now);
 
         Assert.AreEqual(3, snapshot.TotalPackages);
-        Assert.AreEqual(1, snapshot.ActivePackages);
+        Assert.AreEqual(2, snapshot.ActivePackages);
         Assert.AreEqual(1, snapshot.ExpiredPackages);
         Assert.AreEqual(1, snapshot.ExhaustedPackages);
         Assert.AreEqual(1, snapshot.ProtectedPackages);
@@ -268,7 +349,7 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual(2, snapshot.EmptyPackages);
         Assert.AreEqual(1, snapshot.TotalItems);
         Assert.AreEqual(128, snapshot.TotalBytes);
-        Assert.AreEqual(2, snapshot.CleanupPending);
+        Assert.AreEqual(1, snapshot.CleanupPending);
     }
 
     [TestMethod]

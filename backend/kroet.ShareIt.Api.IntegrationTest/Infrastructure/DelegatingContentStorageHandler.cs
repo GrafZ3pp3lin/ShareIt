@@ -77,4 +77,12 @@ internal sealed class DelegatingContentStorageHandler(
 
     public Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
         => inner.GetPackagesToDeleteAsync(cancellationToken);
+
+    public Task<IReadOnlyList<string>> GetPendingBlobDeletionsAsync(
+        int take,
+        CancellationToken cancellationToken = default)
+        => inner.GetPendingBlobDeletionsAsync(take, cancellationToken);
+
+    public Task CompleteBlobDeletionAsync(string blobId, CancellationToken cancellationToken = default)
+        => inner.CompleteBlobDeletionAsync(blobId, cancellationToken);
 }

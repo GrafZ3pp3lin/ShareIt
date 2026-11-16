@@ -30,10 +30,7 @@
       <Content Include="..\.dockerignore">
         <Link>.dockerignore</Link>
       </Content>
-      <None Remove="Content\Storage\Package\PostgreSqlSchema.sql" />
-      <Content Update="Resources\PostgreSqlSchema.sql">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </Content>
+      <None Update="Resources\SqlSchema.sql" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
     <ItemGroup>

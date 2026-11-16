@@ -70,8 +70,6 @@ public class SqlDownloadTokenService : IDownloadTokenService
             IsUsed = false
         });
 
-        _logger.LogDebug("Generated download token for content {ContentId}, expires at {ExpiresAt}", contentId, downloadToken.ExpiresAt);
-
         return downloadToken;
     }
 
@@ -94,7 +92,6 @@ public class SqlDownloadTokenService : IDownloadTokenService
 
         if (tokenDoc is null)
         {
-            _logger.LogWarning("Invalid download token attempted: {TokenPrefix}...", token[..Math.Min(8, token.Length)]);
             return new TokenValidationResult(false, null, "Invalid token");
         }
 
@@ -106,7 +103,6 @@ public class SqlDownloadTokenService : IDownloadTokenService
 
         if (tokenDoc.ExpiresAt <= now)
         {
-            _logger.LogWarning("Expired download token attempted for content {ContentId}", tokenDoc.ContentId);
             return new TokenValidationResult(false, null, "Token has expired");
         }
 
@@ -148,11 +144,9 @@ public class SqlDownloadTokenService : IDownloadTokenService
         {
             // Unlike validation, we no longer know which reason applied without
             // a second read; this only happens on a lost race or a stale token.
-            _logger.LogWarning("Download token could not be consumed (already used, expired or wrong client)");
             return new TokenValidationResult(false, null, "Token has already been used");
         }
 
-        _logger.LogDebug("Consumed download token for content {ContentId}", contentId.Value);
         return new TokenValidationResult(true, contentId.Value, null);
     }
 
@@ -172,11 +166,6 @@ public class SqlDownloadTokenService : IDownloadTokenService
         await connection.OpenAsync(cancellationToken);
 
         var deletedCount = await connection.ExecuteAsync(deleteSql, new { Now = now, UsedTokenCutoff = usedTokenCutoff });
-
-        if (deletedCount > 0)
-        {
-            _logger.LogInformation("Cleaned up {Count} expired/used download tokens", deletedCount);
-        }
 
         return deletedCount;
     }

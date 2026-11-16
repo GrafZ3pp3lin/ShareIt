@@ -3,6 +3,7 @@ using kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.Storage.Postgres;
+using kroet.ShareIt.Api.Storage.S3;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -98,5 +99,70 @@ public sealed class DeleteFailureEndpointTests : ShareItApiTestBase
         var stored = await Services.GetRequiredService<IContentStorageHandler>()
             .GetPackageAsync(packageId, includeContent: false);
         Assert.IsNotNull(stored);
+    }
+}
+
+/// <summary>
+/// Blob-deletion queue behaviour when a real S3 deletion fails once: package
+/// deletion still completes durably and the queued blob is retried later.
+/// </summary>
+[TestClass]
+public sealed class BlobDeletionFailureEndpointTests : ShareItApiTestBase
+{
+    private ControllableBlobStorageHandler _blobHandler = null!;
+
+    protected override Action<IServiceCollection> ConfigureTestServices => services =>
+    {
+        services.AddSingleton<IBlobStorageHandler>(sp =>
+        {
+            _blobHandler = new ControllableBlobStorageHandler(
+                ActivatorUtilities.CreateInstance<S3BlobStorageHandler>(sp));
+            return _blobHandler;
+        });
+    };
+
+    [TestMethod]
+    public async Task Cleanup_WhenBlobDeletionFails_KeepsQueueEntryAndRetriesIt()
+    {
+        var ownerId = Guid.NewGuid();
+        var (packageId, _) = await CreatePackageWithItemAsync(
+            userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+
+        var response = await DeletePackageAsync(packageId, userId: ownerId);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.NoContent, response.StatusCode, body);
+
+        var contentHandler = Services.GetRequiredService<IContentStorageHandler>();
+        Assert.IsNull(
+            await contentHandler.GetPackageAsync(packageId, includeContent: false),
+            "Metadata deletion must succeed even when blob deletion is deferred.");
+
+        Assert.AreEqual(
+            0,
+            _blobHandler.DeleteCallCount,
+            "The request path must only queue blobs; cleanup owns physical deletion.");
+        Assert.AreEqual(1, await CountStoredObjectsAsync(), "Owner deletion leaves the queued object in S3.");
+        Assert.HasCount(
+            1,
+            await contentHandler.GetPendingBlobDeletionsAsync(10),
+            "Owner deletion must durably queue the blob.");
+
+        // The first cleanup run retries the deletion, fails, and keeps the job.
+        _blobHandler.FailOnDeleteCall = 1;
+        await RunCleanupAsync();
+
+        Assert.AreEqual(1, await CountStoredObjectsAsync(), "The failed deletion must leave the object in S3.");
+        Assert.HasCount(
+            1,
+            await contentHandler.GetPendingBlobDeletionsAsync(10),
+            "The failed blob deletion must remain queued.");
+
+        // The next cleanup run retries the deletion and completes it.
+        await RunCleanupAsync();
+
+        Assert.AreEqual(0, await CountStoredObjectsAsync(), "The retry must remove the object.");
+        Assert.IsEmpty(
+            await contentHandler.GetPendingBlobDeletionsAsync(10),
+            "The retried queue entry must be completed.");
     }
 }

@@ -2,13 +2,16 @@ using System.Buffers.Text;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Dapper;
 using kroet.ShareIt.Api.Content.Dtos;
+using kroet.ShareIt.Api.Services.Cleanup;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 
 namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
@@ -327,6 +330,20 @@ public abstract class ShareItApiTestBase
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/content/packages/{packageId}");
         AddIdentity(request, guestId, userId);
         return Client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Invokes the hosted cleanup service's private run method directly. The
+    /// host starts the service with a long interval, so the next timer tick
+    /// would never arrive during a test.
+    /// </summary>
+    protected Task RunCleanupAsync()
+    {
+        var cleanup = Services.GetServices<IHostedService>().OfType<CleanupService>().Single();
+        var method = typeof(CleanupService)
+            .GetMethod("RunCleanupAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        return (Task)method.Invoke(cleanup, [CancellationToken.None])!;
     }
 
     /// <summary>

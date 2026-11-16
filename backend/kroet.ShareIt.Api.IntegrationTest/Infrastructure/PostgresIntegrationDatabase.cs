@@ -36,7 +36,7 @@ public sealed class PostgresIntegrationDatabase : IAsyncDisposable
     public async Task ResetAsync()
     {
         const string truncateSql = """
-                                   TRUNCATE TABLE download_tokens, contents, content_packages
+                                   TRUNCATE TABLE download_tokens, blob_deletion_jobs, contents, content_packages
                                    RESTART IDENTITY CASCADE;
                                    """;
 

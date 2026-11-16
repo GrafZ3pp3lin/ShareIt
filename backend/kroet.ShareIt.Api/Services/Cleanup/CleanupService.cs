@@ -1,13 +1,16 @@
 ﻿using System.Diagnostics;
 using kroet.ShareIt.Api.Services.Metrics;
 using kroet.ShareIt.Api.Services.Observability;
+using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage;
 using Microsoft.Extensions.Options;
 
 namespace kroet.ShareIt.Api.Services.Cleanup;
 
 /// <summary>
-/// Background service that periodically cleans up expired tokens and content that has reached its download limit.
+/// Background service that periodically cleans up expired tokens, expired
+/// packages, exhausted packages after their retention window, and queued blob
+/// deletions.
 /// </summary>
 public class CleanupService : BackgroundService
 {
@@ -60,8 +63,6 @@ public class CleanupService : BackgroundService
         {
             // Normal shutdown
         }
-
-        _logger.LogInformation("Content cleanup service stopped");
     }
 
     private async Task RunCleanupAsync(CancellationToken cancellationToken)
@@ -70,17 +71,18 @@ public class CleanupService : BackgroundService
 
         try
         {
-            _logger.LogDebug("Running content cleanup...");
-
             using var scope = _scopeFactory.CreateScope();
             var tokenService = scope.ServiceProvider.GetRequiredService<IDownloadTokenService>();
             var contentStorageHandler = scope.ServiceProvider.GetRequiredService<IContentStorageHandler>();
+            var storageHandler = scope.ServiceProvider.GetRequiredService<IStorageHandler>();
 
             // Cleanup expired tokens
             var tokensDeleted = await tokenService.CleanupExpiredTokensAsync(cancellationToken);
             activity?.SetTag("shareit.cleanup.tokens_deleted", tokensDeleted);
 
-            // Cleanup packages that have reached their access limit
+            // Cleanup expired packages and exhausted packages whose download
+            // retention period has elapsed. Metadata deletion and blob queueing
+            // commit together; draining that queue is a separate step below.
             var packagesToDelete = await contentStorageHandler.GetPackagesToDeleteAsync(cancellationToken);
             activity?.SetTag("shareit.cleanup.packages_pending", packagesToDelete.Count);
             var packagesDeleted = 0;
@@ -88,7 +90,7 @@ public class CleanupService : BackgroundService
 
             try
             {
-                packagesDeleted = await contentStorageHandler.DeletePackagesAsync(packagesToDelete, cancellationToken);
+                packagesDeleted = await storageHandler.DeletePackagesAsync(packagesToDelete, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -102,20 +104,40 @@ public class CleanupService : BackgroundService
                 _logger.LogError(ex, "Error deleting content packages during cleanup");
             }
 
+            activity?.SetTag("shareit.cleanup.packages_deleted", packagesDeleted);
+            activity?.SetTag("shareit.cleanup.succeeded", packageDeletionSucceeded);
+
             if (packageDeletionSucceeded)
             {
                 _metrics.PackageDeleted("cleanup", packagesDeleted);
                 _heartbeat.RecordSuccess(_timeProvider.GetUtcNow());
             }
 
-            activity?.SetTag("shareit.cleanup.packages_deleted", packagesDeleted);
-            activity?.SetTag("shareit.cleanup.succeeded", packageDeletionSucceeded);
+            // Blob deletion is independent of package metadata cleanup. A queue
+            // failure must not turn an already committed package deletion into
+            // a failed run or lose its metric and heartbeat.
+            var blobsDeleted = 0;
+            try
+            {
+                blobsDeleted = await storageHandler.ProcessPendingBlobDeletionsAsync(cancellationToken);
+                activity?.SetTag("shareit.cleanup.blobs_deleted", blobsDeleted);
+                activity?.SetTag("shareit.cleanup.blob_drain_succeeded", true);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                activity?.SetTag("shareit.cleanup.blob_drain_succeeded", false);
+                _logger.LogError(ex, "Error processing queued blob deletions during cleanup");
+            }
 
-            if (tokensDeleted > 0 || packagesDeleted > 0)
+            if (tokensDeleted > 0 || packagesDeleted > 0 || blobsDeleted > 0)
             {
                 _logger.LogInformation(
-                    "Cleanup completed: {TokensDeleted} tokens, {PackagesDeleted} packages deleted",
-                    tokensDeleted, packagesDeleted);
+                    "Cleanup completed: {TokensDeleted} tokens, {PackagesDeleted} packages, {BlobsDeleted} blobs deleted",
+                    tokensDeleted, packagesDeleted, blobsDeleted);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

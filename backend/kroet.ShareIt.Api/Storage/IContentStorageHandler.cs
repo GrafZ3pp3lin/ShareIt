@@ -93,32 +93,54 @@ public interface IContentStorageHandler
     Task<DownloadIncrementResult> IncrementPackageAccessCountAsync(Guid packageId, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Deletes multiple packages and their content.
+    /// Deletes multiple packages and their content, queueing their blobs in
+    /// the same transaction.
     /// </summary>
+    /// <remarks>
+    /// Low-level metadata and queue primitive. Production callers must use
+    /// <see cref="Services.Storage.IStorageHandler"/> so queue draining is
+    /// owned by the cleanup service; direct calls leave entries queued.
+    /// </remarks>
     /// <param name="packageIds">The unique package identifiers.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Number of packages deleted.</returns>
     Task<int> DeletePackagesAsync(IEnumerable<Guid> packageIds, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deletes a package its content.
+    /// Deletes a package and its content, queueing its blobs in the same
+    /// transaction.
     /// </summary>
+    /// <remarks>
+    /// Low-level metadata and queue primitive. Production callers must use
+    /// <see cref="Services.Storage.IStorageHandler"/> so queue draining is
+    /// owned by the cleanup service; direct calls leave entries queued.
+    /// </remarks>
     /// <param name="packageId">The unique package identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if deleted, false if not found.</returns>
     Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Deletes multiple contents.
+    /// Deletes multiple contents, queueing their blobs in the same transaction.
     /// </summary>
+    /// <remarks>
+    /// Low-level metadata and queue primitive. Production callers must use
+    /// <see cref="Services.Storage.IStorageHandler"/> so queue draining is
+    /// owned by the cleanup service; direct calls leave entries queued.
+    /// </remarks>
     /// <param name="contentIds">The unique content identifiers.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Number of contents deleted.</returns>
     Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Deletes content and its associated data.
+    /// Deletes content and queues its blob in the same transaction.
     /// </summary>
+    /// <remarks>
+    /// Low-level metadata and queue primitive. Production callers must use
+    /// <see cref="Services.Storage.IStorageHandler"/> so queue draining is
+    /// owned by the cleanup service; direct calls leave entries queued.
+    /// </remarks>
     /// <param name="contentId">The unique content identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if deleted, false if not found.</returns>
@@ -141,9 +163,22 @@ public interface IContentStorageHandler
     Task<bool> ExistsContentAsync(Guid contentId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets all packages that have reached their access limit.
+    /// Gets expired packages and exhausted packages whose download-retention
+    /// grace period has elapsed.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of package IDs to delete.</returns>
     Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets object keys whose metadata has been deleted but whose blob deletion
+    /// still needs to be completed or retried.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetPendingBlobDeletionsAsync(int take, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Completes a queued blob deletion after the object is gone. Repeating
+    /// this operation is safe.
+    /// </summary>
+    Task CompleteBlobDeletionAsync(string blobId, CancellationToken cancellationToken = default);
 }

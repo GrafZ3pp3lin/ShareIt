@@ -33,6 +33,15 @@ internal sealed class ControllableStorageHandler(IStorageHandler inner) : IStora
     public Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
         => inner.DeleteContentAsync(contentId, cancellationToken);
 
+    public Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default)
+        => inner.DeletePackageAsync(packageId, cancellationToken);
+
+    public Task<int> DeletePackagesAsync(IEnumerable<Guid> packageIds, CancellationToken cancellationToken = default)
+        => inner.DeletePackagesAsync(packageIds, cancellationToken);
+
+    public Task<int> ProcessPendingBlobDeletionsAsync(CancellationToken cancellationToken = default)
+        => inner.ProcessPendingBlobDeletionsAsync(cancellationToken);
+
     public Task<Stream> RetrieveContentAsync(Guid contentId, CancellationToken cancellationToken = default)
         => inner.RetrieveContentAsync(contentId, cancellationToken);
 }

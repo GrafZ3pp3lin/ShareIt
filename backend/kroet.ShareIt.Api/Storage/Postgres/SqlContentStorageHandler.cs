@@ -1,4 +1,5 @@
 ﻿using Dapper;
+using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -17,13 +18,19 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
 
     private readonly SqlStorageSettings _settings;
     private readonly ILogger<SqlContentStorageHandler> _logger;
+    private readonly TimeProvider _timeProvider;
+    private readonly DownloadSettings _downloadSettings;
 
     public SqlContentStorageHandler(
         IOptions<SqlStorageSettings> settings,
-        ILogger<SqlContentStorageHandler> logger)
+        ILogger<SqlContentStorageHandler> logger,
+        TimeProvider? timeProvider = null,
+        IOptions<DownloadSettings>? downloadSettings = null)
     {
         _settings = settings.Value;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _downloadSettings = downloadSettings?.Value ?? new DownloadSettings();
     }
 
     /// <inheritdoc />
@@ -32,12 +39,12 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         const string insertPackageSql = """
                                         INSERT INTO content_packages (
                                             id, created_at, user_id, is_private,
-                                            max_download_count, current_download_count, expires_at,
-                                            unlock_verifier
+                                            max_download_count, current_download_count, last_access_at,
+                                            expires_at, unlock_verifier
                                         ) VALUES (
                                             @Id, @CreatedAt, @UserId, @IsPrivate,
-                                            @MaxDownloadCount, 0, @ExpiresAt,
-                                            @UnlockVerifier
+                                            @MaxDownloadCount, 0, @LastAccessAt,
+                                            @ExpiresAt, @UnlockVerifier
                                         );
                                         """;
 
@@ -53,13 +60,10 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                 package.UserId,
                 package.IsPrivate,
                 package.MaxDownloadCount,
+                package.LastAccessAt,
                 package.ExpiresAt,
                 package.UnlockVerifier
             });
-
-        _logger.LogInformation(
-            "Stored content package {PackageId}", 
-            package.Id);
     }
 
     /// <inheritdoc />
@@ -91,11 +95,6 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                 content.Meta,
                 content.Url
             });
-
-        _logger.LogInformation(
-            "Stored content {ContentId} in package {PackageId}",
-            content.Id,
-            content.PackageId);
     }
 
     /// <inheritdoc />
@@ -133,8 +132,6 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         });
 
         await connection.ExecuteAsync(insertSql, parameters);
-
-        _logger.LogInformation("Stored {Count} contents", contentList.Count);
     }
 
     /// <inheritdoc />
@@ -143,7 +140,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         const string getPackageSql = """
                                      SELECT
                                          id, created_at, user_id, is_private,
-                                         max_download_count, current_download_count, expires_at,
+                                         max_download_count, current_download_count, last_access_at, expires_at,
                                          unlock_verifier
                                      FROM content_packages
                                      WHERE id = @PackageId
@@ -259,7 +256,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         const string getPackagesSql = """
                                       SELECT
                                           id, created_at, user_id, is_private,
-                                          max_download_count, current_download_count, expires_at,
+                                          max_download_count, current_download_count, last_access_at, expires_at,
                                           unlock_verifier
                                       FROM content_packages
                                       WHERE id = ANY(@PackageIds)
@@ -368,7 +365,8 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         // exceed the configured limit.
         const string incrementSql = """
                                     UPDATE content_packages
-                                        SET current_download_count = current_download_count + 1
+                                        SET current_download_count = current_download_count + 1,
+                                            last_access_at = @AccessedAt
                                     WHERE id = @PackageId
                                       AND (max_download_count IS NULL OR current_download_count < max_download_count)
                                     RETURNING current_download_count, max_download_count
@@ -379,7 +377,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
 
         var result = await connection.QuerySingleOrDefaultAsync<DownloadCountDbDto>(
             incrementSql,
-            new { PackageId = packageId });
+            new { PackageId = packageId, AccessedAt = _timeProvider.GetUtcNow() });
 
         if (result == null)
         {
@@ -389,12 +387,6 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
 
         var limitReached = result.MaxDownloadCount.HasValue && 
                           result.CurrentDownloadCount >= result.MaxDownloadCount.Value;
-
-        _logger.LogDebug(
-            "Incremented access count for package {PackageId}: {Current}/{Max}",
-            packageId, 
-            result.CurrentDownloadCount, 
-            result.MaxDownloadCount?.ToString() ?? "unlimited");
 
         return new DownloadIncrementResult(
             true,
@@ -406,20 +398,33 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <inheritdoc />
     public async Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default)
     {
+        const string lockPackageSql = "SELECT id FROM content_packages WHERE id = @PackageId FOR UPDATE";
+        const string queueBlobDeletionsSql = """
+                                             INSERT INTO blob_deletion_jobs (blob_id, created_at)
+                                             SELECT url, @CreatedAt
+                                             FROM contents
+                                             WHERE package_id = @PackageId
+                                             ON CONFLICT (blob_id) DO NOTHING
+                                             """;
         const string deletePackageSql = "DELETE FROM content_packages WHERE id = @PackageId";
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        var affected = await connection.ExecuteAsync(
-            deletePackageSql,
-            new { PackageId = packageId });
+        var parameters = new { PackageId = packageId, CreatedAt = _timeProvider.GetUtcNow() };
+
+        // Lock the package row first so a concurrent upload cannot commit its
+        // contents row between queueing and the cascade delete: either the
+        // upload's FK check completes before the lock is acquired (the queue
+        // then sees the row) or it fails afterward and its compensation
+        // removes the blob.
+        await connection.ExecuteAsync(lockPackageSql, parameters, transaction);
+        await connection.ExecuteAsync(queueBlobDeletionsSql, parameters, transaction);
+        var affected = await connection.ExecuteAsync(deletePackageSql, parameters, transaction);
+        await transaction.CommitAsync(cancellationToken);
 
         var deleted = affected > 0;
-        if (deleted)
-        {
-            _logger.LogInformation("Deleted content package {PackageId}", packageId);
-        }
 
         return deleted;
     }
@@ -433,19 +438,39 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             return 0;
         }
 
+        // A deterministic lock order prevents overlapping cleanup deletions
+        // from deadlocking on the same package rows.
+        const string lockPackagesSql = """
+                                       SELECT id
+                                       FROM content_packages
+                                       WHERE id = ANY(@PackageIds)
+                                       ORDER BY id
+                                       FOR UPDATE
+                                       """;
+        const string queueBlobDeletionsSql = """
+                                             INSERT INTO blob_deletion_jobs (blob_id, created_at)
+                                             SELECT url, @CreatedAt
+                                             FROM contents
+                                             WHERE package_id = ANY(@PackageIds)
+                                             ON CONFLICT (blob_id) DO NOTHING
+                                             """;
         const string deletePackagesSql = """
-                                         DELETE FROM content_packages 
+                                         DELETE FROM content_packages
                                          WHERE id = ANY(@PackageIds)
                                          """;
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        var rowsAffected = await connection.ExecuteAsync(
-            deletePackagesSql,
-            new { PackageIds = packageIdList.ToArray() });
-        
-        _logger.LogInformation("Deleted {Count} packages", rowsAffected);
+        var parameters = new { PackageIds = packageIdList.ToArray(), CreatedAt = _timeProvider.GetUtcNow() };
+
+        // Lock the package rows first so concurrent uploads cannot commit
+        // between queueing and the cascade delete (see DeletePackageAsync).
+        await connection.ExecuteAsync(lockPackagesSql, parameters, transaction);
+        await connection.ExecuteAsync(queueBlobDeletionsSql, parameters, transaction);
+        var rowsAffected = await connection.ExecuteAsync(deletePackagesSql, parameters, transaction);
+        await transaction.CommitAsync(cancellationToken);
 
         return rowsAffected;
     }
@@ -453,23 +478,25 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <inheritdoc />
     public async Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
-        const string deleteSql = """
-                                 DELETE FROM contents
-                                 WHERE id = @ContentId
-                                 """;
+        const string queueBlobDeletionSql = """
+                                            INSERT INTO blob_deletion_jobs (blob_id, created_at)
+                                            SELECT url, @CreatedAt
+                                            FROM contents
+                                            WHERE id = @ContentId
+                                            ON CONFLICT (blob_id) DO NOTHING
+                                            """;
+        const string deleteSql = "DELETE FROM contents WHERE id = @ContentId";
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        var rowsAffected = await connection.ExecuteAsync(
-            deleteSql,
-            new { ContentId = contentId });
+        var parameters = new { ContentId = contentId, CreatedAt = _timeProvider.GetUtcNow() };
+        await connection.ExecuteAsync(queueBlobDeletionSql, parameters, transaction);
+        var rowsAffected = await connection.ExecuteAsync(deleteSql, parameters, transaction);
+        await transaction.CommitAsync(cancellationToken);
 
         var deleted = rowsAffected > 0;
-        if (deleted)
-        {
-            _logger.LogInformation("Deleted content {ContentId}", contentId);
-        }
 
         return deleted;
     }
@@ -483,6 +510,13 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             return 0;
         }
 
+        const string queueBlobDeletionsSql = """
+                                             INSERT INTO blob_deletion_jobs (blob_id, created_at)
+                                             SELECT url, @CreatedAt
+                                             FROM contents
+                                             WHERE id = ANY(@ContentIds)
+                                             ON CONFLICT (blob_id) DO NOTHING
+                                             """;
         const string deleteSql = """
                                  DELETE FROM contents
                                  WHERE id = ANY(@ContentIds)
@@ -490,12 +524,12 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
-        var rowsAffected = await connection.ExecuteAsync(
-            deleteSql,
-            new { ContentIds = contentIdList.ToArray() });
-        
-        _logger.LogInformation("Deleted {Count} contents", rowsAffected);
+        var parameters = new { ContentIds = contentIdList.ToArray(), CreatedAt = _timeProvider.GetUtcNow() };
+        await connection.ExecuteAsync(queueBlobDeletionsSql, parameters, transaction);
+        var rowsAffected = await connection.ExecuteAsync(deleteSql, parameters, transaction);
+        await transaction.CommitAsync(cancellationToken);
 
         return rowsAffected;
     }
@@ -541,27 +575,33 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <inheritdoc />
     public async Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
     {
+        // Two independent branches let the planner use the expiry index and
+        // the exhausted-retention index instead of scanning the table for the
+        // combined OR predicate. UNION also removes duplicates for packages
+        // that are both expired and exhausted.
         const string getExpiredPackagesSql = """
                                              SELECT id
                                              FROM content_packages
-                                             WHERE 
-                                                 (max_download_count IS NOT NULL AND current_download_count >= max_download_count)
-                                                 OR (expires_at IS NOT NULL AND expires_at <= @Now)
+                                             WHERE expires_at IS NOT NULL AND expires_at <= @Now
+                                             UNION
+                                             SELECT id
+                                             FROM content_packages
+                                             WHERE max_download_count IS NOT NULL
+                                               AND current_download_count >= max_download_count
+                                               AND last_access_at <= @ExhaustedBefore
                                              """;
+
+        var now = _timeProvider.GetUtcNow();
+        var exhaustedBefore = now.AddMinutes(-_downloadSettings.ExhaustedPackageRetentionMinutes);
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var packageIds = await connection.QueryAsync<Guid>(
             getExpiredPackagesSql,
-            new { Now = DateTimeOffset.UtcNow });
+            new { Now = now, ExhaustedBefore = exhaustedBefore });
 
         var result = packageIds.ToList();
-        
-        if (result.Count > 0)
-        {
-            _logger.LogInformation("Found {Count} packages to delete", result.Count);
-        }
 
         return result;
     }
@@ -576,7 +616,11 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                                        COUNT(*)::int AS total_packages,
                                        COUNT(*) FILTER (WHERE NOT (
                                            (expires_at IS NOT NULL AND expires_at <= @Now)
-                                           OR (max_download_count IS NOT NULL AND current_download_count >= max_download_count)
+                                           OR (
+                                               max_download_count IS NOT NULL
+                                               AND current_download_count >= max_download_count
+                                               AND last_access_at <= @ExhaustedBefore
+                                           )
                                        ))::int AS active_packages,
                                        COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= @Now)::int AS expired_packages,
                                        COUNT(*) FILTER (WHERE max_download_count IS NOT NULL AND current_download_count >= max_download_count)::int AS exhausted_packages,
@@ -590,11 +634,16 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                                    FROM content_packages p
                                    """;
 
+        // A package exhausted within the retention window can still serve its
+        // outstanding downloads, so it counts as active rather than as
+        // cleanup-pending until retention elapses.
+        var exhaustedBefore = now.AddMinutes(-_downloadSettings.ExhaustedPackageRetentionMinutes);
+
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
         var row = await connection.QuerySingleAsync<MetricsSnapshotDbDto>(
-            new CommandDefinition(snapshotSql, new { Now = now }, cancellationToken: cancellationToken));
+            new CommandDefinition(snapshotSql, new { Now = now, ExhaustedBefore = exhaustedBefore }, cancellationToken: cancellationToken));
 
         return new ApplicationMetricsSnapshot
         {
@@ -611,6 +660,37 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         };
     }
     
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> GetPendingBlobDeletionsAsync(
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        const string getPendingSql = """
+                                     SELECT blob_id
+                                     FROM blob_deletion_jobs
+                                     ORDER BY created_at, blob_id
+                                     LIMIT @Limit
+                                     """;
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var blobIds = await connection.QueryAsync<string>(
+            getPendingSql,
+            new { Limit = Math.Clamp(take, 1, 1000) });
+        return blobIds.AsList();
+    }
+
+    /// <inheritdoc />
+    public async Task CompleteBlobDeletionAsync(string blobId, CancellationToken cancellationToken = default)
+    {
+        const string completeSql = "DELETE FROM blob_deletion_jobs WHERE blob_id = @BlobId";
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await connection.ExecuteAsync(completeSql, new { BlobId = blobId });
+    }
+
     private NpgsqlConnection CreateConnection()
     {
         return new NpgsqlConnection(_settings.ConnectionString);
@@ -648,6 +728,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             UnlockVerifier = dbDto.UnlockVerifier,
             MaxDownloadCount = dbDto.MaxDownloadCount,
             CurrentDownloadCount = dbDto.CurrentDownloadCount,
+            LastAccessAt = dbDto.LastAccessAt,
             ExpiresAt = dbDto.ExpiresAt
         };
     }
@@ -663,6 +744,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         public bool? IsPrivate { get; init; }
         public int? MaxDownloadCount { get; init; }
         public int CurrentDownloadCount { get; init; }
+        public DateTimeOffset? LastAccessAt { get; init; }
         public DateTimeOffset? ExpiresAt { get; init; }
         public string? UnlockVerifier { get; init; }
     }

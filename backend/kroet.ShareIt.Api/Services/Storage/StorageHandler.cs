@@ -1,18 +1,18 @@
-﻿using kroet.ShareIt.Api.Models;
+using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage;
 
 namespace kroet.ShareIt.Api.Services.Storage;
 
 /// <summary>
-/// Main storage handler that routes content to appropriate storage based on size.
-/// Small content is embedded in the content store, large content goes to blob storage.
+/// Coordinates content metadata and blob storage. Metadata deletion and
+/// blob-deletion queueing are atomic in the content store. The request path
+/// never waits for S3 deletion; the cleanup service drains the durable queue.
 /// </summary>
 public class StorageHandler : IStorageHandler
 {
-    /// <summary>
-    /// Content type written to the blob store for every item. The real MIME
-    /// type is part of the encrypted per-item metadata, never storage metadata.
-    /// </summary>
+    private const int BlobDeletionBatchSize = 100;
+    private static readonly TimeSpan OrphanCleanupTimeout = TimeSpan.FromSeconds(30);
+
     private const string OpaqueBlobContentType = "application/octet-stream";
 
     private readonly IContentStorageHandler _contentStorageHandler;
@@ -37,19 +37,14 @@ public class StorageHandler : IStorageHandler
         {
             // The blob store must not learn the real name or MIME type: both
             // live in the opaque, client-sealed per-item metadata. Only an
-            // opaque content type and the item id are written as object
-            // metadata.
+            // opaque content type and the item id are written as object metadata.
             externalUrl = await _blobStorageHandler.UploadAsync(
                 dataStream,
                 OpaqueBlobContentType,
                 content.Id.ToString(),
                 cancellationToken);
-            _logger.LogDebug(
-                "Stored content {ContentId} ({Size} bytes) in blob storage as {BlobId}",
-                content.Id, content.Size, externalUrl);
-            
-            var externalContent = new ExternalContent(content, externalUrl);
 
+            var externalContent = new ExternalContent(content, externalUrl);
             await _contentStorageHandler.StoreContentAsync(externalContent, cancellationToken);
         }
         catch (Exception ex)
@@ -57,11 +52,12 @@ public class StorageHandler : IStorageHandler
             _logger.LogError(ex, "Failed to store content {ContentId} (blob and/or metadata)", content.Id);
             if (!string.IsNullOrEmpty(externalUrl))
             {
-                // Attempt to clean up the uploaded blob
+                // The request may have caused this failure by being canceled.
+                // Give compensation its own bounded timeout so it can still run.
                 try
                 {
-                    await _blobStorageHandler.DeleteAsync(externalUrl, cancellationToken);
-                    _logger.LogDebug("Cleaned up blob {BlobId} after failed content storage", externalUrl);
+                    using var cleanupTimeout = new CancellationTokenSource(OrphanCleanupTimeout);
+                    await _blobStorageHandler.DeleteAsync(externalUrl, cleanupTimeout.Token);
                 }
                 catch (Exception cleanupEx)
                 {
@@ -75,48 +71,65 @@ public class StorageHandler : IStorageHandler
     /// <inheritdoc />
     public async Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
-        // First get the document to check if there's blob storage to clean up
-        var document = await _contentStorageHandler.GetContentAsync(contentId, cancellationToken);
-
-        if (document == null)
-        {
-            return false;
-        }
-
-        // Delete blob if exists
-        try
-        {
-            await _blobStorageHandler.DeleteAsync(document.Url, cancellationToken);
-            _logger.LogDebug("Deleted blob {BlobId} for content {ContentId}", document.Url, contentId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete blob {BlobId} for content {ContentId}", document.Url, contentId);
-            return false;
-        }
-
-        // Delete the document from internal storage
         var deleted = await _contentStorageHandler.DeleteContentAsync(contentId, cancellationToken);
 
-        if (deleted)
+        return deleted;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default)
+    {
+        return await _contentStorageHandler.DeletePackageAsync(packageId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeletePackagesAsync(IEnumerable<Guid> packageIds, CancellationToken cancellationToken = default)
+    {
+        return await _contentStorageHandler.DeletePackagesAsync(packageIds, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ProcessPendingBlobDeletionsAsync(CancellationToken cancellationToken = default)
+    {
+        var pending = await _contentStorageHandler.GetPendingBlobDeletionsAsync(
+            BlobDeletionBatchSize,
+            cancellationToken);
+        var completed = 0;
+
+        foreach (var blobId in pending)
         {
-            _logger.LogInformation("Deleted content {ContentId}", contentId);
+            try
+            {
+                // A missing object already satisfies the deletion goal. S3 and
+                // the in-memory handler both report that case as false.
+                await _blobStorageHandler.DeleteAsync(blobId, cancellationToken);
+                await _contentStorageHandler.CompleteBlobDeletionAsync(blobId, cancellationToken);
+                completed++;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Keep the queue entry. A later cleanup run can safely repeat
+                // deletion because a missing object is also success.
+                _logger.LogError(ex, "Failed to delete queued blob {BlobId}; it remains queued for retry", blobId);
+            }
         }
 
-        return deleted;
+        return completed;
     }
 
     /// <inheritdoc />
     public async Task<Stream> RetrieveContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
         var document = await _contentStorageHandler.GetContentAsync(contentId, cancellationToken);
-
         if (document == null)
         {
             throw new KeyNotFoundException($"Content with ID {contentId} was not found");
         }
-        
+
         return await _blobStorageHandler.DownloadAsync(document.Url, cancellationToken);
     }
 }
-

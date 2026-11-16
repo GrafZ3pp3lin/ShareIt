@@ -93,13 +93,16 @@ The application instruments are emitted from the `ShareIt` meter.
 | `shareit_items` | gauge | Stored content items |
 | `shareit_storage_bytes` | gauge | Logical size of stored content |
 | `shareit_cleanup_pending` | gauge | Packages currently eligible for cleanup |
-| `shareit_cleanup_last_success_timestamp_seconds` | gauge | Last successful cleanup, or 0 |
+| `shareit_cleanup_last_success_timestamp_seconds` | gauge | Last run that completed token cleanup and package metadata deletion, or 0 |
 | `shareit_dependency_up{component}` | gauge | `postgres` / `s3` reachability |
 | `shareit_build_info{version,environment}` | gauge | Running build information |
 
 `shareit_packages{state}` is a set of independent counts, not a partition:
-`expired`, `exhausted`, `protected`, `private` and `empty` can overlap, while
-`active` excludes expired and exhausted packages.
+`expired`, `exhausted`, `protected`, `private` and `empty` can overlap.
+`active` excludes expired packages and exhausted packages whose retention
+window has elapsed; an exhausted package that is still inside that window
+counts as active. `shareit_cleanup_pending` is `total - active`: packages
+eligible for cleanup at snapshot time, not the blob-deletion queue depth.
 
 Important distinctions:
 
@@ -123,6 +126,8 @@ Important distinctions:
   configured. The in-memory development store intentionally has no snapshot
   provider. The OTLP export never queries Postgres or S3 directly from a
   metric callback.
+- Blob-deletion queue failures are logged and retried by cleanup. No
+  blob-queue depth or failure metric is exported yet (planned for PR5).
 - The metric labels are aggregate-only. Never add package IDs, user IDs,
   guest IDs, tokens, URLs or content to metric labels. Traces and logs are
   per-request and may contain opaque package/content IDs, but never tokens,

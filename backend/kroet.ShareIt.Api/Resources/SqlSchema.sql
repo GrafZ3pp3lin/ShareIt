@@ -9,18 +9,12 @@ CREATE TABLE IF NOT EXISTS content_packages (
     is_private BOOLEAN,
     max_download_count INT,
     current_download_count INT NOT NULL DEFAULT 0,
+    last_access_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
     unlock_verifier TEXT,
     CONSTRAINT chk_download_count CHECK (current_download_count >= 0),
     CONSTRAINT chk_max_download_count CHECK (max_download_count IS NULL OR max_download_count > 0)
 );
-
--- Upgrade databases created before the redesign. The dropped columns carried
--- names (title/description, file_name/mime_type) that now live in `meta`.
-ALTER TABLE content_packages ADD COLUMN IF NOT EXISTS is_private BOOLEAN;
-ALTER TABLE content_packages ADD COLUMN IF NOT EXISTS unlock_verifier TEXT;
-ALTER TABLE content_packages DROP COLUMN IF EXISTS title;
-ALTER TABLE content_packages DROP COLUMN IF EXISTS description;
 
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_packages_user_id ON content_packages(user_id);
@@ -33,8 +27,15 @@ CREATE INDEX IF NOT EXISTS idx_packages_user_created
     ON content_packages(user_id, created_at DESC, id DESC)
     WHERE user_id IS NOT NULL;
 
--- Index for cleanup queries (finding expired or limit-reached packages)
+-- Index for cleanup queries (finding expired or limit-reached packages).
 CREATE INDEX IF NOT EXISTS idx_packages_for_cleanup ON content_packages(expires_at, current_download_count, max_download_count);
+
+-- Restricting the index to exhausted packages keeps it small and lets the
+-- retention predicate use an index range scan.
+CREATE INDEX IF NOT EXISTS idx_packages_exhausted_cleanup
+    ON content_packages (last_access_at)
+    WHERE max_download_count IS NOT NULL
+      AND current_download_count >= max_download_count;
 
 
 -- Table for external content metadata
@@ -51,16 +52,20 @@ CREATE TABLE IF NOT EXISTS contents (
     CONSTRAINT chk_content_size CHECK (size >= 0)
 );
 
--- Upgrade databases created before `meta` existed.
-ALTER TABLE contents ADD COLUMN IF NOT EXISTS meta TEXT;
-ALTER TABLE contents DROP COLUMN IF EXISTS file_name;
-ALTER TABLE contents DROP COLUMN IF EXISTS mime_type;
-
 -- Indexes for contents
 CREATE INDEX IF NOT EXISTS idx_contents_user_id ON contents(user_id);
 CREATE INDEX IF NOT EXISTS idx_contents_created_at ON contents(created_at);
 CREATE INDEX IF NOT EXISTS idx_contents_content_type ON contents(content_type);
 CREATE INDEX IF NOT EXISTS idx_contents_package_id ON contents(package_id);
+
+-- Object keys are recorded before their content metadata disappears. S3
+-- deletion happens afterward and is retried until the object is gone.
+CREATE TABLE IF NOT EXISTS blob_deletion_jobs (
+    blob_id TEXT PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_blob_deletion_jobs_created_at ON blob_deletion_jobs(created_at);
 
 
 -- Table for download tokens

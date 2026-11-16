@@ -4,7 +4,6 @@ using System.Text.Json;
 using kroet.ShareIt.Api.Authentication;
 using kroet.ShareIt.Api.Configuration;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -23,8 +22,7 @@ public sealed class DpopProofValidatorTests
     private static DpopProofValidator CreateValidator(DpopSettings? settings = null) =>
         new(
             Options.Create(settings ?? new DpopSettings()),
-            TimeProvider.System,
-            NullLogger<DpopProofValidator>.Instance);
+            TimeProvider.System);
 
     private static HttpRequest CreateRequest(string method = "POST") =>
         new DefaultHttpContext

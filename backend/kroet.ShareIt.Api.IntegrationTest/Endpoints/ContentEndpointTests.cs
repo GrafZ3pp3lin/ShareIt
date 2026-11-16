@@ -502,7 +502,9 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     public async Task DeletePackage_AsOwner_Returns204AndPackageBecomesUnreachable()
     {
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        var (packageId, _) = await CreatePackageWithItemAsync(
+            userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        Assert.AreEqual(1, await CountStoredObjectsAsync(), "The item must be stored before deletion.");
 
         var response = await DeletePackageAsync(packageId, userId: ownerId);
         var body = await response.Content.ReadAsStringAsync();
@@ -514,6 +516,22 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var storedContents = await Services.GetRequiredService<IContentStorageHandler>()
             .GetPackageAsync(packageId, includeContent: true);
         Assert.IsNull(storedContents);
+
+        // Owner deletion only queues the blobs; cleanup performs the physical
+        // deletion without making the DELETE request wait for S3.
+        Assert.AreEqual(1, await CountStoredObjectsAsync(), "Owner deletion leaves the queued object in S3.");
+        var contentHandler = Services.GetRequiredService<IContentStorageHandler>();
+        Assert.HasCount(
+            1,
+            await contentHandler.GetPendingBlobDeletionsAsync(10),
+            "Owner deletion must queue the blobs for cleanup.");
+
+        await RunCleanupAsync();
+
+        Assert.AreEqual(0, await CountStoredObjectsAsync(), "Cleanup must delete the queued blobs.");
+        Assert.IsEmpty(
+            await contentHandler.GetPendingBlobDeletionsAsync(10),
+            "Cleanup must drain the blob-deletion queue.");
     }
 
     [TestMethod]

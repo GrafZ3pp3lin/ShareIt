@@ -67,7 +67,6 @@ public static class BlobStorageExtensions
             try
             {
                 await handler.InitializeAsync(app.Lifetime.ApplicationStopping);
-                logger.LogDebug("Blob storage initialized");
             }
             catch (Exception ex)
             {

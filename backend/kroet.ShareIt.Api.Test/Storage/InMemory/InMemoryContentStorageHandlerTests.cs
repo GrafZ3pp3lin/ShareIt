@@ -1,5 +1,7 @@
+using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage.InMemory;
+using Microsoft.Extensions.Options;
 using ContentModel = kroet.ShareIt.Api.Models.Content;
 
 namespace kroet.ShareIt.Api.Test.Storage.InMemory;
@@ -207,23 +209,87 @@ public class InMemoryContentStorageHandlerTests
     }
 
     [TestMethod]
-    public async Task GetPackagesToDeleteAsync_ReturnsExpiredAndAccessLimitedPackages()
+    public async Task GetPackagesToDeleteAsync_ReturnsExpiredImmediatelyAndExhaustedAfterRetention()
     {
+        var timeProvider = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-16T12:00:00+00:00"));
+        var handler = new InMemoryContentStorageHandler(timeProvider, Options.Create(new DownloadSettings()));
         var activePackage = CreatePackage();
-        var expiredPackage = CreatePackage(expiresAt: DateTimeOffset.UtcNow.AddHours(-1));
-        var limitedPackage = CreatePackage(maxDownloadCount: 1, currentDownloadCount: 1);
+        var expiredPackage = CreatePackage(expiresAt: timeProvider.UtcNow.AddHours(-1));
+        var limitedPackage = CreatePackage(maxDownloadCount: 1);
 
-        await _handler.StorePackageAsync(activePackage);
-        await _handler.StorePackageAsync(expiredPackage);
-        await _handler.StorePackageAsync(limitedPackage);
+        await handler.StorePackageAsync(activePackage);
+        await handler.StorePackageAsync(expiredPackage);
+        await handler.StorePackageAsync(limitedPackage);
+        await handler.IncrementPackageAccessCountAsync(limitedPackage.Id);
 
-        var packagesToDelete = await _handler.GetPackagesToDeleteAsync();
+        // The exhausted package must stay servable for its retention period.
+        var retained = await handler.GetPackagesToDeleteAsync();
+        CollectionAssert.AreEquivalent(new[] { expiredPackage.Id }, retained.ToArray());
+        Assert.DoesNotContain(limitedPackage.Id, retained);
 
-        Assert.HasCount(2, packagesToDelete);
+        timeProvider.UtcNow = timeProvider.UtcNow.AddMinutes(31);
+
+        var eligible = await handler.GetPackagesToDeleteAsync();
         CollectionAssert.AreEquivalent(
             new[] { expiredPackage.Id, limitedPackage.Id },
-            packagesToDelete.ToArray());
-        Assert.DoesNotContain(activePackage.Id, packagesToDelete);
+            eligible.ToArray());
+        Assert.DoesNotContain(activePackage.Id, eligible);
+    }
+
+    [TestMethod]
+    public async Task IncrementPackageAccessCountAsync_RecordsLastAccessAt()
+    {
+        var timeProvider = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-16T12:00:00+00:00"));
+        var handler = new InMemoryContentStorageHandler(timeProvider);
+        var package = CreatePackage(maxDownloadCount: 2);
+        await handler.StorePackageAsync(package);
+
+        var claimed = await handler.IncrementPackageAccessCountAsync(package.Id);
+
+        Assert.IsTrue(claimed.Success);
+        var stored = await handler.GetPackageShellAsync(package.Id);
+        Assert.IsNotNull(stored);
+        Assert.AreEqual(timeProvider.UtcNow, stored.LastAccessAt);
+    }
+
+    [TestMethod]
+    public async Task DeletePackageAsync_QueuesContentBlobsForDeletion()
+    {
+        var package = CreatePackage();
+        var content = CreateContent(package.Id);
+
+        await _handler.StorePackageAsync(package);
+        await _handler.StoreContentAsync(content);
+
+        Assert.IsTrue(await _handler.DeletePackageAsync(package.Id));
+
+        var pending = await _handler.GetPendingBlobDeletionsAsync(10);
+        CollectionAssert.AreEqual(new[] { content.Url }, pending.ToArray());
+
+        await _handler.CompleteBlobDeletionAsync(content.Url);
+        Assert.IsEmpty(await _handler.GetPendingBlobDeletionsAsync(10));
+    }
+
+    [TestMethod]
+    public async Task DeletePackagesAsync_DeduplicatesSharedBlobKeys()
+    {
+        var firstPackage = CreatePackage();
+        var secondPackage = CreatePackage();
+        var sharedUrl = "blob://shared";
+
+        await _handler.StorePackageAsync(firstPackage);
+        await _handler.StorePackageAsync(secondPackage);
+        await _handler.StoreContentsAsync(
+        [
+            new ExternalContent(CreateContent(firstPackage.Id), sharedUrl),
+            new ExternalContent(CreateContent(secondPackage.Id), sharedUrl)
+        ]);
+
+        Assert.AreEqual(2, await _handler.DeletePackagesAsync([firstPackage.Id, secondPackage.Id]));
+
+        var pending = await _handler.GetPendingBlobDeletionsAsync(10);
+        Assert.HasCount(1, pending);
+        Assert.AreEqual(sharedUrl, pending[0]);
     }
 
     [TestMethod]
@@ -310,5 +376,15 @@ public class InMemoryContentStorageHandlerTests
                 Meta = "bWV0YQ"
             },
             $"blob://{Guid.NewGuid()}");
+    }
+
+    /// <summary>
+    /// Minimal controllable clock for retention-window tests.
+    /// </summary>
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 }
