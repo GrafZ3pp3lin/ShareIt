@@ -34,15 +34,15 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         var otherId = Guid.NewGuid();
 
         TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(-2);
-        var oldest = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        var oldest = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
         TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(1);
-        var middle = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        var middle = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
         TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(1);
-        var newest = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        var newest = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
-        await CreatePackageAsync(userId: otherId, maxDownloadCount: 10, timeToLiveHours: 24);
+        await CreatePackageAsync(userId: otherId, maxAccessCount: 10, timeToLiveHours: 24);
 
         var response = await ListPackagesAsync(userId: ownerId);
         var body = await response.Content.ReadAsStringAsync();
@@ -60,11 +60,11 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task ListPackages_ReportsItemCountTotalSizeAndRemainingDownloads()
+    public async Task ListPackages_ReportsItemCountTotalSizeAndRemainingAccesses()
     {
         var ownerId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(
-            userId: ownerId, maxDownloadCount: 3, timeToLiveHours: 24);
+            userId: ownerId, maxAccessCount: 3, timeToLiveHours: 24);
 
         await SendUploadItemAsync(packageId, "file", new byte[10], guestId: null, userId: ownerId);
         TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(1);
@@ -76,9 +76,9 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         Assert.AreEqual(packageId, row.Id);
         Assert.AreEqual(2, row.ItemCount);
         Assert.AreEqual(30, row.TotalSize);
-        Assert.AreEqual(3, row.MaxDownloadCount);
-        Assert.AreEqual(0, row.CurrentDownloadCount);
-        Assert.AreEqual(3, row.RemainingDownloads);
+        Assert.AreEqual(3, row.MaxAccessCount);
+        Assert.AreEqual(0, row.CurrentAccessCount);
+        Assert.AreEqual(3, row.RemainingAccesses);
         Assert.IsFalse(row.IsExpired);
         Assert.IsFalse(row.IsProtected);
     }
@@ -87,10 +87,10 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
     public async Task ListPackages_ReportsWhetherThePackageIsProtected()
     {
         var ownerId = Guid.NewGuid();
-        var unprotected = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        var unprotected = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
         TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(1);
         var protectedPackage = await CreatePackageAsync(
-            userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24, unlockVerifier: Verifier());
+            userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24, unlockVerifier: Verifier());
 
         var page = await ReadJsonAsync<ContentPackageListResponse>(await ListPackagesAsync(userId: ownerId));
 
@@ -110,7 +110,7 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         for (var i = 0; i < 3; i++)
         {
             TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(1);
-            created.Add(await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24));
+            created.Add(await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24));
         }
 
         // Newest first: [2], [1], [0].
@@ -136,7 +136,7 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
     {
         var ownerId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(
-            userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 1);
+            userId: ownerId, maxAccessCount: 10, timeToLiveHours: 1);
 
         TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
 

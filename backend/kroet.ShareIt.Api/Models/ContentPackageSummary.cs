@@ -34,18 +34,18 @@ public sealed record ContentPackageSummary
     /// <summary>
     /// Maximum access count. Null means unlimited.
     /// </summary>
-    public int? MaxDownloadCount { get; init; }
+    public int? MaxAccessCount { get; init; }
 
     /// <summary>
     /// Number of accesses consumed so far.
     /// </summary>
-    public required int CurrentDownloadCount { get; init; }
+    public required int CurrentAccessCount { get; init; }
 
     /// <summary>
     /// Remaining accesses. Null means unlimited.
     /// </summary>
-    public int? RemainingDownloads => MaxDownloadCount.HasValue
-        ? Math.Max(0, MaxDownloadCount.Value - CurrentDownloadCount)
+    public int? RemainingAccesses => MaxAccessCount.HasValue
+        ? Math.Max(0, MaxAccessCount.Value - CurrentAccessCount)
         : null;
 
     /// <summary>

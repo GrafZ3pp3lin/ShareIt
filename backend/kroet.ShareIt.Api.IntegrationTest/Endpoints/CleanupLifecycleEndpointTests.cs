@@ -18,13 +18,12 @@ public sealed class CleanupLifecycleEndpointTests : ShareItApiTestBase
     {
         var guestId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            bytes: LargeItemBytes, guestId: guestId, maxDownloadCount: 1);
+            bytes: LargeItemBytes, guestId: guestId, maxAccessCount: 1);
 
         var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
-        var item = details.Items.Single();
-        Assert.AreEqual(1, details.Package.CurrentDownloadCount);
+        Assert.AreEqual(1, details.Package.CurrentAccessCount);
 
-        // Exhausted: cleanup must retain the package so its download token
+        // Exhausted: cleanup must retain the package so its access session
         // stays usable, and its blob must survive.
         await RunCleanupAsync();
         var retained = await Services.GetRequiredService<IContentStorageHandler>()
@@ -32,12 +31,15 @@ public sealed class CleanupLifecycleEndpointTests : ShareItApiTestBase
         Assert.IsNotNull(retained, "An exhausted package must stay available during the retention window.");
         Assert.AreEqual(1, await CountStoredObjectsAsync(), "The blob must survive while the package is retained.");
 
-        // The token issued by the final access must still work after cleanup.
-        var download = await SendDownloadAsync(item.DownloadUrl!, item.DownloadToken!, guestId);
+        // The session issued by the final access must still work after cleanup.
+        var download = await SendDownloadAsync(
+            DownloadUrl(packageId, details.Items.Single().Id),
+            details.AccessSession.Token,
+            guestId);
         Assert.AreEqual(
             HttpStatusCode.OK,
             download.StatusCode,
-            "Cleanup must not invalidate the download token issued by the final access.");
+            "Cleanup must not invalidate the access session issued by the final access.");
         CollectionAssert.AreEqual(LargeItemBytes, await download.Content.ReadAsByteArrayAsync());
 
         // After the retention window the package becomes cleanup-eligible.

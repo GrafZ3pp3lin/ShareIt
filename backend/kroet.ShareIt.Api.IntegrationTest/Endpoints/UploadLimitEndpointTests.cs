@@ -101,7 +101,7 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     public async Task UploadItem_FileAboveGuestLimitWithinAuthenticatedLimit_SucceedsForOwner()
     {
         var userId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: userId, maxDownloadCount: 10, timeToLiveHours: 24);
+        var packageId = await CreatePackageAsync(userId: userId, maxAccessCount: 10, timeToLiveHours: 24);
 
         var response = await SendUploadItemAsync(packageId, "file", OversizedFile, userId: userId);
         var body = await response.Content.ReadAsStringAsync();

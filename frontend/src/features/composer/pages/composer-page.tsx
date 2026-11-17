@@ -45,7 +45,7 @@ export function ComposerPage() {
             <OptionsPanel
               isAuthenticated={composer.isAuthenticated()}
               expiryIndex={composer.expiryIndex()}
-              downloadIndex={composer.downloadIndex()}
+              accessIndex={composer.accessIndex()}
               passwordMode={composer.passwordMode()}
               customPassphrase={composer.customPassphrase()}
               customError={composer.passphraseError()}

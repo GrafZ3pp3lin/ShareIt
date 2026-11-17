@@ -14,7 +14,7 @@ export function ResultPanel(props: ResultPanelProps) {
   const summary = () =>
     t('result.summary', {
       expiry: props.result.expiryLabel,
-      downloads: props.result.downloadsLabel,
+      downloads: props.result.accessesLabel,
       password: props.result.passwordLabel
     });
 

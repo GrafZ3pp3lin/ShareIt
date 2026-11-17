@@ -29,7 +29,7 @@ export const customFetch = async <T>(url: string, options: RequestInit = {}): Pr
 
 const parseBody = async (response: Response): Promise<unknown> => {
   const contentType = response.headers.get('content-type') ?? '';
-  if (contentType.includes('application/json')) {
+  if (contentType.includes('application/json') || contentType.includes('+json')) {
     try {
       return await response.json();
     } catch {

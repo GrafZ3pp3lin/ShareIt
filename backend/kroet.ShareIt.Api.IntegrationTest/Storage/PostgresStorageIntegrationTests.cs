@@ -16,7 +16,6 @@ public class PostgresStorageIntegrationTests
 
     private SqlContentStorageHandler _contentStorageHandler = null!;
     private IMetricsSnapshotProvider _metricsSnapshotProvider = null!;
-    private SqlDownloadTokenService _downloadTokenService = null!;
     private MutableTimeProvider _timeProvider = null!;
     private DownloadSettings _downloadSettings = null!;
 
@@ -47,8 +46,7 @@ public class PostgresStorageIntegrationTests
         });
         var downloadSettings = Options.Create(new DownloadSettings
         {
-            DefaultTokenExpirationMinutes = 15,
-            UsedTokenRetentionHours = 24,
+            AccessSessionLifetimeMinutes = 15,
             ExhaustedPackageRetentionMinutes = 30
         });
         _downloadSettings = downloadSettings.Value;
@@ -60,18 +58,13 @@ public class PostgresStorageIntegrationTests
             _timeProvider,
             downloadSettings);
         _metricsSnapshotProvider = _contentStorageHandler;
-        _downloadTokenService = new SqlDownloadTokenService(
-            sqlSettings,
-            downloadSettings,
-            _timeProvider,
-            NullLogger<SqlDownloadTokenService>.Instance);
     }
 
     [TestMethod]
     public async Task StorePackageAsync_AndGetPackageAsync_RoundTripsPackageWithContent()
     {
         var lastAccessAt = DateTimeOffset.UtcNow.AddMinutes(-5);
-        var package = CreatePackage(maxDownloadCount: 3, isPrivate: true) with
+        var package = CreatePackage(maxAccessCount: 3, isPrivate: true) with
         {
             LastAccessAt = lastAccessAt
         };
@@ -85,7 +78,7 @@ public class PostgresStorageIntegrationTests
         Assert.IsNotNull(storedPackage);
         Assert.AreEqual(package.Id, storedPackage.Id);
         Assert.AreEqual(package.UnlockVerifier, storedPackage.UnlockVerifier);
-        Assert.AreEqual(package.MaxDownloadCount, storedPackage.MaxDownloadCount);
+        Assert.AreEqual(package.MaxAccessCount, storedPackage.MaxAccessCount);
         Assert.AreEqual(package.IsPrivate, storedPackage.IsPrivate);
         Assert.IsNotNull(storedPackage.LastAccessAt);
         Assert.IsTrue(
@@ -98,20 +91,20 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task IncrementPackageAccessCountAsync_ReportsWhenLimitIsReached()
+    public async Task CreateAccessSessionAsync_ReportsWhenLimitIsReached()
     {
-        var package = CreatePackage(maxDownloadCount: 2);
+        var package = CreatePackage(maxAccessCount: 2);
         await _contentStorageHandler.StorePackageAsync(package);
 
-        var firstIncrement = await _contentStorageHandler.IncrementPackageAccessCountAsync(package.Id);
-        var secondIncrement = await _contentStorageHandler.IncrementPackageAccessCountAsync(package.Id);
+        var firstIncrement = await CreateAccessSessionAsync(package.Id);
+        var secondIncrement = await CreateAccessSessionAsync(package.Id);
+        var rejected = await CreateAccessSessionAsync(package.Id);
 
         Assert.IsTrue(firstIncrement.Success);
-        Assert.AreEqual(1, firstIncrement.NewCount);
-        Assert.IsFalse(firstIncrement.LimitReached);
+        Assert.AreEqual(1, firstIncrement.NewAccessCount);
         Assert.IsTrue(secondIncrement.Success);
-        Assert.AreEqual(2, secondIncrement.NewCount);
-        Assert.IsTrue(secondIncrement.LimitReached);
+        Assert.AreEqual(2, secondIncrement.NewAccessCount);
+        Assert.IsFalse(rejected.Success);
     }
 
     [TestMethod]
@@ -133,37 +126,37 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task ValidateTokenAsync_DoesNotConsume_AndConsumeTokenAsync_AllowsSingleUse()
+    public async Task CreateAccessSessionAsync_RejectsExpiredPackage()
     {
-        var contentId = Guid.NewGuid();
-        var clientId = Guid.NewGuid();
+        var package = CreatePackage(expiresAt: _timeProvider.GetUtcNow().AddMinutes(-1));
+        await _contentStorageHandler.StorePackageAsync(package);
 
-        var token = await _downloadTokenService.GenerateTokenAsync(contentId, clientId);
-        var firstValidation = await _downloadTokenService.ValidateTokenAsync(token.Token, clientId);
-        var secondValidation = await _downloadTokenService.ValidateTokenAsync(token.Token, clientId);
-        var consumed = await _downloadTokenService.ConsumeTokenAsync(token.Token, clientId);
-        var reused = await _downloadTokenService.ConsumeTokenAsync(token.Token, clientId);
+        var claim = await CreateAccessSessionAsync(package.Id);
 
-        Assert.IsTrue(firstValidation.IsValid);
-        Assert.IsTrue(secondValidation.IsValid);
-        Assert.AreEqual(contentId, firstValidation.ContentId);
-        Assert.IsTrue(consumed.IsValid);
-        Assert.IsFalse(reused.IsValid);
-        Assert.AreEqual("Token has already been used", reused.ErrorMessage);
+        Assert.IsFalse(claim.Success);
+        var stored = await _contentStorageHandler.GetPackageShellAsync(package.Id);
+        Assert.IsNotNull(stored);
+        Assert.AreEqual(0, stored.CurrentAccessCount);
     }
 
     [TestMethod]
-    public async Task ValidateTokenAsync_ReturnsInvalidForWrongClient()
+    public async Task CreateAccessSessionAsync_RoundTripsTheSessionAndCascadesOnPackageDelete()
     {
-        var contentId = Guid.NewGuid();
-        var validClientId = Guid.NewGuid();
-        var invalidClientId = Guid.NewGuid();
+        var package = CreatePackage(maxAccessCount: 2);
+        await _contentStorageHandler.StorePackageAsync(package);
 
-        var token = await _downloadTokenService.GenerateTokenAsync(contentId, validClientId);
-        var validation = await _downloadTokenService.ValidateTokenAsync(token.Token, invalidClientId);
+        var session = NewSession(package.Id);
+        var result = await _contentStorageHandler.CreateAccessSessionAsync(session);
+        var stored = await _contentStorageHandler.GetAccessSessionByTokenHashAsync(session.TokenHash);
 
-        Assert.IsFalse(validation.IsValid);
-        Assert.AreEqual("Token is not valid for this client", validation.ErrorMessage);
+        Assert.IsTrue(result.Success);
+        Assert.IsNotNull(stored);
+        Assert.AreEqual(package.Id, stored.PackageId);
+        Assert.AreEqual(session.ClientId, stored.ClientId);
+        Assert.AreEqual(session.IsGuest, stored.IsGuest);
+
+        Assert.IsTrue(await _contentStorageHandler.DeletePackageAsync(package.Id));
+        Assert.IsNull(await _contentStorageHandler.GetAccessSessionByTokenHashAsync(session.TokenHash));
     }
 
     [TestMethod]
@@ -242,12 +235,12 @@ public class PostgresStorageIntegrationTests
     {
         var activePackage = CreatePackage();
         var expiredPackage = CreatePackage(expiresAt: DateTimeOffset.UtcNow.AddHours(-1));
-        var limitedPackage = CreatePackage(maxDownloadCount: 1);
+        var limitedPackage = CreatePackage(maxAccessCount: 1);
 
         await _contentStorageHandler.StorePackageAsync(activePackage);
         await _contentStorageHandler.StorePackageAsync(expiredPackage);
         await _contentStorageHandler.StorePackageAsync(limitedPackage);
-        await _contentStorageHandler.IncrementPackageAccessCountAsync(limitedPackage.Id);
+        await CreateAccessSessionAsync(limitedPackage.Id);
 
         // The exhausted package keeps serving its outstanding downloads for
         // the retention period and must not be cleanup-eligible yet.
@@ -329,14 +322,14 @@ public class PostgresStorageIntegrationTests
         var now = _timeProvider.GetUtcNow();
         var activePackage = CreatePackage(expiresAt: now.AddHours(1), isPrivate: true);
         var expiredPackage = CreatePackage(expiresAt: now.AddHours(-1)) with { UnlockVerifier = null };
-        var exhaustedPackage = CreatePackage(maxDownloadCount: 1) with { UnlockVerifier = null };
+        var exhaustedPackage = CreatePackage(maxAccessCount: 1) with { UnlockVerifier = null };
 
         await _contentStorageHandler.StorePackageAsync(activePackage);
         await _contentStorageHandler.StorePackageAsync(expiredPackage);
         await _contentStorageHandler.StorePackageAsync(exhaustedPackage);
         await _contentStorageHandler.StoreContentAsync(
             new ExternalContent(CreateContent(activePackage.Id), "https://blob.example/file-1"));
-        await _contentStorageHandler.IncrementPackageAccessCountAsync(exhaustedPackage.Id);
+        await CreateAccessSessionAsync(exhaustedPackage.Id);
 
         var snapshot = await _metricsSnapshotProvider.GetMetricsSnapshotAsync(now);
 
@@ -390,50 +383,51 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task ValidateTokenAsync_ReturnsInvalidForUnknownToken()
+    public async Task GetAccessSessionByTokenHashAsync_ReturnsNullForUnknownHash()
     {
-        var result = await _downloadTokenService.ValidateTokenAsync("unknown-token", Guid.NewGuid());
-
-        Assert.IsFalse(result.IsValid);
-        Assert.AreEqual("Invalid token", result.ErrorMessage);
+        Assert.IsNull(await _contentStorageHandler.GetAccessSessionByTokenHashAsync("unknown-hash"));
     }
 
     [TestMethod]
-    public async Task ValidateTokenAsync_ReturnsInvalidForExpiredToken()
+    public async Task DeleteExpiredAccessSessionsAsync_RemovesOnlyExpiredSessions()
     {
-        var token = await _downloadTokenService.GenerateTokenAsync(Guid.NewGuid(), Guid.NewGuid());
+        var package = CreatePackage(maxAccessCount: 3);
+        await _contentStorageHandler.StorePackageAsync(package);
 
-        _timeProvider.UtcNow = token.ExpiresAt.AddSeconds(1);
+        var first = NewSession(package.Id, expiresAt: _timeProvider.UtcNow.AddMinutes(15));
+        var second = NewSession(package.Id, expiresAt: _timeProvider.UtcNow.AddMinutes(30));
+        await _contentStorageHandler.CreateAccessSessionAsync(first);
+        await _contentStorageHandler.CreateAccessSessionAsync(second);
 
-        var result = await _downloadTokenService.ValidateTokenAsync(token.Token, token.ClientId);
-
-        Assert.IsFalse(result.IsValid);
-        Assert.AreEqual("Token has expired", result.ErrorMessage);
-    }
-
-    [TestMethod]
-    public async Task CleanupExpiredTokensAsync_RemovesOnlyExpiredTokens()
-    {
-        var clientId = Guid.NewGuid();
-        var secondContentId = Guid.NewGuid();
-        var firstToken = await _downloadTokenService.GenerateTokenAsync(Guid.NewGuid(), clientId);
-
-        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(10);
-        var secondToken = await _downloadTokenService.GenerateTokenAsync(secondContentId, clientId);
-
-        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(6);
-        var deleted = await _downloadTokenService.CleanupExpiredTokensAsync();
+        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(16);
+        var deleted = await _contentStorageHandler.DeleteExpiredAccessSessionsAsync(_timeProvider.UtcNow);
 
         Assert.AreEqual(1, deleted);
-        Assert.IsFalse((await _downloadTokenService.ValidateTokenAsync(firstToken.Token, clientId)).IsValid);
-
-        var stillValid = await _downloadTokenService.ConsumeTokenAsync(secondToken.Token, clientId);
-        Assert.IsTrue(stillValid.IsValid);
-        Assert.AreEqual(secondContentId, stillValid.ContentId);
+        Assert.IsNull(await _contentStorageHandler.GetAccessSessionByTokenHashAsync(first.TokenHash));
+        Assert.IsNotNull(await _contentStorageHandler.GetAccessSessionByTokenHashAsync(second.TokenHash));
     }
 
+    private Task<AccessSessionClaimResult> CreateAccessSessionAsync(Guid packageId)
+        => _contentStorageHandler.CreateAccessSessionAsync(NewSession(packageId));
+
+    private AccessSession NewSession(
+        Guid packageId,
+        Guid? clientId = null,
+        bool isGuest = false,
+        DateTimeOffset? expiresAt = null)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            PackageId = packageId,
+            ClientId = clientId ?? Guid.NewGuid(),
+            IsGuest = isGuest,
+            TokenHash = Guid.NewGuid().ToString("N"),
+            CreatedAt = _timeProvider.GetUtcNow(),
+            ExpiresAt = expiresAt ?? _timeProvider.GetUtcNow().AddMinutes(_downloadSettings.AccessSessionLifetimeMinutes)
+        };
+
     private static ContentPackage CreatePackage(
-        int? maxDownloadCount = null,
+        int? maxAccessCount = null,
         bool? isPrivate = null,
         DateTimeOffset? expiresAt = null,
         DateTimeOffset? createdAt = null,
@@ -446,7 +440,7 @@ public class PostgresStorageIntegrationTests
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             UserId = userId ?? Guid.NewGuid(),
             IsPrivate = isPrivate,
-            MaxDownloadCount = maxDownloadCount,
+            MaxAccessCount = maxAccessCount,
             ExpiresAt = expiresAt
         };
     }

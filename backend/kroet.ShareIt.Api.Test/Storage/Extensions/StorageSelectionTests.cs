@@ -5,6 +5,9 @@ using kroet.ShareIt.Api.Storage.Postgres;
 using kroet.ShareIt.Api.Storage.S3;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+
+#pragma warning disable SYSLIB0066 // IStartupValidator is what ValidateOnStart registers on this target.
 
 namespace kroet.ShareIt.Api.Test.Storage.Extensions;
 
@@ -122,32 +125,51 @@ public class StorageSelectionTests
     }
 
     [TestMethod]
-    public void AddDownloadTokenStorage_WithPostgresConfigured_RegistersSqlService()
-    {
-        var descriptor = GetSingleDescriptor(
-            services => services.AddDownloadTokenStorage(CreateConfiguration(PostgresSettings)),
-            typeof(IDownloadTokenService));
-
-        Assert.AreEqual(typeof(SqlDownloadTokenService), descriptor.ImplementationType);
-    }
-
-    [TestMethod]
-    public void AddDownloadTokenStorage_WithInMemoryConfigured_RegistersInMemoryService()
-    {
-        var descriptor = GetSingleDescriptor(
-            services => services.AddDownloadTokenStorage(CreateConfiguration(InMemorySettings)),
-            typeof(IDownloadTokenService));
-
-        Assert.AreEqual(typeof(InMemoryDownloadTokenService), descriptor.ImplementationType);
-    }
-
-    [TestMethod]
-    public void AddDownloadTokenStorage_WithNoStorageConfigured_Throws()
+    public void AddAccessSessionStorage_RegistersAccessSessionService()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(CreateConfiguration(InMemorySettings));
+        services.AddSingleton(TimeProvider.System);
+        services.AddContentStorage(CreateConfiguration(InMemorySettings));
+        services.AddAccessSessionStorage();
+        using var provider = services.BuildServiceProvider();
 
-        Assert.ThrowsExactly<InvalidOperationException>(
-            () => services.AddDownloadTokenStorage(CreateConfiguration(new Dictionary<string, string?>())));
+        Assert.IsInstanceOfType<AccessSessionService>(
+            provider.GetRequiredService<IAccessSessionService>());
+    }
+
+    [TestMethod]
+    public void AddAccessSessionStorage_BindsAndValidatesDownloadSettings()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["DownloadSettings:AccessSessionLifetimeMinutes"] = "15",
+            ["DownloadSettings:ExhaustedPackageRetentionMinutes"] = "30"
+        }));
+        services.AddAccessSessionStorage();
+        using var provider = services.BuildServiceProvider();
+
+        var settings = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<kroet.ShareIt.Api.Configuration.DownloadSettings>>();
+        Assert.AreEqual(15, settings.Value.AccessSessionLifetimeMinutes);
+        Assert.AreEqual(30, settings.Value.ExhaustedPackageRetentionMinutes);
+        provider.GetRequiredService<IStartupValidator>().Validate();
+    }
+
+    [TestMethod]
+    public void AddAccessSessionStorage_ValidateOnStartRejectsRetentionShorterThanSessionLifetime()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(CreateConfiguration(new Dictionary<string, string?>
+        {
+            ["DownloadSettings:AccessSessionLifetimeMinutes"] = "30",
+            ["DownloadSettings:ExhaustedPackageRetentionMinutes"] = "15"
+        }));
+        services.AddAccessSessionStorage();
+        using var provider = services.BuildServiceProvider();
+
+        Assert.ThrowsExactly<OptionsValidationException>(() =>
+            provider.GetRequiredService<IStartupValidator>().Validate());
     }
 
     private static ServiceDescriptor GetSingleDescriptor(

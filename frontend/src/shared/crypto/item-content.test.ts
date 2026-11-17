@@ -20,17 +20,13 @@ describe('readItemBytes', () => {
     expect(download).not.toHaveBeenCalled();
   });
 
-  it('downloads through the token when no payload is present', async () => {
+  it('downloads when no payload is present', async () => {
     const download = vi.fn(async () => new Blob([utf8('downloaded')]));
 
-    const bytes = await readItemBytes({ Id: ITEM_ID, DownloadToken: 'token-1' }, download);
+    const bytes = await readItemBytes({ Id: ITEM_ID }, download);
 
     expect(new TextDecoder().decode(bytes)).toBe('downloaded');
-    expect(download).toHaveBeenCalledWith('token-1');
-  });
-
-  it('throws when an item has neither payload nor token', async () => {
-    await expect(readItemBytes({ Id: ITEM_ID }, vi.fn())).rejects.toThrow('neither an inline payload');
+    expect(download).toHaveBeenCalledWith();
   });
 });
 

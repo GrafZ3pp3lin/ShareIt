@@ -84,16 +84,15 @@ The application instruments are emitted from the `ShareIt` meter.
 | `shareit_package_accesses_total` | counter | Successful package access claims (link opens) |
 | `shareit_items_uploaded_total{kind}` | counter | Items uploaded, split into `text` and `file` |
 | `shareit_bytes_uploaded_total` | counter | Stored item bytes uploaded |
-| `shareit_tokens_issued_total` | counter | Download tokens prepared for non-inline items |
-| `shareit_tokens_consumed_total` | counter | Download tokens consumed; authorizes a download but does not prove body transfer |
-| `shareit_bytes_authorized_total` | counter | Logical content bytes whose download was authorized by a consumed token |
+| `shareit_access_sessions_reused_total` | counter | Package reads that reused a valid access session instead of claiming another access |
+| `shareit_bytes_authorized_total` | counter | Logical content bytes whose download was authorized by an access session |
 | `shareit_unlock_failures_total` | counter | Failed unlock attempts |
-| `shareit_rate_limited_total` | counter | Requests rejected by the package read limiter |
+| `shareit_rate_limited_total` | counter | Requests rejected by the package-read or download rate limiter |
 | `shareit_packages{state}` | gauge | Package counts: `total`, `active`, `expired`, `exhausted`, `protected`, `private`, `empty` |
 | `shareit_items` | gauge | Stored content items |
 | `shareit_storage_bytes` | gauge | Logical size of stored content |
 | `shareit_cleanup_pending` | gauge | Packages currently eligible for cleanup |
-| `shareit_cleanup_last_success_timestamp_seconds` | gauge | Last run that completed token cleanup and package metadata deletion, or 0 |
+| `shareit_cleanup_last_success_timestamp_seconds` | gauge | Last run that completed session cleanup and package metadata deletion, or 0 |
 | `shareit_dependency_up{component}` | gauge | `postgres` / `s3` reachability |
 | `shareit_build_info{version,environment}` | gauge | Running build information |
 
@@ -106,18 +105,18 @@ eligible for cleanup at snapshot time, not the blob-deletion queue depth.
 
 Important distinctions:
 
-- `shareit_package_accesses_total` counts link opens, not file downloads.
-- A token is issued for each non-inline item every time a package is opened.
-  `shareit_tokens_issued_total` therefore counts prepared tokens, not completed
-  downloads.
-- `shareit_tokens_consumed_total` and `shareit_bytes_authorized_total` are
-  recorded after the token is consumed and the blob has been opened, before the
-  response body is streamed. They measure authorization, not completed
-  transfers. A client disconnect, storage failure during streaming, `HEAD`
-  request, or range response still consumes the token and records the full
-  logical content size.
+- `shareit_package_accesses_total` counts successful link opens, not file
+  downloads. A valid access session lets the same recipient re-fetch and
+  download without another claim.
+- `shareit_access_sessions_reused_total` counts re-fetches that presented a
+  valid session and therefore skipped the claim.
+- `shareit_bytes_authorized_total` is recorded after the session is validated
+  and the blob has been opened, before the response body is streamed. It
+  measures authorization, not completed transfers. A client disconnect or
+  storage failure during streaming still records the full logical content size.
+  Retries and parallel downloads are counted per authorized response.
 - Inline items are delivered in the package response and are not represented in
-  the token consumption counters.
+  the authorized-bytes counter.
 - Counters reset when the API process restarts. PromQL `increase()` and `rate()`
   handle resets; the dashboard should use those rather than reading raw
   counter totals.
@@ -129,8 +128,8 @@ Important distinctions:
 - Blob-deletion queue failures are logged and retried by cleanup. No
   blob-queue depth or failure metric is exported yet (planned for PR5).
 - The metric labels are aggregate-only. Never add package IDs, user IDs,
-  guest IDs, tokens, URLs or content to metric labels. Traces and logs are
-  per-request and may contain opaque package/content IDs, but never tokens,
+  guest IDs, access sessions, URLs or content to metric labels. Traces and logs are
+  per-request and may contain opaque package/content IDs, but never access sessions,
   unlock proofs, user/guest IDs, filenames or content.
 
 ## Traces
@@ -143,19 +142,20 @@ activity source:
 |---|---|
 | `package.create` | Create a package |
 | `package.upload` | Upload one content item |
-| `package.open` | Open a package, claim access and prepare inline/token items |
-| `package.download` | Validate a download token and open the content blob |
+| `package.open` | Open a package, reuse or claim an access session, and prepare items |
+| `package.download` | Validate an access session and open the content blob |
 | `package.delete` | Delete an owned package |
-| `cleanup.run` | Background cleanup of expired tokens and packages |
+| `cleanup.run` | Background cleanup of expired sessions and packages |
 | `metrics.snapshot` | Periodic database-derived gauge refresh |
 
 Spans carry counts and sizes such as `shareit.package.items`,
-`shareit.package.inline_items`, `shareit.package.token_items`,
-`shareit.content.kind`, `shareit.content.size_bytes` and `shareit.cleanup.*`.
-Package and content IDs are not added as separate attributes; where relevant
-they are already in the request URL recorded by ASP.NET Core. The
-`package.download` span ends after the token is consumed and the blob is
-opened; streaming the response body is outside that span.
+`shareit.package.inline_items`, `shareit.package.deferred_items`,
+`shareit.package.access_claimed`, `shareit.access.session_reused`,
+`shareit.content.kind`, `shareit.content.size_bytes` and
+`shareit.cleanup.*`. Package and content IDs are not added as separate
+attributes; where relevant they are already in the request URL recorded by
+ASP.NET Core. The `package.download` span ends after the session is validated
+and the blob is opened; streaming the response body is outside that span.
 
 Sampling is configured through the standard SDK environment variables. The
 collector stack in `kroet.server` stores traces in VictoriaTraces (14-day

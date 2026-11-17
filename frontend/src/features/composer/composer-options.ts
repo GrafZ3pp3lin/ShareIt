@@ -11,7 +11,7 @@ export const EXPIRY_OPTIONS = [
 export const DEFAULT_EXPIRY_INDEX = 2;
 export const ANONYMOUS_EXPIRY_INDEX = 0;
 
-export const DOWNLOAD_COUNT_OPTIONS = [1, 3, 5, 10, null] as const;
+export const ACCESS_COUNT_OPTIONS = [1, 3, 5, 10, null] as const;
 
-export const DEFAULT_DOWNLOAD_COUNT_INDEX = 0;
-export const ANONYMOUS_DOWNLOAD_COUNT = 1;
+export const DEFAULT_ACCESS_COUNT_INDEX = 0;
+export const ANONYMOUS_ACCESS_COUNT = 1;

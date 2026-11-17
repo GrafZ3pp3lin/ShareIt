@@ -62,6 +62,7 @@ const waitForLoaded = async (auth: Auth) => {
 describe('AuthProvider', () => {
   beforeEach(() => {
     oidc.state.enabled = false;
+    window.sessionStorage.clear();
     oidc.manager.getUser.mockReset();
     oidc.manager.getUser.mockResolvedValue(null);
     oidc.manager.signinRedirect.mockClear();
@@ -107,8 +108,9 @@ describe('AuthProvider', () => {
     expect(auth.isAuthenticated()).toBe(true);
   });
 
-  it('delegates login and logout to the user manager', async () => {
+  it('delegates login and logout to the user manager and clears tab sessions', async () => {
     oidc.state.enabled = true;
+    window.sessionStorage.setItem('shareit-access-session:pkg-1', '{"Token":"session-1"}');
 
     const { auth } = renderAuth();
     await waitForLoaded(auth);
@@ -118,6 +120,7 @@ describe('AuthProvider', () => {
 
     expect(oidc.manager.signinRedirect).toHaveBeenCalledTimes(1);
     expect(oidc.manager.signoutRedirect).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem('shareit-access-session:pkg-1')).toBeNull();
   });
 
   it('completes the callback and reloads the user', async () => {

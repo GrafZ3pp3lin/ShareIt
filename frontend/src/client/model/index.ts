@@ -5,6 +5,7 @@
  * OpenAPI spec version: 1.0.0
  */
 
+export * from './accessSessionResponse';
 export * from './contentItemInPackage';
 export * from './contentPackageDetailsResponse';
 export * from './contentPackageListItem';

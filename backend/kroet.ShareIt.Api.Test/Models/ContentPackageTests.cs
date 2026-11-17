@@ -6,17 +6,17 @@ namespace kroet.ShareIt.Api.Test.Models;
 public class ContentPackageTests
 {
     [TestMethod]
-    public void RemainingDownloads_ReturnsZeroWhenDownloadCountExceedsLimit()
+    public void RemainingAccesses_ReturnsZeroWhenDownloadCountExceedsLimit()
     {
-        var package = CreatePackage(maxDownloadCount: 3, currentDownloadCount: 5);
+        var package = CreatePackage(maxAccessCount: 3, currentAccessCount: 5);
 
-        Assert.AreEqual(0, package.RemainingDownloads);
+        Assert.AreEqual(0, package.RemainingAccesses);
     }
 
     [TestMethod]
     public void IsAccessLimitReached_ReturnsTrueWhenDownloadCountMatchesLimit()
     {
-        var package = CreatePackage(maxDownloadCount: 3, currentDownloadCount: 3);
+        var package = CreatePackage(maxAccessCount: 3, currentAccessCount: 3);
 
         Assert.IsTrue(package.IsAccessLimitReached);
     }
@@ -33,16 +33,16 @@ public class ContentPackageTests
     }
 
     private static ContentPackage CreatePackage(
-        int? maxDownloadCount = null,
-        int currentDownloadCount = 0,
+        int? maxAccessCount = null,
+        int currentAccessCount = 0,
         DateTimeOffset? expiresAt = null)
     {
         return new ContentPackage
         {
             Id = Guid.NewGuid(),
             CreatedAt = DateTimeOffset.Parse("2026-03-05T10:00:00+00:00"),
-            MaxDownloadCount = maxDownloadCount,
-            CurrentDownloadCount = currentDownloadCount,
+            MaxAccessCount = maxAccessCount,
+            CurrentAccessCount = currentAccessCount,
             ExpiresAt = expiresAt
         };
     }

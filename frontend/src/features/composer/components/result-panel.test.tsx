@@ -8,7 +8,7 @@ import type { ComposerResult } from '../use-composer.ts';
 const baseResult: ComposerResult = {
   link: 'http://localhost:3001/s/package-1',
   expiryLabel: '7 days',
-  downloadsLabel: 'once',
+  accessesLabel: 'once',
   passwordLabel: 'off',
   encrypted: false
 };

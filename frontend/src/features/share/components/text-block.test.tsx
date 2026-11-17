@@ -25,10 +25,22 @@ const item: ShareItem = {
   mime: 'text/plain'
 };
 
-const renderBlock = () =>
+const renderBlock = (
+  props: {
+    onAccessExpired?: (failedToken?: string) => void;
+    onPackageGone?: () => void;
+  } = {}
+) =>
   render(() => (
     <I18nProvider>
-      <TextBlock packageId={PACKAGE_ID} item={item} packageKey={packageKey} />
+      <TextBlock
+        packageId={PACKAGE_ID}
+        item={item}
+        packageKey={packageKey}
+        accessSessionToken="session-1"
+        onAccessExpired={props.onAccessExpired}
+        onPackageGone={props.onPackageGone}
+      />
     </I18nProvider>
   ));
 
@@ -48,8 +60,27 @@ describe('<TextBlock />', () => {
 
     expect(screen.getByText('Loading text…')).toBeInTheDocument();
     expect(await screen.findByText('hello world')).toBeInTheDocument();
-    expect(read.readShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, packageKey);
+    expect(read.readShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, packageKey, 'session-1', undefined, undefined);
     expect(screen.getByRole('button', { name: 'copy' })).toBeInTheDocument();
+  });
+
+  it('forwards the access-expired and package-gone callbacks to the reader', async () => {
+    const onAccessExpired = vi.fn();
+    const onPackageGone = vi.fn();
+    read.readShareItem.mockRejectedValueOnce(new Error('expired'));
+
+    renderBlock({ onAccessExpired, onPackageGone });
+
+    await vi.waitFor(() =>
+      expect(read.readShareItem).toHaveBeenCalledWith(
+        PACKAGE_ID,
+        item,
+        packageKey,
+        'session-1',
+        onAccessExpired,
+        onPackageGone
+      )
+    );
   });
 
   it('shows a decrypt error and reloads on retry', async () => {

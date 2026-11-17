@@ -34,10 +34,9 @@ public sealed class ShareItMetrics
     private readonly Counter<long> _packagesCreated;
     private readonly Counter<long> _packagesDeleted;
     private readonly Counter<long> _packageAccesses;
+    private readonly Counter<long> _accessSessionsReused;
     private readonly Counter<long> _itemsUploaded;
     private readonly Counter<long> _bytesUploaded;
-    private readonly Counter<long> _tokensIssued;
-    private readonly Counter<long> _tokensConsumed;
     private readonly Counter<long> _authorizedBytes;
     private readonly Counter<long> _unlockFailures;
     private readonly Counter<long> _rateLimited;
@@ -75,6 +74,11 @@ public sealed class ShareItMetrics
             unit: "{access}",
             description: "Number of package access claims.");
 
+        _accessSessionsReused = meter.CreateCounter<long>(
+            "shareit.access.sessions_reused",
+            unit: "{request}",
+            description: "Number of package reads that reused an existing access session instead of claiming another access.");
+
         _itemsUploaded = meter.CreateCounter<long>(
             "shareit.items.uploaded",
             unit: "{item}",
@@ -85,20 +89,10 @@ public sealed class ShareItMetrics
             unit: "By",
             description: "Number of content bytes uploaded.");
 
-        _tokensIssued = meter.CreateCounter<long>(
-            "shareit.tokens.issued",
-            unit: "{token}",
-            description: "Number of download tokens issued for non-inline content.");
-
-        _tokensConsumed = meter.CreateCounter<long>(
-            "shareit.tokens.consumed",
-            unit: "{token}",
-            description: "Number of download tokens successfully consumed. Consumption authorizes a download but does not prove the response body was sent.");
-
         _authorizedBytes = meter.CreateCounter<long>(
             "shareit.bytes.authorized",
             unit: "By",
-            description: "Logical content size whose download was authorized by consuming a download token. The full content size is recorded even for range responses.");
+            description: "Logical content size whose download was authorized by an access session. The full content size is recorded even if the response is interrupted.");
 
         _unlockFailures = meter.CreateCounter<long>(
             "shareit.unlock.failures",
@@ -108,7 +102,7 @@ public sealed class ShareItMetrics
         _rateLimited = meter.CreateCounter<long>(
             "shareit.rate.limited",
             unit: "{request}",
-            description: "Number of requests rejected by the package read rate limiter.");
+            description: "Number of requests rejected by the package-read or download rate limiter.");
 
         _packages = meter.CreateObservableGauge(
             "shareit.packages",
@@ -174,6 +168,11 @@ public sealed class ShareItMetrics
         _packageAccesses.Add(1);
     }
 
+    public void AccessSessionReused()
+    {
+        _accessSessionsReused.Add(1);
+    }
+
     public void ItemUploaded(ContentType contentType, long size)
     {
         var kind = contentType == ContentType.Text ? "text" : "file";
@@ -181,14 +180,8 @@ public sealed class ShareItMetrics
         _bytesUploaded.Add(size);
     }
 
-    public void TokenIssued()
-    {
-        _tokensIssued.Add(1);
-    }
-
     public void DownloadAuthorized(long authorizedBytes)
     {
-        _tokensConsumed.Add(1);
         _authorizedBytes.Add(authorizedBytes);
     }
 

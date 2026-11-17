@@ -22,7 +22,7 @@ public sealed class PackageReadRateLimitTests : ShareItApiTestBase
     {
         var ownerId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            userId: ownerId, maxDownloadCount: null, timeToLiveHours: null);
+            userId: ownerId, maxAccessCount: null, timeToLiveHours: null);
 
         var guestId = Guid.NewGuid();
         for (var attempt = 1; attempt <= 2; attempt++)
@@ -44,7 +44,7 @@ public sealed class PackageReadRateLimitTests : ShareItApiTestBase
     {
         var guestId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxDownloadCount: 1, unlockVerifier: Verifier());
+            guestId: guestId, maxAccessCount: 1, unlockVerifier: Verifier());
 
         for (var attempt = 1; attempt <= 2; attempt++)
         {

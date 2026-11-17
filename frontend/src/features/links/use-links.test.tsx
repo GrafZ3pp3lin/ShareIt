@@ -35,9 +35,9 @@ const makePackage = (id: string, overrides: Partial<PackageSummary> = {}): Packa
   ExpiresAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
   ItemCount: 1,
   TotalSize: 1024,
-  MaxDownloadCount: 1,
-  CurrentDownloadCount: 0,
-  RemainingDownloads: 1,
+  MaxAccessCount: 1,
+  CurrentAccessCount: 0,
+  RemainingAccesses: 1,
   IsExpired: false,
   IsProtected: false,
   ...overrides

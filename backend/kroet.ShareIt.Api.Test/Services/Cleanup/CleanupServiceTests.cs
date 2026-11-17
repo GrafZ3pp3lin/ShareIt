@@ -18,7 +18,7 @@ namespace kroet.ShareIt.Api.Test.Services.Cleanup;
 [TestClass]
 public class CleanupServiceTests
 {
-    private readonly IDownloadTokenService _tokenService = Substitute.For<IDownloadTokenService>();
+    private readonly IAccessSessionService _accessSessionService = Substitute.For<IAccessSessionService>();
     private readonly IContentStorageHandler _contentStorageHandler = Substitute.For<IContentStorageHandler>();
     private readonly IStorageHandler _storageHandler = Substitute.For<IStorageHandler>();
     private readonly IServiceScope _scope = Substitute.For<IServiceScope>();
@@ -30,7 +30,7 @@ public class CleanupServiceTests
 
     public CleanupServiceTests()
     {
-        _scopeProvider.GetService(typeof(IDownloadTokenService)).Returns(_tokenService);
+        _scopeProvider.GetService(typeof(IAccessSessionService)).Returns(_accessSessionService);
         _scopeProvider.GetService(typeof(IContentStorageHandler)).Returns(_contentStorageHandler);
         _scopeProvider.GetService(typeof(IStorageHandler)).Returns(_storageHandler);
         _scope.ServiceProvider.Returns(_scopeProvider);
@@ -49,11 +49,11 @@ public class CleanupServiceTests
     }
 
     [TestMethod]
-    public async Task RunCleanupAsync_DeletesExpiredTokensAndPackages()
+    public async Task RunCleanupAsync_DeletesExpiredSessionsAndPackages()
     {
         var firstPackageId = Guid.NewGuid();
         var secondPackageId = Guid.NewGuid();
-        _tokenService.CleanupExpiredTokensAsync(Arg.Any<CancellationToken>()).Returns(2);
+        _accessSessionService.CleanupExpiredAsync(Arg.Any<CancellationToken>()).Returns(2);
         _contentStorageHandler.GetPackagesToDeleteAsync(Arg.Any<CancellationToken>())
             .Returns([firstPackageId, secondPackageId]);
         _storageHandler.DeletePackagesAsync(
@@ -62,7 +62,7 @@ public class CleanupServiceTests
 
         await InvokeRunCleanupAsync();
 
-        await _tokenService.Received(1).CleanupExpiredTokensAsync(Arg.Any<CancellationToken>());
+        await _accessSessionService.Received(1).CleanupExpiredAsync(Arg.Any<CancellationToken>());
         await _storageHandler.Received(1).DeletePackagesAsync(
             Arg.Is<IEnumerable<Guid>>(ids => ids.SequenceEqual(new[] { firstPackageId, secondPackageId })),
             Arg.Any<CancellationToken>());
@@ -73,7 +73,7 @@ public class CleanupServiceTests
     [TestMethod]
     public async Task RunCleanupAsync_WhenPackageDeletionFails_DoesNotThrow()
     {
-        _tokenService.CleanupExpiredTokensAsync(Arg.Any<CancellationToken>()).Returns(1);
+        _accessSessionService.CleanupExpiredAsync(Arg.Any<CancellationToken>()).Returns(1);
         _contentStorageHandler.GetPackagesToDeleteAsync(Arg.Any<CancellationToken>())
             .Returns([Guid.NewGuid()]);
         _storageHandler.DeletePackagesAsync(
@@ -83,7 +83,7 @@ public class CleanupServiceTests
 
         await InvokeRunCleanupAsync();
 
-        await _tokenService.Received(1).CleanupExpiredTokensAsync(Arg.Any<CancellationToken>());
+        await _accessSessionService.Received(1).CleanupExpiredAsync(Arg.Any<CancellationToken>());
         await _storageHandler.Received(1).DeletePackagesAsync(
             Arg.Any<IEnumerable<Guid>>(),
             Arg.Any<CancellationToken>());
@@ -103,13 +103,13 @@ public class CleanupServiceTests
 
         await (Task)executeMethod.Invoke(_subject, [cancellationTokenSource.Token])!;
 
-        await _tokenService.DidNotReceiveWithAnyArgs().CleanupExpiredTokensAsync(default);
+        await _accessSessionService.DidNotReceiveWithAnyArgs().CleanupExpiredAsync(default);
     }
 
     [TestMethod]
     public async Task RunCleanupAsync_EmitsCleanupSpanWithCounts()
     {
-        _tokenService.CleanupExpiredTokensAsync(Arg.Any<CancellationToken>()).Returns(42);
+        _accessSessionService.CleanupExpiredAsync(Arg.Any<CancellationToken>()).Returns(42);
         _contentStorageHandler.GetPackagesToDeleteAsync(Arg.Any<CancellationToken>())
             .Returns([Guid.NewGuid(), Guid.NewGuid()]);
         _storageHandler.DeletePackagesAsync(
@@ -133,7 +133,7 @@ public class CleanupServiceTests
 
         var span = activities.SingleOrDefault(activity =>
             activity.OperationName == "cleanup.run" &&
-            activity.GetTagItem("shareit.cleanup.tokens_deleted") is 42L);
+            activity.GetTagItem("shareit.cleanup.sessions_deleted") is 42L);
         Assert.IsNotNull(span);
         Assert.AreEqual(2, span.GetTagItem("shareit.cleanup.packages_pending"));
         Assert.AreEqual(1, span.GetTagItem("shareit.cleanup.packages_deleted"));
@@ -143,10 +143,15 @@ public class CleanupServiceTests
     }
 
     [TestMethod]
-    public async Task RunCleanupAsync_WhenTokenCleanupFails_EmitsErrorSpan()
+    public async Task RunCleanupAsync_WhenSessionCleanupFails_ContinuesWithPackagesButDoesNotRecordHeartbeat()
     {
-        _tokenService.CleanupExpiredTokensAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<long>(new InvalidOperationException("token cleanup failed")));
+        _accessSessionService.CleanupExpiredAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<long>(new InvalidOperationException("session cleanup failed")));
+        _contentStorageHandler.GetPackagesToDeleteAsync(Arg.Any<CancellationToken>())
+            .Returns([Guid.NewGuid()]);
+        _storageHandler.DeletePackagesAsync(
+            Arg.Any<IEnumerable<Guid>>(),
+            Arg.Any<CancellationToken>()).Returns(1);
 
         var activities = new ConcurrentBag<Activity>();
         using var listener = new ActivityListener
@@ -160,19 +165,22 @@ public class CleanupServiceTests
 
         await InvokeRunCleanupAsync();
 
+        await _storageHandler.Received(1).DeletePackagesAsync(
+            Arg.Any<IEnumerable<Guid>>(),
+            Arg.Any<CancellationToken>());
+        await _storageHandler.Received(1).ProcessPendingBlobDeletionsAsync(Arg.Any<CancellationToken>());
+
         var span = activities.SingleOrDefault(activity =>
             activity.OperationName == "cleanup.run" &&
-            activity.StatusDescription == "cleanup failed");
+            activity.GetTagItem("shareit.cleanup.session_cleanup_succeeded") is false);
         Assert.IsNotNull(span);
-        Assert.AreEqual(ActivityStatusCode.Error, span.Status);
-        Assert.AreEqual(false, span.GetTagItem("shareit.cleanup.succeeded"));
         Assert.AreEqual(0, _heartbeat.LastSuccessUnixSeconds);
     }
 
     [TestMethod]
     public async Task RunCleanupAsync_WhenBlobQueueDrainFails_StillEmitsDeletedMetricAndHeartbeat()
     {
-        _tokenService.CleanupExpiredTokensAsync(Arg.Any<CancellationToken>()).Returns(0);
+        _accessSessionService.CleanupExpiredAsync(Arg.Any<CancellationToken>()).Returns(0);
         _contentStorageHandler.GetPackagesToDeleteAsync(Arg.Any<CancellationToken>())
             .Returns([Guid.NewGuid(), Guid.NewGuid()]);
         _storageHandler.DeletePackagesAsync(

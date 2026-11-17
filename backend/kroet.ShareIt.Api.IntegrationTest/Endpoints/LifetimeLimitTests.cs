@@ -28,8 +28,8 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
         var limits = await ReadJsonAsync<kroet.ShareIt.Api.Content.Dtos.UploadLimitsResponse>(response);
         Assert.AreEqual(6, limits.AnonymousMaxLifetimeHours);
         Assert.AreEqual(24, limits.AuthenticatedMaxLifetimeHours);
-        Assert.AreEqual(1, limits.AnonymousMaxDownloadCount);
-        Assert.AreEqual(10, limits.AuthenticatedMaxDownloadCount);
+        Assert.AreEqual(1, limits.AnonymousMaxAccessCount);
+        Assert.AreEqual(10, limits.AuthenticatedMaxAccessCount);
     }
 
     [TestMethod]

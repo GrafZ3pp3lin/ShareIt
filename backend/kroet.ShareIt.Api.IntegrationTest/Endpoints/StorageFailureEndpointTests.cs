@@ -88,7 +88,7 @@ public sealed class DeleteFailureEndpointTests : ShareItApiTestBase
     public async Task DeletePackage_WhenStorageDeleteFails_Returns500AndKeepsPackage()
     {
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+        var packageId = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
         var response = await DeletePackageAsync(packageId, userId: ownerId);
 
@@ -126,7 +126,7 @@ public sealed class BlobDeletionFailureEndpointTests : ShareItApiTestBase
     {
         var ownerId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            userId: ownerId, maxDownloadCount: 10, timeToLiveHours: 24);
+            userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
         var response = await DeletePackageAsync(packageId, userId: ownerId);
         var body = await response.Content.ReadAsStringAsync();

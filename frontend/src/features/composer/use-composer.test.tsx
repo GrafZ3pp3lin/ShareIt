@@ -52,8 +52,8 @@ const uploadLimits = (anonymousFileLimitBytes: number) => ({
   AuthenticatedFileLimitBytes: 10 * 1024 * 1024,
   AnonymousMaxLifetimeHours: 6,
   AuthenticatedMaxLifetimeHours: 720,
-  AnonymousMaxDownloadCount: 1,
-  AuthenticatedMaxDownloadCount: 10
+  AnonymousMaxAccessCount: 1,
+  AuthenticatedMaxAccessCount: 10
 });
 
 const addedItem = (callIndex: number) => api.uploadItem.mock.calls[callIndex][1];
@@ -86,7 +86,7 @@ describe('createComposer', () => {
     expect(request.Id).toMatch(UUID);
     expect(request.UnlockVerifier).toBeNull();
     expect(request.TimeToLiveHours).toBe(6);
-    expect(request.MaxDownloadCount).toBe(1);
+    expect(request.MaxAccessCount).toBe(1);
 
     expect(api.uploadItem).toHaveBeenCalledTimes(2);
     expect(addedItem(0).Kind).toBe('text');
@@ -172,7 +172,7 @@ describe('createComposer', () => {
     const composer = renderComposer();
 
     expect(composer.isAuthenticated()).toBe(true);
-    expect(composer.downloadsLabel()).toBe('once');
+    expect(composer.accessesLabel()).toBe('once');
     expect(composer.expiryLabel()).toBe('7 days');
   });
 
@@ -300,16 +300,16 @@ describe('createComposer', () => {
     flush();
 
     expect(composer.expiryLabel()).toBe('30 days');
-    expect(composer.downloadsLabel()).toBe('unlimited');
+    expect(composer.accessesLabel()).toBe('unlimited');
 
     composer.handleSubmit();
     await vi.waitFor(() => expect(composer.stage()).toBe('result'));
 
     const request = api.createPackage.mock.calls[0][0];
     expect(request.TimeToLiveHours).toBe(720);
-    expect(request.MaxDownloadCount).toBeNull();
+    expect(request.MaxAccessCount).toBeNull();
     expect(composer.result()?.expiryLabel).toBe('30 days');
-    expect(composer.result()?.downloadsLabel).toBe('unlimited');
+    expect(composer.result()?.accessesLabel).toBe('unlimited');
   });
 
   it('reports upload progress from the XHR callback', async () => {

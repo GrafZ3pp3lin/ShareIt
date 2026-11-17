@@ -24,10 +24,22 @@ const item: ShareItem = {
   mime: 'application/pdf'
 };
 
-const renderRow = () =>
+const renderRow = (
+  props: {
+    onAccessExpired?: (failedToken?: string) => void;
+    onPackageGone?: () => void;
+  } = {}
+) =>
   render(() => (
     <I18nProvider>
-      <FileRow packageId={PACKAGE_ID} item={item} packageKey={undefined} />
+      <FileRow
+        packageId={PACKAGE_ID}
+        item={item}
+        packageKey={undefined}
+        accessSessionToken="session-1"
+        onAccessExpired={props.onAccessExpired}
+        onPackageGone={props.onPackageGone}
+      />
     </I18nProvider>
   ));
 
@@ -55,7 +67,9 @@ describe('<FileRow />', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'download' }));
 
-    await vi.waitFor(() => expect(read.readShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, undefined));
+    await vi.waitFor(() =>
+      expect(read.readShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, undefined, 'session-1', undefined, undefined)
+    );
     await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
     const blob = createObjectURL.mock.calls[0][0];
     expect(blob).toBeInstanceOf(Blob);
@@ -63,6 +77,26 @@ describe('<FileRow />', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock');
     expect(screen.getByRole('button', { name: 'download' })).toBeInTheDocument();
+  });
+
+  it('forwards the access-expired and package-gone callbacks to the reader', async () => {
+    const onAccessExpired = vi.fn();
+    const onPackageGone = vi.fn();
+    read.readShareItem.mockRejectedValueOnce(new Error('expired'));
+    renderRow({ onAccessExpired, onPackageGone });
+
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    await vi.waitFor(() =>
+      expect(read.readShareItem).toHaveBeenCalledWith(
+        PACKAGE_ID,
+        item,
+        undefined,
+        'session-1',
+        onAccessExpired,
+        onPackageGone
+      )
+    );
   });
 
   it('shows a loading state while the download is in flight', async () => {
@@ -85,14 +119,14 @@ describe('<FileRow />', () => {
   });
 
   it('keeps the error on the row and retries the same item', async () => {
-    read.readShareItem.mockRejectedValueOnce(new Error('token expired')).mockResolvedValueOnce(utf8('file-bytes'));
+    read.readShareItem.mockRejectedValueOnce(new Error('session expired')).mockResolvedValueOnce(utf8('file-bytes'));
     renderRow();
 
     fireEvent.click(screen.getByRole('button', { name: 'download' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Download failed.');
-    expect(alert).toHaveTextContent('token expired');
+    expect(alert).toHaveTextContent('session expired');
     expect(screen.getByRole('button', { name: 'retry' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'retry' }));

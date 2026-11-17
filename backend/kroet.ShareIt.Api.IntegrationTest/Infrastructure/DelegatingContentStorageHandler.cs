@@ -50,10 +50,20 @@ internal sealed class DelegatingContentStorageHandler(
         CancellationToken cancellationToken = default)
         => inner.GetContentsAsync(contentIds, cancellationToken);
 
-    public Task<DownloadIncrementResult> IncrementPackageAccessCountAsync(
-        Guid packageId,
+    public Task<AccessSessionClaimResult> CreateAccessSessionAsync(
+        AccessSession session,
         CancellationToken cancellationToken = default)
-        => inner.IncrementPackageAccessCountAsync(packageId, cancellationToken);
+        => inner.CreateAccessSessionAsync(session, cancellationToken);
+
+    public Task<AccessSession?> GetAccessSessionByTokenHashAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default)
+        => inner.GetAccessSessionByTokenHashAsync(tokenHash, cancellationToken);
+
+    public Task<long> DeleteExpiredAccessSessionsAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+        => inner.DeleteExpiredAccessSessionsAsync(now, cancellationToken);
 
     public Task<int> DeletePackagesAsync(IEnumerable<Guid> packageIds, CancellationToken cancellationToken = default)
         => inner.DeletePackagesAsync(packageIds, cancellationToken);

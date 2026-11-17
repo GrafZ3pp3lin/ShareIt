@@ -31,7 +31,7 @@ public sealed class ProofLogLeakTests : ShareItApiTestBase
 
         var ownerId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            userId: ownerId, maxDownloadCount: 1, timeToLiveHours: 1, unlockVerifier: Verifier());
+            userId: ownerId, maxAccessCount: 1, timeToLiveHours: 1, unlockVerifier: Verifier());
 
         var proof = Verifier(7);
         var response = await GetPackageAsync(packageId, guestId: Guid.NewGuid(), unlockProof: proof);

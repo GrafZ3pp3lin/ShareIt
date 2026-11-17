@@ -29,7 +29,7 @@ public abstract class ShareItApiTestBase
 
     /// <summary>
     /// Larger than the default 16 KB inline payload limit, so this item is
-    /// always served through a download token.
+    /// always served through the package access session.
     /// </summary>
     protected static readonly byte[] LargeItemBytes = new byte[20 * 1024];
 
@@ -103,7 +103,7 @@ public abstract class ShareItApiTestBase
     /// </summary>
     protected static CreatePackageRequest PackageRequest(
         Guid? packageId = null,
-        int? maxDownloadCount = 1,
+        int? maxAccessCount = 1,
         bool? isPrivate = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
@@ -111,7 +111,7 @@ public abstract class ShareItApiTestBase
         {
             Id = packageId ?? Guid.NewGuid(),
             UnlockVerifier = unlockVerifier,
-            MaxDownloadCount = maxDownloadCount,
+            MaxAccessCount = maxAccessCount,
             TimeToLiveHours = timeToLiveHours,
             IsPrivate = isPrivate
         };
@@ -121,14 +121,14 @@ public abstract class ShareItApiTestBase
     /// </summary>
     protected Task<HttpResponseMessage> SendCreatePackageAsync(
         Guid? packageId = null,
-        int? maxDownloadCount = 1,
+        int? maxAccessCount = 1,
         bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
         => SendCreatePackageAsync(
-            PackageRequest(packageId, maxDownloadCount, isPrivate, timeToLiveHours, unlockVerifier),
+            PackageRequest(packageId, maxAccessCount, isPrivate, timeToLiveHours, unlockVerifier),
             guestId,
             userId);
 
@@ -151,7 +151,7 @@ public abstract class ShareItApiTestBase
     /// </summary>
     protected async Task<Guid> CreatePackageAsync(
         Guid? packageId = null,
-        int? maxDownloadCount = 1,
+        int? maxAccessCount = 1,
         bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
@@ -159,7 +159,7 @@ public abstract class ShareItApiTestBase
         string? unlockVerifier = null)
     {
         var response = await SendCreatePackageAsync(
-            packageId, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
+            packageId, maxAccessCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
@@ -176,7 +176,7 @@ public abstract class ShareItApiTestBase
         string meta = "bWV0YQ",
         Guid? packageId = null,
         Guid? contentId = null,
-        int? maxDownloadCount = 1,
+        int? maxAccessCount = 1,
         bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
@@ -184,7 +184,7 @@ public abstract class ShareItApiTestBase
         string? unlockVerifier = null)
     {
         var createdPackageId = await CreatePackageAsync(
-            packageId, maxDownloadCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
+            packageId, maxAccessCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
 
         var createdContentId = contentId ?? Guid.NewGuid();
         var response = await SendUploadItemAsync(
@@ -254,13 +254,18 @@ public abstract class ShareItApiTestBase
         Guid packageId,
         Guid? guestId = null,
         Guid? userId = null,
-        string? unlockProof = null)
+        string? unlockProof = null,
+        string? accessSession = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/content/package/{packageId}");
         AddIdentity(request, guestId, userId);
         if (unlockProof is not null)
         {
             request.Headers.Add("X-Unlock-Proof", unlockProof);
+        }
+        if (accessSession is not null)
+        {
+            request.Headers.Add("X-Access-Session", accessSession);
         }
 
         return Client.SendAsync(request);
@@ -273,9 +278,10 @@ public abstract class ShareItApiTestBase
         Guid packageId,
         Guid? guestId = null,
         Guid? userId = null,
-        string? unlockProof = null)
+        string? unlockProof = null,
+        string? accessSession = null)
     {
-        var response = await GetPackageAsync(packageId, guestId, userId, unlockProof);
+        var response = await GetPackageAsync(packageId, guestId, userId, unlockProof, accessSession);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
@@ -308,19 +314,30 @@ public abstract class ShareItApiTestBase
         return Client.SendAsync(request);
     }
 
+    protected static string DownloadUrl(Guid packageId, Guid contentId)
+        => $"/api/v1/content/package/{packageId}/content/{contentId}/download";
+
     /// <summary>
-    /// Fetches a content item via its download token.
+    /// Fetches a content item with the package's access session.
     /// </summary>
-    protected Task<HttpResponseMessage> SendDownloadAsync(string downloadUrl, string? token, Guid? guestId)
+    protected Task<HttpResponseMessage> SendDownloadAsync(
+        string downloadUrl,
+        string? accessSession,
+        Guid? guestId,
+        Guid? userId = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
-        if (token is not null)
+        if (accessSession is not null)
         {
-            request.Headers.Add("X-File-Token", token);
+            request.Headers.Add("X-Access-Session", accessSession);
         }
         if (guestId.HasValue)
         {
             request.Headers.Add("X-Guest-ID", guestId.Value.ToString());
+        }
+        if (userId.HasValue)
+        {
+            request.Headers.Add(TestAuthHandler.UserIdHeader, userId.Value.ToString());
         }
         return Client.SendAsync(request);
     }

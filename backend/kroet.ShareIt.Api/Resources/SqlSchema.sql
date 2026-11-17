@@ -7,20 +7,20 @@ CREATE TABLE IF NOT EXISTS content_packages (
     created_at TIMESTAMPTZ NOT NULL,
     user_id UUID,
     is_private BOOLEAN,
-    max_download_count INT,
-    current_download_count INT NOT NULL DEFAULT 0,
+    max_access_count INT,
+    current_access_count INT NOT NULL DEFAULT 0,
     last_access_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
     unlock_verifier TEXT,
-    CONSTRAINT chk_download_count CHECK (current_download_count >= 0),
-    CONSTRAINT chk_max_download_count CHECK (max_download_count IS NULL OR max_download_count > 0)
+    CONSTRAINT chk_access_count CHECK (current_access_count >= 0),
+    CONSTRAINT chk_max_access_count CHECK (max_access_count IS NULL OR max_access_count > 0)
 );
 
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_packages_user_id ON content_packages(user_id);
 CREATE INDEX IF NOT EXISTS idx_packages_expires_at ON content_packages(expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_packages_download_limit ON content_packages(current_download_count, max_download_count)
-    WHERE max_download_count IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_packages_access_limit ON content_packages(current_access_count, max_access_count)
+    WHERE max_access_count IS NOT NULL;
 
 -- Keyset pagination for the owner's links list: newest first.
 CREATE INDEX IF NOT EXISTS idx_packages_user_created
@@ -28,14 +28,14 @@ CREATE INDEX IF NOT EXISTS idx_packages_user_created
     WHERE user_id IS NOT NULL;
 
 -- Index for cleanup queries (finding expired or limit-reached packages).
-CREATE INDEX IF NOT EXISTS idx_packages_for_cleanup ON content_packages(expires_at, current_download_count, max_download_count);
+CREATE INDEX IF NOT EXISTS idx_packages_for_cleanup ON content_packages(expires_at, current_access_count, max_access_count);
 
 -- Restricting the index to exhausted packages keeps it small and lets the
 -- retention predicate use an index range scan.
 CREATE INDEX IF NOT EXISTS idx_packages_exhausted_cleanup
     ON content_packages (last_access_at)
-    WHERE max_download_count IS NOT NULL
-      AND current_download_count >= max_download_count;
+    WHERE max_access_count IS NOT NULL
+      AND current_access_count >= max_access_count;
 
 
 -- Table for external content metadata
@@ -68,21 +68,20 @@ CREATE TABLE IF NOT EXISTS blob_deletion_jobs (
 CREATE INDEX IF NOT EXISTS idx_blob_deletion_jobs_created_at ON blob_deletion_jobs(created_at);
 
 
--- Table for download tokens
-CREATE TABLE IF NOT EXISTS download_tokens (
+-- Access sessions are created atomically with the package access claim. Only
+-- the SHA-256 token hash is stored; the token itself is returned to the client
+-- once and never written to the database or logs.
+CREATE TABLE IF NOT EXISTS access_sessions (
     id UUID PRIMARY KEY,
-    content_id UUID NOT NULL,
-    token VARCHAR(64) NOT NULL,
+    package_id UUID NOT NULL,
+    client_id UUID NOT NULL,
+    is_guest BOOLEAN NOT NULL,
+    token_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
-    client_id UUID NOT NULL,
-    is_used BOOLEAN NOT NULL DEFAULT false,
-    used_at TIMESTAMPTZ,
-    CONSTRAINT uq_download_token UNIQUE (token)
+    FOREIGN KEY (package_id) REFERENCES content_packages(id) ON DELETE CASCADE,
+    CONSTRAINT uq_access_session_token_hash UNIQUE (token_hash)
 );
 
--- Indexes for download tokens
-CREATE INDEX IF NOT EXISTS idx_download_tokens_token ON download_tokens(token) WHERE not is_used;
-CREATE INDEX IF NOT EXISTS idx_download_tokens_expires_at ON download_tokens(expires_at);
-CREATE INDEX IF NOT EXISTS idx_download_tokens_content_id ON download_tokens(content_id);
-CREATE INDEX IF NOT EXISTS idx_download_tokens_cleanup ON download_tokens(expires_at, is_used, used_at);
+CREATE INDEX IF NOT EXISTS idx_access_sessions_package_id ON access_sessions(package_id);
+CREATE INDEX IF NOT EXISTS idx_access_sessions_expires_at ON access_sessions(expires_at);

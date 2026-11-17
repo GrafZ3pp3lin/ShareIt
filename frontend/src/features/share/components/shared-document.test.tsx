@@ -25,7 +25,6 @@ const fileItem: ShareItem = {
   Kind: 'file',
   Size: 1024,
   Payload: null,
-  DownloadToken: 'token-1',
   index: 1,
   decodedMeta: { name: 'report.pdf', mime: 'application/pdf' },
   displayName: 'report.pdf',
@@ -36,16 +35,25 @@ const packageDetails = (overrides: Partial<ContentPackageResponse> = {}): Conten
   Id: PACKAGE_ID,
   CreatedAt: '2026-11-04T12:00:00Z',
   ItemCount: 2,
-  MaxDownloadCount: 1,
-  CurrentDownloadCount: 0,
-  RemainingDownloads: null,
+  MaxAccessCount: 1,
+  CurrentAccessCount: 0,
+  RemainingAccesses: null,
   ...overrides
 });
 
 const renderDocument = (items: ShareItem[], overrides: Partial<ContentPackageResponse> = {}) =>
   render(() => (
     <I18nProvider>
-      <SharedDocument package={packageDetails(overrides)} items={items} packageId={PACKAGE_ID} packageKey={undefined} />
+      <SharedDocument
+        package={packageDetails(overrides)}
+        items={items}
+        packageId={PACKAGE_ID}
+        packageKey={undefined}
+        accessSessionToken="session-1"
+        accessSessionExpiresAt={new Date(Date.now() + 15 * 60 * 1000).toISOString()}
+        onAccessExpired={() => undefined}
+        onPackageGone={() => undefined}
+      />
     </I18nProvider>
   ));
 
@@ -56,16 +64,16 @@ describe('<SharedDocument />', () => {
     expect(await screen.findByText('hello')).toBeInTheDocument();
     expect(screen.getByText('report.pdf')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'download' })).toBeInTheDocument();
-    expect(screen.getByText('1 text · 1 file · 1.0 KB · unlimited downloads')).toBeInTheDocument();
-    expect(screen.getByText(/Unlocking used one access/)).toBeInTheDocument();
+    expect(screen.getByText('1 text · 1 file · 1.0 KB · unlimited accesses')).toBeInTheDocument();
+    expect(screen.getByText(/This access is valid until \d{1,2}:\d{2}/)).toBeInTheDocument();
   });
 
-  it('uses the singular download label and a relative expiry', () => {
+  it('uses the singular access label and a relative expiry', () => {
     renderDocument([], {
       ExpiresAt: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
-      RemainingDownloads: 1
+      RemainingAccesses: 1
     });
 
-    expect(screen.getByText('expires in 2 h · 1 download left')).toBeInTheDocument();
+    expect(screen.getByText('expires in 2 h · 1 access left')).toBeInTheDocument();
   });
 });

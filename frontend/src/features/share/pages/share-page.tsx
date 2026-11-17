@@ -35,6 +35,10 @@ export function SharePage() {
           items={share.items()}
           packageId={share.packageId()}
           packageKey={share.packageKey()}
+          accessSessionToken={share.accessSessionToken()}
+          accessSessionExpiresAt={details().AccessSession.ExpiresAt}
+          onAccessExpired={share.sessionExpired}
+          onPackageGone={share.packageGone}
         />
       )}
     </Show>

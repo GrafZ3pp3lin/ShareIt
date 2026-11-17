@@ -14,10 +14,4 @@ export interface ContentItemInPackage {
   Meta?: string | null;
   /** @nullable */
   Payload?: string | null;
-  /** @nullable */
-  DownloadToken?: string | null;
-  /** @nullable */
-  DownloadUrl?: string | null;
-  /** @nullable */
-  TokenExpiresAt?: string | null;
 }

@@ -41,12 +41,12 @@ public record ContentPackage
     /// Maximum number of times this package can be accessed.
     /// Null means unlimited access.
     /// </summary>
-    public int? MaxDownloadCount { get; init; }
+    public int? MaxAccessCount { get; init; }
 
     /// <summary>
     /// Current number of times this package has been accessed.
     /// </summary>
-    public int CurrentDownloadCount { get; init; }
+    public int CurrentAccessCount { get; init; }
 
     /// <summary>
     /// Timestamp of the most recent successful access claim. Cleanup uses this
@@ -64,14 +64,14 @@ public record ContentPackage
     /// Gets the remaining number of accesses available.
     /// Null if unlimited.
     /// </summary>
-    public int? RemainingDownloads => MaxDownloadCount.HasValue 
-        ? Math.Max(0, MaxDownloadCount.Value - CurrentDownloadCount) 
+    public int? RemainingAccesses => MaxAccessCount.HasValue
+        ? Math.Max(0, MaxAccessCount.Value - CurrentAccessCount)
         : null;
 
     /// <summary>
     /// Whether the access limit has been reached.
     /// </summary>
-    public bool IsAccessLimitReached => MaxDownloadCount.HasValue && CurrentDownloadCount >= MaxDownloadCount.Value;
+    public bool IsAccessLimitReached => MaxAccessCount.HasValue && CurrentAccessCount >= MaxAccessCount.Value;
 
     /// <summary>
     /// Whether the package has expired.

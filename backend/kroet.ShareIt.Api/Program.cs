@@ -66,8 +66,9 @@ try
         .ValidateOnStart();
 
     // Rate limiting for package reads: partitioned on (package id, remote IP),
-    // so unlocking counts towards the same budget as failed attempts and one
-    // NAT cannot lock everyone out.
+    // so unlocking counts towards the same budget as failed attempts.
+    // Downloads are limited per remote IP: the package id is client-supplied
+    // and would create unbounded limiter partitions.
     builder.Services.AddOptions<RateLimitSettings>()
         .BindConfiguration(RateLimitSettings.SectionName)
         .ValidateWithFluentValidator<RateLimitSettings, RateLimitSettingsValidator>()
@@ -89,6 +90,20 @@ try
                 {
                     PermitLimit = rateLimitSettings.PackageReadPermitLimit,
                     Window = TimeSpan.FromMinutes(rateLimitSettings.PackageReadWindowMinutes),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
+        options.AddPolicy(RateLimitPolicies.Download, httpContext =>
+        {
+            var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                remoteIp,
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = rateLimitSettings.DownloadPermitLimit,
+                    Window = TimeSpan.FromMinutes(rateLimitSettings.DownloadWindowMinutes),
                     QueueLimit = 0,
                     AutoReplenishment = true
                 });
@@ -130,8 +145,8 @@ try
     // Register content storage handler
     builder.Services.AddContentStorage(configuration);
     
-    // Register download token storage handler
-    builder.Services.AddDownloadTokenStorage(configuration);
+    // Register access session storage handler
+    builder.Services.AddAccessSessionStorage();
     
     // Main storage handler
     builder.Services.AddSingleton<IStorageHandler, StorageHandler>();

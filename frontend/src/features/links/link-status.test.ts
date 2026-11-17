@@ -10,9 +10,9 @@ const makePackage = (overrides: Partial<PackageSummary> = {}): PackageSummary =>
   ExpiresAt: '2026-11-10T12:00:00Z',
   ItemCount: 3,
   TotalSize: 1024,
-  MaxDownloadCount: 1,
-  CurrentDownloadCount: 0,
-  RemainingDownloads: 1,
+  MaxAccessCount: 1,
+  CurrentAccessCount: 0,
+  RemainingAccesses: 1,
   IsExpired: false,
   IsProtected: true,
   ...overrides
@@ -29,12 +29,12 @@ describe('linkStatus', () => {
   });
 
   it('is used up when no accesses remain', () => {
-    expect(linkStatus(makePackage({ RemainingDownloads: 0, CurrentDownloadCount: 1 }), NOW)).toBe('usedUp');
+    expect(linkStatus(makePackage({ RemainingAccesses: 0, CurrentAccessCount: 1 }), NOW)).toBe('usedUp');
   });
 
   it('reports expired first when the package is past its expiry', () => {
     expect(
-      linkStatus(makePackage({ IsExpired: true, ExpiresAt: '2026-11-01T12:00:00Z', RemainingDownloads: 0 }), NOW)
+      linkStatus(makePackage({ IsExpired: true, ExpiresAt: '2026-11-01T12:00:00Z', RemainingAccesses: 0 }), NOW)
     ).toBe('expired');
   });
 });

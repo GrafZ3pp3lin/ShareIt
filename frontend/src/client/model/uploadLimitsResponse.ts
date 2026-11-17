@@ -15,7 +15,7 @@ export interface UploadLimitsResponse {
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   AuthenticatedMaxLifetimeHours: number | string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  AnonymousMaxDownloadCount: number | string;
+  AnonymousMaxAccessCount: number | string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  AuthenticatedMaxDownloadCount: number | string;
+  AuthenticatedMaxAccessCount: number | string;
 }

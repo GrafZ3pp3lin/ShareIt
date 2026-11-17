@@ -25,7 +25,7 @@ public class CreatePackageRequest
     /// Maximum number of times this package can be accessed.
     /// Null means unlimited.
     /// </summary>
-    public int? MaxDownloadCount { get; set; }
+    public int? MaxAccessCount { get; set; }
 
     /// <summary>
     /// Time to live in hours. Package will expire after this duration.
@@ -95,12 +95,12 @@ public class UploadLimitsResponse
     /// <summary>
     /// Maximum number of times an anonymous package may be accessed.
     /// </summary>
-    public required int AnonymousMaxDownloadCount { get; init; }
+    public required int AnonymousMaxAccessCount { get; init; }
 
     /// <summary>
     /// Maximum number of times an authenticated package may be accessed.
     /// </summary>
-    public required int AuthenticatedMaxDownloadCount { get; init; }
+    public required int AuthenticatedMaxAccessCount { get; init; }
 }
 
 /// <summary>
@@ -126,17 +126,17 @@ public class ContentPackageResponse
     /// <summary>
     /// Maximum access count.
     /// </summary>
-    public int? MaxDownloadCount { get; init; }
+    public int? MaxAccessCount { get; init; }
 
     /// <summary>
     /// Number of accesses consumed so far.
     /// </summary>
-    public required int CurrentDownloadCount { get; init; }
+    public required int CurrentAccessCount { get; init; }
 
     /// <summary>
     /// Remaining accesses.
     /// </summary>
-    public int? RemainingDownloads { get; init; }
+    public int? RemainingAccesses { get; init; }
 
     /// <summary>
     /// Optional expiration timestamp.
@@ -150,9 +150,9 @@ public class ContentPackageResponse
             Id = package.Id,
             CreatedAt = package.CreatedAt,
             ItemCount = package.Contents?.Count ?? 0,
-            MaxDownloadCount = package.MaxDownloadCount,
-            CurrentDownloadCount = package.CurrentDownloadCount,
-            RemainingDownloads = package.RemainingDownloads,
+            MaxAccessCount = package.MaxAccessCount,
+            CurrentAccessCount = package.CurrentAccessCount,
+            RemainingAccesses = package.RemainingAccesses,
             ExpiresAt = package.ExpiresAt,
         };
     }
@@ -172,6 +172,28 @@ public class ContentPackageDetailsResponse
     /// List of content items in the package.
     /// </summary>
     public required List<ContentItemInPackage> Items { get; init; }
+
+    /// <summary>
+    /// Short-lived grant for re-fetching this package and downloading its
+    /// non-inline items. Send it in the <c>X-Access-Session</c> header.
+    /// </summary>
+    public required AccessSessionResponse AccessSession { get; init; }
+}
+
+/// <summary>
+/// The client-visible access session.
+/// </summary>
+public class AccessSessionResponse
+{
+    /// <summary>
+    /// Opaque session token. Never put this in a URL.
+    /// </summary>
+    public required string Token { get; init; }
+
+    /// <summary>
+    /// When the session stops authorizing package reads and downloads.
+    /// </summary>
+    public required DateTimeOffset ExpiresAt { get; init; }
 }
 
 /// <summary>
@@ -202,24 +224,10 @@ public class ContentItemInPackage
     public string? Meta { get; init; }
 
     /// <summary>
-    /// Base64url content bytes for items small enough to inline.
+    /// Base64url content bytes for items small enough to inline. Items without
+    /// a payload are downloaded through the package's access session.
     /// </summary>
     public string? Payload { get; init; }
-
-    /// <summary>
-    /// Download token for items served through a separate request.
-    /// </summary>
-    public string? DownloadToken { get; init; }
-
-    /// <summary>
-    /// Download URL for items served through a separate request.
-    /// </summary>
-    public string? DownloadUrl { get; init; }
-
-    /// <summary>
-    /// Token expiration.
-    /// </summary>
-    public DateTimeOffset? TokenExpiresAt { get; init; }
 }
 
 /// <summary>
@@ -272,17 +280,17 @@ public class ContentPackageListItem
     /// <summary>
     /// Maximum access count.
     /// </summary>
-    public int? MaxDownloadCount { get; init; }
+    public int? MaxAccessCount { get; init; }
 
     /// <summary>
     /// Number of accesses consumed so far.
     /// </summary>
-    public required int CurrentDownloadCount { get; init; }
+    public required int CurrentAccessCount { get; init; }
 
     /// <summary>
     /// Remaining accesses.
     /// </summary>
-    public int? RemainingDownloads { get; init; }
+    public int? RemainingAccesses { get; init; }
 
     /// <summary>
     /// Whether the package has expired.
@@ -303,9 +311,9 @@ public class ContentPackageListItem
             ExpiresAt = summary.ExpiresAt,
             ItemCount = summary.ItemCount,
             TotalSize = summary.TotalSize,
-            MaxDownloadCount = summary.MaxDownloadCount,
-            CurrentDownloadCount = summary.CurrentDownloadCount,
-            RemainingDownloads = summary.RemainingDownloads,
+            MaxAccessCount = summary.MaxAccessCount,
+            CurrentAccessCount = summary.CurrentAccessCount,
+            RemainingAccesses = summary.RemainingAccesses,
             IsExpired = summary.IsExpired(now),
             IsProtected = summary.IsProtected
         };

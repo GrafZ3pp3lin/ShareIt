@@ -80,7 +80,7 @@ Per-file size limits come from `GET /package/limits` (anonymous vs authenticated
 
 ### Share flow
 
-`src/features/share/use-share.ts` is a `locked → unlocking → unlocked | invalid | gone` state machine. A plain link renders the gate with no request until submit; a `#s=` link derives the proof and fetches immediately (skeleton, no gate flash), then `history.replaceState` removes the fragment after success. `GET /package/{id}` carries `X-Unlock-Proof`; a wrong proof gets `401` before any access is counted. Text and file metadata are decoded per item; content comes from inline `payload` or a single-use download token, and only then is the `SIE2` envelope opened.
+`src/features/share/use-share.ts` is a `locked → unlocking → unlocked | invalid | gone` state machine. A plain link renders the gate with no request until submit; a `#s=` link derives the proof and fetches immediately (skeleton, no gate flash), then `history.replaceState` removes the fragment after success. `GET /package/{id}` carries `X-Unlock-Proof` plus any stored `X-Access-Session`; a valid session reuses the access instead of claiming another, and a wrong proof gets `401` before any access is counted. Text and file metadata are decoded per item; content comes from inline `payload` or a session-authorized download, and only then is the `SIE2` envelope opened. The session token lives in `sessionStorage` for the package lifetime (15 minutes) and is never put in a URL. `access-session.ts` owns that storage helper; the server is the authority for expiry, and the helper clears the token on a download `401` or a `410`/`404` package-gone response.
 
 ### Auth (OIDC)
 
@@ -109,7 +109,7 @@ One optional passphrase per package; one sealed format for text and files. The s
 - `keys.ts`: `packageSalt(id)`, `deriveKeyBits(passphrase, salt)` (PBKDF2-SHA256, 150k, client constant), `unlockProof(key, id)` (HMAC verifier sent as `X-Unlock-Proof`), per-item `itemKey` / `metaKey` via HKDF, and `itemAad` / `metaAad`.
 - `sealed.ts`: `SIE2 | IV(12) | AES-GCM ciphertext+tag` — `seal`, `open`, `isSealed`.
 - `meta.ts`: per-item `{ name, mime }` JSON, sealed with `metaKey` when protected; `buildMeta` / `parseMeta` / `encodeMeta` / `decodeMeta`, fallback `item-<n>` on invalid metadata.
-- `item-content.ts`: `openItemContent` — inline `payload` or token download, then open the envelope when sealed.
+- `item-content.ts`: `openItemContent` — inline `payload` or session-authorized download, then open the envelope when sealed.
 - `passphrase.ts`: `generatePassphrase` and `validatePassphrase`.
 
 There is no legacy `SIE1`/JSON envelope reader.

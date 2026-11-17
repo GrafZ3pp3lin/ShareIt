@@ -3,26 +3,21 @@
 namespace kroet.ShareIt.Api.Configuration;
 
 /// <summary>
-/// Configuration settings for download tokens and limits.
+/// Configuration settings for access sessions and download limits.
 /// </summary>
 public sealed class DownloadSettings : ISettings
 {
     /// <summary>
-    /// Default expiration time for download tokens in minutes.
+    /// How long an access session authorizes package reads and downloads after
+    /// a successful open. Fixed: sessions are not renewed automatically.
     /// Default: 15 minutes.
     /// </summary>
-    public int DefaultTokenExpirationMinutes { get; set; } = 15;
-
-    /// <summary>
-    /// How long to keep used tokens before cleanup (for audit purposes) in hours.
-    /// Default: 24 hours.
-    /// </summary>
-    public int UsedTokenRetentionHours { get; set; } = 24;
+    public int AccessSessionLifetimeMinutes { get; set; } = 15;
 
     /// <summary>
     /// How long an access-limited package remains available after its most
-    /// recent access, so tokens issued by that access can still be downloaded.
-    /// Must be at least <see cref="DefaultTokenExpirationMinutes"/>.
+    /// recent access, so downloads from that access can still complete. Must be
+    /// at least <see cref="AccessSessionLifetimeMinutes"/>.
     /// Default: 30 minutes.
     /// </summary>
     public int ExhaustedPackageRetentionMinutes { get; set; } = 30;
@@ -30,14 +25,14 @@ public sealed class DownloadSettings : ISettings
     /// <summary>
     /// Maximum size of a single item (in bytes) that GET /package/{id} may
     /// read fully into memory and inline as a base64url payload. Larger items
-    /// are served through a download token instead.
+    /// are served through the access session instead.
     /// Default: 16 KB.
     /// </summary>
     public long InlinePayloadLimitBytes { get; set; } = 16 * 1024;
 
     /// <summary>
     /// Total inline payload budget per response (in bytes). Once the budget is
-    /// spent, every remaining item is served through a download token, so a
+    /// spent, every remaining item is served through the access session, so a
     /// package full of small notes cannot turn the details response into a
     /// megabyte of base64.
     /// Default: 64 KB.
@@ -51,15 +46,13 @@ public sealed class DownloadSettingsValidator : AbstractValidator<DownloadSettin
 {
     public DownloadSettingsValidator()
     {
-        RuleFor(x => x.DefaultTokenExpirationMinutes).GreaterThan(0);
-
-        RuleFor(x => x.UsedTokenRetentionHours).GreaterThanOrEqualTo(0);
+        RuleFor(x => x.AccessSessionLifetimeMinutes).GreaterThan(0);
 
         RuleFor(x => x.ExhaustedPackageRetentionMinutes)
-            .GreaterThanOrEqualTo(x => x.DefaultTokenExpirationMinutes)
+            .GreaterThanOrEqualTo(x => x.AccessSessionLifetimeMinutes)
             .WithMessage(
-                "ExhaustedPackageRetentionMinutes must be at least DefaultTokenExpirationMinutes " +
-                "so tokens issued by the final access remain usable.");
+                "ExhaustedPackageRetentionMinutes must be at least AccessSessionLifetimeMinutes " +
+                "so the final access remains usable for downloads.");
 
         RuleFor(x => x.InlinePayloadLimitBytes).GreaterThanOrEqualTo(0);
 

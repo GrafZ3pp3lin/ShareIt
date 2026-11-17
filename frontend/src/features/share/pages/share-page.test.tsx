@@ -32,10 +32,14 @@ const packageDetails = (): ContentPackageDetailsResponse => ({
     Id: PACKAGE_ID,
     CreatedAt: new Date().toISOString(),
     ItemCount: 2,
-    MaxDownloadCount: 1,
-    CurrentDownloadCount: 1,
-    RemainingDownloads: 0,
+    MaxAccessCount: 1,
+    CurrentAccessCount: 1,
+    RemainingAccesses: 0,
     ExpiresAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString()
+  },
+  AccessSession: {
+    Token: 'session-1',
+    ExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
   },
   Items: [
     {
@@ -100,6 +104,7 @@ describe('<SharePage />', () => {
   beforeEach(() => {
     params.packageId = PACKAGE_ID;
     window.history.replaceState(null, '', `/s/${PACKAGE_ID}`);
+    window.sessionStorage.clear();
     api.getPackageDetails.mockReset();
     api.downloadContent.mockReset();
     api.getPackageDetails.mockResolvedValue({ status: 200, data: packageDetails() });
@@ -211,5 +216,29 @@ describe('<SharePage />', () => {
 
     expect(await screen.findByText('This link is no longer available')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('passphrase')).not.toBeInTheDocument();
+  });
+
+  it('leaves the document for the gone screen when a lazy download returns 410', async () => {
+    const details = packageDetails();
+    api.getPackageDetails.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        ...details,
+        Items: details.Items.map((item) => (item.Id === FILE_ID ? { ...item, Payload: null } : item))
+      }
+    });
+    api.downloadContent.mockResolvedValueOnce({
+      status: 410,
+      error: { title: 'Package expired', detail: 'This package has expired' }
+    });
+
+    renderPage();
+    await submitPassphrase('');
+    await screen.findByText('photo.jpg');
+
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    expect(await screen.findByText('This link is no longer available')).toBeInTheDocument();
+    expect(window.sessionStorage.getItem(`shareit-access-session:${PACKAGE_ID}`)).toBeNull();
   });
 });

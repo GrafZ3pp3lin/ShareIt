@@ -1,12 +1,13 @@
 import {
   createPackage as createPackageGenerated,
   deletePackage as deletePackageGenerated,
-  downloadContentWithToken,
+  downloadContent as downloadContentGenerated,
   getPackage as getPackageGenerated,
   getUploadLimits as getUploadLimitsGenerated,
   listPackages as listPackagesGenerated
 } from '../../client/api.ts';
 import type {
+  AccessSessionResponse,
   ContentPackageDetailsResponse,
   ContentPackageListItem,
   ContentPackageListResponse,
@@ -31,8 +32,8 @@ export type UploadLimits = {
   AuthenticatedFileLimitBytes: number;
   AnonymousMaxLifetimeHours: number;
   AuthenticatedMaxLifetimeHours: number;
-  AnonymousMaxDownloadCount: number;
-  AuthenticatedMaxDownloadCount: number;
+  AnonymousMaxAccessCount: number;
+  AuthenticatedMaxAccessCount: number;
 };
 
 const isUploadLimits = (value: unknown): value is UploadLimits =>
@@ -42,14 +43,28 @@ const isUploadLimits = (value: unknown): value is UploadLimits =>
   'AuthenticatedFileLimitBytes' in value &&
   'AnonymousMaxLifetimeHours' in value &&
   'AuthenticatedMaxLifetimeHours' in value &&
-  'AnonymousMaxDownloadCount' in value &&
-  'AuthenticatedMaxDownloadCount' in value;
+  'AnonymousMaxAccessCount' in value &&
+  'AuthenticatedMaxAccessCount' in value;
 
 const isContentPackageResponse = (value: unknown): value is ContentPackageResponse =>
   typeof value === 'object' && value !== null && 'Id' in value;
 
+const isAccessSessionResponse = (value: unknown): value is AccessSessionResponse => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<AccessSessionResponse>;
+  return typeof candidate.Token === 'string' && candidate.Token.length > 0 && typeof candidate.ExpiresAt === 'string';
+};
+
 const isContentPackageDetailsResponse = (value: unknown): value is ContentPackageDetailsResponse =>
-  typeof value === 'object' && value !== null && 'Package' in value && 'Items' in value;
+  typeof value === 'object' &&
+  value !== null &&
+  'Package' in value &&
+  'Items' in value &&
+  'AccessSession' in value &&
+  isAccessSessionResponse(value.AccessSession);
 
 const isContentPackageListItem = (value: unknown): value is ContentPackageListItem =>
   typeof value === 'object' &&
@@ -58,7 +73,7 @@ const isContentPackageListItem = (value: unknown): value is ContentPackageListIt
   'CreatedAt' in value &&
   'ItemCount' in value &&
   'TotalSize' in value &&
-  'CurrentDownloadCount' in value &&
+  'CurrentAccessCount' in value &&
   'IsExpired' in value &&
   'IsProtected' in value;
 
@@ -76,9 +91,9 @@ export type PackageSummary = {
   ExpiresAt?: string;
   ItemCount: number;
   TotalSize: number;
-  MaxDownloadCount: number | null;
-  CurrentDownloadCount: number;
-  RemainingDownloads: number | null;
+  MaxAccessCount: number | null;
+  CurrentAccessCount: number;
+  RemainingAccesses: number | null;
   IsExpired: boolean;
   IsProtected: boolean;
 };
@@ -94,9 +109,9 @@ const toPackageSummary = (item: ContentPackageListItem): PackageSummary => ({
   ExpiresAt: item.ExpiresAt ?? undefined,
   ItemCount: Number(item.ItemCount),
   TotalSize: Number(item.TotalSize),
-  MaxDownloadCount: item.MaxDownloadCount == null ? null : Number(item.MaxDownloadCount),
-  CurrentDownloadCount: Number(item.CurrentDownloadCount),
-  RemainingDownloads: item.RemainingDownloads == null ? null : Number(item.RemainingDownloads),
+  MaxAccessCount: item.MaxAccessCount == null ? null : Number(item.MaxAccessCount),
+  CurrentAccessCount: Number(item.CurrentAccessCount),
+  RemainingAccesses: item.RemainingAccesses == null ? null : Number(item.RemainingAccesses),
   IsExpired: item.IsExpired,
   IsProtected: item.IsProtected
 });
@@ -196,34 +211,44 @@ export async function getUploadLimits(): Promise<ApiResult<UploadLimits>> {
 }
 
 /**
- * Fetches a package, optionally with the `X-Unlock-Proof` header. The header is
- * only ever attached to this call.
+ * Fetches a package with the unlock proof and/or the existing access session.
+ * Both headers are only ever attached to this call.
  */
 export async function getPackageDetails(
   packageId: string,
-  unlockProof?: string
+  unlockProof?: string,
+  accessSession?: string
 ): Promise<ApiResult<ContentPackageDetailsResponse>> {
-  const result = await getPackageGenerated(
-    packageId,
-    unlockProof ? { headers: { 'X-Unlock-Proof': unlockProof } } : undefined
-  );
+  const headers: Record<string, string> = {};
+  if (unlockProof) {
+    headers['X-Unlock-Proof'] = unlockProof;
+  }
+  if (accessSession) {
+    headers['X-Access-Session'] = accessSession;
+  }
+
+  const result = await getPackageGenerated(packageId, Object.keys(headers).length > 0 ? { headers } : undefined);
   if (isSuccess(result.status) && isContentPackageDetailsResponse(result.data)) {
     return { data: result.data, status: result.status };
   }
   return { error: result.data, status: result.status };
 }
 
-export async function downloadContent(packageId: string, contentId: string, token: string): Promise<ApiResult<Blob>> {
-  const result = await downloadContentWithToken(packageId, contentId, {
-    headers: { 'X-File-Token': token }
+export async function downloadContent(
+  packageId: string,
+  contentId: string,
+  accessSession: string
+): Promise<ApiResult<Blob>> {
+  const result = await downloadContentGenerated(packageId, contentId, {
+    headers: { 'X-Access-Session': accessSession }
   });
+  if (!isSuccess(result.status)) {
+    return { error: result.data, status: result.status };
+  }
   if (result.data instanceof Blob) {
     return { data: result.data, status: result.status };
   }
-  if (isSuccess(result.status)) {
-    return { error: new Error('Download did not return a blob'), status: result.status };
-  }
-  return { error: result.data, status: result.status };
+  return { error: new Error('Download did not return a blob'), status: result.status };
 }
 
 export async function listPackages(cursor?: string): Promise<ApiResult<PackageListPage>> {

@@ -112,8 +112,8 @@ describe('<ComposerPage />', () => {
     flush();
 
     expect(screen.getByText('password')).toBeInTheDocument();
-    expect(screen.queryByText('downloads allowed')).not.toBeInTheDocument();
-    expect(screen.getByText(/Expiry and downloads are fixed/)).toBeInTheDocument();
+    expect(screen.queryByText('accesses allowed')).not.toBeInTheDocument();
+    expect(screen.getByText(/Expiry and accesses are fixed/)).toBeInTheDocument();
   });
 
   it('creates the link and shows the result panel', async () => {
@@ -143,7 +143,7 @@ describe('<ComposerPage />', () => {
     expect(api.createPackage).toHaveBeenCalledTimes(1);
   });
 
-  it('lets signed-in users pick expiry and download options', async () => {
+  it('lets signed-in users pick expiry and access options', async () => {
     authState.authenticated = true;
     renderPage();
 
@@ -165,7 +165,7 @@ describe('<ComposerPage />', () => {
     await screen.findByText('link ready');
     const request = api.createPackage.mock.calls[0][0];
     expect(request.TimeToLiveHours).toBe(720);
-    expect(request.MaxDownloadCount).toBeNull();
+    expect(request.MaxAccessCount).toBeNull();
   });
 
   it('validates a custom passphrase before enabling submit', () => {

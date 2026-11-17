@@ -65,10 +65,10 @@ export const dict = {
       thirtyDays: '30 days'
     },
     downloads: {
-      label: 'downloads allowed',
-      hint: 'one person, one download',
+      label: 'accesses allowed',
+      hint: 'one person, one access',
       once: 'once',
-      count: '{{ count }} downloads',
+      count: '{{ count }} accesses',
       unlimited: 'unlimited'
     },
     password: {
@@ -97,7 +97,7 @@ export const dict = {
         strong: 'strong'
       }
     },
-    guestNote: 'Expiry and downloads are fixed for links created without an account. Sign in to choose them.'
+    guestNote: 'Expiry and accesses are fixed for links created without an account. Sign in to choose them.'
   },
   result: {
     ready: 'link ready',
@@ -107,7 +107,7 @@ export const dict = {
     combined: 'link + passphrase — both included',
     selfOpenTitle: "Don't open this link yourself.",
     selfOpenBody:
-      'Opening it counts as an access: it uses up one of the allowed downloads, and with a one-time link the upload is deleted by the cleanup job after you look at it.',
+      'Opening it counts as an access: it uses up one of the allowed accesses, and with a one-time link the upload is deleted by the cleanup job after its retention window.',
     channels:
       'Anyone holding this single link has everything. For maximum security, send the link and the passphrase through different channels — link by mail, passphrase by chat, for example.',
     noPasswordNote:
@@ -162,10 +162,10 @@ export const dict = {
     days: '{{ count }} days',
     expiresIn: 'expires in {{ value }}',
     expiredAgo: 'expired {{ value }} ago',
-    downloadLeft: '{{ count }} download left',
-    downloadsLeft: '{{ count }} downloads left',
-    unlimited: 'unlimited downloads',
-    usedUpNote: '{{ current }} of {{ max }} access used · cleanup removes it',
+    downloadLeft: '{{ count }} access left',
+    downloadsLeft: '{{ count }} accesses left',
+    unlimited: 'unlimited accesses',
+    usedUpNote: '{{ current }} of {{ max }} accesses used · cleanup removes it',
     actions: {
       copyLink: 'copy link',
       delete: 'delete'
@@ -205,10 +205,13 @@ export const dict = {
     missingBody: 'Enter the passphrase the sender shared with you. Nothing was loaded and no access was used.',
     goneTitle: 'This link is no longer available',
     goneBody:
-      'It expired, its downloads were used up, or the sender deleted it. Content is removed by the cleanup job, not archived — ask the sender for a new link.',
+      'It expired, its accesses were used up, or the sender deleted it. Content is removed by the cleanup job, not archived — ask the sender for a new link.',
     home: 'What is ShareIt?',
     rateLimitedTitle: 'Too many attempts.',
     rateLimitedBody: 'Wait a few minutes and try again. No access was used.',
+    sessionExpiredTitle: 'This access has expired.',
+    sessionExpiredBody:
+      'Unlock the link again to continue. A one-time link may already be used up — ask the sender for a new one.',
     failedTitle: 'Unable to load this link.',
     failedBody: 'Check your connection and try again.'
   },
@@ -227,10 +230,10 @@ export const dict = {
     day: '{{ count }} day',
     days: '{{ count }} days',
     expiresNow: 'expires now',
-    unlimitedDownloads: 'unlimited downloads',
-    downloadLeft: '{{ count }} download left',
-    downloadsLeft: '{{ count }} downloads left',
-    accessNote: "Unlocking used one access. This page won't refetch — keep the tab open.",
+    unlimitedDownloads: 'unlimited accesses',
+    downloadLeft: '{{ count }} access left',
+    downloadsLeft: '{{ count }} accesses left',
+    accessNote: 'This access is valid until {{ time }}.',
     fileFallback: 'item-{{ index }}',
     download: 'download',
     downloading: 'downloading…',
@@ -239,7 +242,7 @@ export const dict = {
     textErrorTitle: 'Could not read this text.',
     textErrorBody: 'The text could not be decrypted.',
     downloadFailedTitle: 'Download failed.',
-    downloadFailedBody: 'The link may have expired between unlocking and downloading.'
+    downloadFailedBody: 'The access session may have expired. Reopen the link to try again.'
   },
   auth: {
     signIn: 'Sign in',

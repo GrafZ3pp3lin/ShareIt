@@ -1,4 +1,4 @@
-﻿using kroet.ShareIt.Api.Configuration;
+using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using Microsoft.Extensions.Options;
 
@@ -8,7 +8,9 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 {
     private readonly List<ContentPackage> _packages = [];
     private readonly List<ExternalContent> _contents = [];
+    private readonly List<AccessSession> _accessSessions = [];
     private readonly List<string> _pendingBlobDeletions = [];
+    private readonly object _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly DownloadSettings _downloadSettings;
 
@@ -22,38 +24,53 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
 
     public Task StorePackageAsync(ContentPackage package, CancellationToken cancellationToken = default)
     {
-        _packages.Add(package);
+        lock (_lock)
+        {
+            _packages.Add(package);
+        }
+
         return Task.CompletedTask;
     }
 
     public Task StoreContentAsync(ExternalContent content, CancellationToken cancellationToken = default)
     {
-        _contents.Add(content);
+        lock (_lock)
+        {
+            _contents.Add(content);
+        }
+
         return Task.CompletedTask;
     }
 
     public Task StoreContentsAsync(IEnumerable<ExternalContent> contents, CancellationToken cancellationToken = default)
     {
-        _contents.AddRange(contents);
+        lock (_lock)
+        {
+            _contents.AddRange(contents);
+        }
+
         return Task.CompletedTask;
     }
 
     public Task<ContentPackage?> GetPackageAsync(Guid packageId, bool includeContent = true, CancellationToken cancellationToken = default)
     {
-        var package = _packages.FirstOrDefault(p => p.Id == packageId);
-        if (package is null)
+        lock (_lock)
         {
-            return Task.FromResult<ContentPackage?>(null);
-        }
+            var package = _packages.FirstOrDefault(p => p.Id == packageId);
+            if (package is null)
+            {
+                return Task.FromResult<ContentPackage?>(null);
+            }
 
-        if (includeContent)
-        {
-            var contents = _contents.Where(c => c.PackageId == packageId).ToList();
-            var packageWithContent = package with { Contents = contents };
-            return Task.FromResult<ContentPackage?>(packageWithContent);
-        }
+            if (includeContent)
+            {
+                var contents = _contents.Where(c => c.PackageId == packageId).ToList();
+                var packageWithContent = package with { Contents = contents };
+                return Task.FromResult<ContentPackage?>(packageWithContent);
+            }
 
-        return Task.FromResult<ContentPackage?>(package);
+            return Task.FromResult<ContentPackage?>(package);
+        }
     }
 
     public Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default)
@@ -65,193 +82,264 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
         int take,
         CancellationToken cancellationToken = default)
     {
-        var hasCursor = PackageCursor.TryDecode(cursor, out var cursorCreatedAt, out var cursorId);
-
-        var rows = _packages
-            .Where(package => package.UserId == userId)
-            .Where(package => !hasCursor || IsBefore(package, cursorCreatedAt, cursorId))
-            .OrderByDescending(package => package.CreatedAt)
-            .ThenByDescending(package => package.Id.ToString("N"), StringComparer.Ordinal)
-            .Take(take + 1)
-            .ToList();
-
-        string? nextCursor = null;
-        if (rows.Count > take)
+        lock (_lock)
         {
-            rows.RemoveAt(rows.Count - 1);
-            var last = rows[^1];
-            nextCursor = PackageCursor.Encode(last.CreatedAt, last.Id);
-        }
+            var hasCursor = PackageCursor.TryDecode(cursor, out var cursorCreatedAt, out var cursorId);
 
-        var items = rows.Select(package =>
-        {
-            var contents = _contents.Where(content => content.PackageId == package.Id).ToList();
-            return new ContentPackageSummary
+            var rows = _packages
+                .Where(package => package.UserId == userId)
+                .Where(package => !hasCursor || IsBefore(package, cursorCreatedAt, cursorId))
+                .OrderByDescending(package => package.CreatedAt)
+                .ThenByDescending(package => package.Id.ToString("N"), StringComparer.Ordinal)
+                .Take(take + 1)
+                .ToList();
+
+            string? nextCursor = null;
+            if (rows.Count > take)
             {
-                Id = package.Id,
-                CreatedAt = package.CreatedAt,
-                ExpiresAt = package.ExpiresAt,
-                ItemCount = contents.Count,
-                TotalSize = contents.Sum(content => content.Size),
-                MaxDownloadCount = package.MaxDownloadCount,
-                CurrentDownloadCount = package.CurrentDownloadCount,
-                IsProtected = package.UnlockVerifier is not null
-            };
-        }).ToList();
+                rows.RemoveAt(rows.Count - 1);
+                var last = rows[^1];
+                nextCursor = PackageCursor.Encode(last.CreatedAt, last.Id);
+            }
 
-        return Task.FromResult(new PackageListPage(items, nextCursor));
+            var items = rows.Select(package =>
+            {
+                var contents = _contents.Where(content => content.PackageId == package.Id).ToList();
+                return new ContentPackageSummary
+                {
+                    Id = package.Id,
+                    CreatedAt = package.CreatedAt,
+                    ExpiresAt = package.ExpiresAt,
+                    ItemCount = contents.Count,
+                    TotalSize = contents.Sum(content => content.Size),
+                    MaxAccessCount = package.MaxAccessCount,
+                    CurrentAccessCount = package.CurrentAccessCount,
+                    IsProtected = package.UnlockVerifier is not null
+                };
+            }).ToList();
+
+            return Task.FromResult(new PackageListPage(items, nextCursor));
+        }
     }
 
     public Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(IEnumerable<Guid> packageIds, bool includeContent = true, CancellationToken cancellationToken = default)
     {
-        var packages = _packages.Where(p => packageIds.Contains(p.Id)).ToList();
-
-        if (includeContent)
+        lock (_lock)
         {
-            var contents = _contents.Where(c => packageIds.Contains(c.PackageId)).ToList();
-            var packagesWithContent = packages.Select(p =>
+            var packages = _packages.Where(p => packageIds.Contains(p.Id)).ToList();
+
+            if (includeContent)
             {
-                var packageContents = contents.Where(c => c.PackageId == p.Id).ToList();
-                return p with { Contents = packageContents };
-            }).ToList();
+                var contents = _contents.Where(c => packageIds.Contains(c.PackageId)).ToList();
+                var packagesWithContent = packages.Select(p =>
+                {
+                    var packageContents = contents.Where(c => c.PackageId == p.Id).ToList();
+                    return p with { Contents = packageContents };
+                }).ToList();
 
-            return Task.FromResult<IReadOnlyList<ContentPackage>>(packagesWithContent);
+                return Task.FromResult<IReadOnlyList<ContentPackage>>(packagesWithContent);
+            }
+
+            return Task.FromResult<IReadOnlyList<ContentPackage>>(packages);
         }
-
-        return Task.FromResult<IReadOnlyList<ContentPackage>>(packages);
     }
 
     public Task<ExternalContent?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
-        var content = _contents.FirstOrDefault(c => c.Id == contentId);
-        return Task.FromResult<ExternalContent?>(content);
+        lock (_lock)
+        {
+            var content = _contents.FirstOrDefault(c => c.Id == contentId);
+            return Task.FromResult<ExternalContent?>(content);
+        }
     }
 
     public Task<IReadOnlyList<ExternalContent>> GetContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
     {
-        var contents = _contents.Where(c => contentIds.Contains(c.Id)).ToList();
-        return Task.FromResult<IReadOnlyList<ExternalContent>>(contents);
+        lock (_lock)
+        {
+            var contents = _contents.Where(c => contentIds.Contains(c.Id)).ToList();
+            return Task.FromResult<IReadOnlyList<ExternalContent>>(contents);
+        }
     }
 
-    public Task<DownloadIncrementResult> IncrementPackageAccessCountAsync(Guid packageId, CancellationToken cancellationToken = default)
+    public Task<AccessSessionClaimResult> CreateAccessSessionAsync(
+        AccessSession session,
+        CancellationToken cancellationToken = default)
     {
-        var index = _packages.FindIndex(p => p.Id == packageId);
-        if (index < 0)
+        lock (_lock)
         {
-            return Task.FromResult(new DownloadIncrementResult(false, 0, null, false));
+            var index = _packages.FindIndex(p => p.Id == session.PackageId);
+            if (index < 0)
+            {
+                return Task.FromResult(new AccessSessionClaimResult(false, 0, null));
+            }
+
+            var package = _packages[index];
+
+            // Guarded claim: never consume accesses for an expired package or
+            // beyond the configured limit.
+            if (package.IsExpired(session.CreatedAt) || package.IsAccessLimitReached)
+            {
+                return Task.FromResult(new AccessSessionClaimResult(false, 0, null));
+            }
+
+            var newCount = package.CurrentAccessCount + 1;
+            _packages[index] = package with
+            {
+                CurrentAccessCount = newCount,
+                LastAccessAt = session.CreatedAt
+            };
+            _accessSessions.Add(session);
+
+            return Task.FromResult(new AccessSessionClaimResult(true, newCount, package.MaxAccessCount));
         }
+    }
 
-        var package = _packages[index];
-
-        // Guarded claim: never consume accesses beyond the configured limit.
-        if (package.IsAccessLimitReached)
+    public Task<AccessSession?> GetAccessSessionByTokenHashAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
         {
-            return Task.FromResult(new DownloadIncrementResult(false, package.CurrentDownloadCount, package.MaxDownloadCount, true));
+            var session = _accessSessions.FirstOrDefault(
+                candidate => string.Equals(candidate.TokenHash, tokenHash, StringComparison.Ordinal));
+            return Task.FromResult(session);
         }
+    }
 
-        var newCount = package.CurrentDownloadCount + 1;
-        _packages[index] = package with
+    public Task<long> DeleteExpiredAccessSessionsAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
         {
-            CurrentDownloadCount = newCount,
-            LastAccessAt = _timeProvider.GetUtcNow()
-        };
-
-        var limitReached = package.MaxDownloadCount.HasValue && newCount >= package.MaxDownloadCount.Value;
-        return Task.FromResult(new DownloadIncrementResult(true, newCount, package.MaxDownloadCount, limitReached));
+            var removed = (long)_accessSessions.RemoveAll(session => session.ExpiresAt <= now);
+            return Task.FromResult(removed);
+        }
     }
 
     public Task<int> DeletePackagesAsync(IEnumerable<Guid> packageIds, CancellationToken cancellationToken = default)
     {
-        var requestedIds = packageIds.ToHashSet();
-        var deletedIds = _packages
-            .Where(package => requestedIds.Contains(package.Id))
-            .Select(package => package.Id)
-            .ToHashSet();
-
-        QueueBlobDeletions(_contents.Where(content => deletedIds.Contains(content.PackageId)));
-
-        var removed = _packages.RemoveAll(package => deletedIds.Contains(package.Id));
-
-        // Match the PostgreSQL ON DELETE CASCADE behaviour: package deletion
-        // also removes the package's contents.
-        if (removed > 0)
+        lock (_lock)
         {
-            _contents.RemoveAll(content => deletedIds.Contains(content.PackageId));
-        }
+            var requestedIds = packageIds.ToHashSet();
+            var deletedIds = _packages
+                .Where(package => requestedIds.Contains(package.Id))
+                .Select(package => package.Id)
+                .ToHashSet();
 
-        return Task.FromResult(removed);
+            QueueBlobDeletions(_contents.Where(content => deletedIds.Contains(content.PackageId)));
+
+            var removed = _packages.RemoveAll(package => deletedIds.Contains(package.Id));
+
+            // Match the PostgreSQL ON DELETE CASCADE behaviour: package deletion
+            // also removes the package's contents and access sessions.
+            if (removed > 0)
+            {
+                _contents.RemoveAll(content => deletedIds.Contains(content.PackageId));
+                _accessSessions.RemoveAll(session => deletedIds.Contains(session.PackageId));
+            }
+
+            return Task.FromResult(removed);
+        }
     }
 
     public Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default)
     {
-        var package = _packages.FirstOrDefault(p => p.Id == packageId);
-        if (package is null || !_packages.Remove(package))
+        lock (_lock)
         {
-            return Task.FromResult(false);
+            var package = _packages.FirstOrDefault(p => p.Id == packageId);
+            if (package is null || !_packages.Remove(package))
+            {
+                return Task.FromResult(false);
+            }
+
+            QueueBlobDeletions(_contents.Where(content => content.PackageId == packageId));
+
+            // Match the PostgreSQL ON DELETE CASCADE behaviour: package deletion
+            // also removes the package's contents and access sessions.
+            _contents.RemoveAll(content => content.PackageId == packageId);
+            _accessSessions.RemoveAll(session => session.PackageId == packageId);
+            return Task.FromResult(true);
         }
-
-        QueueBlobDeletions(_contents.Where(content => content.PackageId == packageId));
-
-        // Match the PostgreSQL ON DELETE CASCADE behaviour: package deletion
-        // also removes the package's contents.
-        _contents.RemoveAll(content => content.PackageId == packageId);
-        return Task.FromResult(true);
     }
 
     public Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
     {
-        var requestedIds = contentIds.ToHashSet();
-        QueueBlobDeletions(_contents.Where(content => requestedIds.Contains(content.Id)));
-        var removed = _contents.RemoveAll(c => requestedIds.Contains(c.Id));
-        return Task.FromResult(removed);
+        lock (_lock)
+        {
+            var requestedIds = contentIds.ToHashSet();
+            QueueBlobDeletions(_contents.Where(content => requestedIds.Contains(content.Id)));
+            var removed = _contents.RemoveAll(c => requestedIds.Contains(c.Id));
+            return Task.FromResult(removed);
+        }
     }
 
     public Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
-        var content = _contents.FirstOrDefault(c => c.Id == contentId);
-        if (content is null || !_contents.Remove(content))
+        lock (_lock)
         {
-            return Task.FromResult(false);
-        }
+            var content = _contents.FirstOrDefault(c => c.Id == contentId);
+            if (content is null || !_contents.Remove(content))
+            {
+                return Task.FromResult(false);
+            }
 
-        QueueBlobDeletions([content]);
-        return Task.FromResult(true);
+            QueueBlobDeletions([content]);
+            return Task.FromResult(true);
+        }
     }
 
     public Task<bool> ExistsPackageAsync(Guid packageId, CancellationToken cancellationToken = default)
     {
-        var exists = _packages.Any(p => p.Id == packageId);
-        return Task.FromResult(exists);
+        lock (_lock)
+        {
+            var exists = _packages.Any(p => p.Id == packageId);
+            return Task.FromResult(exists);
+        }
     }
 
     public Task<bool> ExistsContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
-        var exists = _contents.Any(c => c.Id == contentId);
-        return Task.FromResult(exists);
+        lock (_lock)
+        {
+            var exists = _contents.Any(c => c.Id == contentId);
+            return Task.FromResult(exists);
+        }
     }
 
     public Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
     {
-        var now = _timeProvider.GetUtcNow();
-        var exhaustedBefore = now.AddMinutes(-_downloadSettings.ExhaustedPackageRetentionMinutes);
-        var packageIds = _packages
-            .Where(package => package.IsExpired(now) || IsExhaustedBeyondRetention(package, exhaustedBefore))
-            .Select(package => package.Id)
-            .ToList();
-        return Task.FromResult<IReadOnlyList<Guid>>(packageIds);
+        lock (_lock)
+        {
+            var now = _timeProvider.GetUtcNow();
+            var exhaustedBefore = now.AddMinutes(-_downloadSettings.ExhaustedPackageRetentionMinutes);
+            var packageIds = _packages
+                .Where(package => package.IsExpired(now) || IsExhaustedBeyondRetention(package, exhaustedBefore))
+                .Select(package => package.Id)
+                .ToList();
+            return Task.FromResult<IReadOnlyList<Guid>>(packageIds);
+        }
     }
 
     public Task<IReadOnlyList<string>> GetPendingBlobDeletionsAsync(
         int take,
         CancellationToken cancellationToken = default)
     {
-        var blobIds = _pendingBlobDeletions.Take(Math.Clamp(take, 1, 1000)).ToList();
-        return Task.FromResult<IReadOnlyList<string>>(blobIds);
+        lock (_lock)
+        {
+            var blobIds = _pendingBlobDeletions.Take(Math.Clamp(take, 1, 1000)).ToList();
+            return Task.FromResult<IReadOnlyList<string>>(blobIds);
+        }
     }
 
     public Task CompleteBlobDeletionAsync(string blobId, CancellationToken cancellationToken = default)
     {
-        _pendingBlobDeletions.Remove(blobId);
+        lock (_lock)
+        {
+            _pendingBlobDeletions.Remove(blobId);
+        }
+
         return Task.CompletedTask;
     }
 
@@ -260,6 +348,7 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
            && package.LastAccessAt is { } lastAccessAt
            && lastAccessAt <= exhaustedBefore;
 
+    // Callers hold _lock for the lifetime of this helper.
     private void QueueBlobDeletions(IEnumerable<ExternalContent> contents)
     {
         foreach (var blobId in contents.Select(content => content.Url).Distinct(StringComparer.Ordinal))

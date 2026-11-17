@@ -43,7 +43,7 @@ Or start all three together with the Aspire AppHost:
 dotnet run --project backend/kroet.ShareIt.AppHost
 ```
 
-The AppHost also starts PostgreSQL 18 (content and download-token storage) and RustFS
+The AppHost also starts PostgreSQL 18 (content and access-session storage) and RustFS
 (S3-compatible blob storage) as Docker containers. It requires the Aspire CLI
 (`dotnet tool install -g Aspire.Cli`), a running Docker daemon, and `pnpm` on `PATH`. It keeps the
 ports used above (8190, 5155, 3001) so `frontend/public/env.js` needs no changes.

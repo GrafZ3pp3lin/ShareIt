@@ -51,13 +51,25 @@ export function AuthProvider(props: { children: any }) {
     void loadUser();
   });
 
+  const logout = () => {
+    // Access sessions are bearer grants held only for this tab. They must not
+    // survive an explicit sign-out, even though the OIDC redirect happens next.
+    try {
+      sessionStorage.clear();
+    } catch {
+      // Storage can be unavailable in restricted browsing modes.
+    }
+
+    return manager ? manager.signoutRedirect() : undefined;
+  };
+
   const value: AuthContextValue = {
     isEnabled: Boolean(settings),
     isLoading,
     isAuthenticated: () => Boolean(user()),
     user,
     login: () => (manager ? manager.signinRedirect() : undefined),
-    logout: () => (manager ? manager.signoutRedirect() : undefined),
+    logout,
     handleCallback: async () => {
       if (!manager) {
         return;

@@ -280,57 +280,67 @@ export const getPackage = async (
   });
 };
 
-export type downloadContentWithTokenResponse200 = {
+export type downloadContentResponse200 = {
   data: Blob;
   status: 200;
 };
 
-export type downloadContentWithTokenResponse400 = {
+export type downloadContentResponse400 = {
   data: ProblemDetails;
   status: 400;
 };
 
-export type downloadContentWithTokenResponse401 = {
+export type downloadContentResponse401 = {
   data: ProblemDetails;
   status: 401;
 };
 
-export type downloadContentWithTokenResponse404 = {
+export type downloadContentResponse404 = {
   data: ProblemDetails;
   status: 404;
 };
 
-export type downloadContentWithTokenResponse500 = {
+export type downloadContentResponse410 = {
+  data: ProblemDetails;
+  status: 410;
+};
+
+export type downloadContentResponse429 = {
+  data: ProblemDetails;
+  status: 429;
+};
+
+export type downloadContentResponse500 = {
   data: ProblemDetails;
   status: 500;
 };
 
-export type downloadContentWithTokenResponseSuccess = downloadContentWithTokenResponse200 & {
+export type downloadContentResponseSuccess = downloadContentResponse200 & {
   headers: Headers;
 };
-export type downloadContentWithTokenResponseError = (
-  | downloadContentWithTokenResponse400
-  | downloadContentWithTokenResponse401
-  | downloadContentWithTokenResponse404
-  | downloadContentWithTokenResponse500
+export type downloadContentResponseError = (
+  | downloadContentResponse400
+  | downloadContentResponse401
+  | downloadContentResponse404
+  | downloadContentResponse410
+  | downloadContentResponse429
+  | downloadContentResponse500
 ) & {
   headers: Headers;
 };
 
-export type downloadContentWithTokenResponse =
-  | downloadContentWithTokenResponseSuccess
-  | downloadContentWithTokenResponseError;
+export type downloadContentResponse = downloadContentResponseSuccess | downloadContentResponseError;
 
-export const getDownloadContentWithTokenUrl = (packageId: string, contentId: string) => {
+export const getDownloadContentUrl = (packageId: string, contentId: string) => {
   return `/api/v1/content/package/${packageId}/content/${contentId}/download`;
 };
 
-export const downloadContentWithToken = async (
+export const downloadContent = async (
   packageId: string,
   contentId: string,
   options?: Parameters<typeof customFetch>[1]
-): Promise<downloadContentWithTokenResponse> => {
-  return customFetch<downloadContentWithTokenResponse>(getDownloadContentWithTokenUrl(packageId, contentId), {
+): Promise<downloadContentResponse> => {
+  return customFetch<downloadContentResponse>(getDownloadContentUrl(packageId, contentId), {
     ...options,
     method: 'GET'
   });

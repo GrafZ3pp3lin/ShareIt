@@ -4,10 +4,12 @@
  * kroet.ShareIt.Api | v1
  * OpenAPI spec version: 1.0.0
  */
+import type { AccessSessionResponse } from './accessSessionResponse';
 import type { ContentItemInPackage } from './contentItemInPackage';
 import type { ContentPackageResponse } from './contentPackageResponse';
 
 export interface ContentPackageDetailsResponse {
   Package: ContentPackageResponse;
   Items: ContentItemInPackage[];
+  AccessSession: AccessSessionResponse;
 }

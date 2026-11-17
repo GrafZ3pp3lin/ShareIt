@@ -94,15 +94,18 @@ public static class ContentEndpoints
 
         // Content download endpoint (required for items above the inline limit)
         packageGroup
-            .MapGet("/{packageId:guid}/content/{contentId:guid}/download", DownloadContentWithTokenAsync)
+            .MapGet("/{packageId:guid}/content/{contentId:guid}/download", DownloadContentAsync)
             .RequirePermission("Download.File")
+            .RequireRateLimiting(RateLimitPolicies.Download)
             // .NET 11 describes FileStreamHttpResult as a binary string schema.
             .Produces<FileStreamHttpResult>(contentType: Application.Octet)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status410Gone)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
-            .WithName("DownloadContentWithToken")
+            .WithName("DownloadContent")
             .WithTags("Content");
 
         return packageGroup;
@@ -169,10 +172,10 @@ public static class ContentEndpoints
             return lifetimeProblem;
         }
 
-        var downloadCountProblem = ValidateMaxDownloadCount(userIdentity, settings, request.MaxDownloadCount);
-        if (downloadCountProblem is not null)
+        var accessCountProblem = ValidateMaxAccessCount(userIdentity, settings, request.MaxAccessCount);
+        if (accessCountProblem is not null)
         {
-            return downloadCountProblem;
+            return accessCountProblem;
         }
 
         // Idempotent retry: the same owner repeating the create call gets the
@@ -202,7 +205,7 @@ public static class ContentEndpoints
             CreatedAt = now,
             UserId = userIdentity.Id,
             IsPrivate = request.IsPrivate,
-            MaxDownloadCount = request.MaxDownloadCount,
+            MaxAccessCount = request.MaxAccessCount,
             ExpiresAt = request.TimeToLiveHours.HasValue
                 ? now.AddHours(request.TimeToLiveHours.Value)
                 : null,
@@ -351,23 +354,24 @@ public static class ContentEndpoints
     }
 
     /// <summary>
-    /// Gets a package with all its content items and issues download tokens for
-    /// items above the inline payload limit. A protected package requires a
-    /// valid unlock proof before anything is read or an access is claimed.
+    /// Gets a package with all its content items and returns its access session.
+    /// Items above the inline payload limit are downloaded through that session.
+    /// A protected package requires a valid unlock proof before anything is read
+    /// or an access is claimed.
     /// </summary>
     private static async Task<Results<Ok<ContentPackageDetailsResponse>, ProblemHttpResult>> GetPackageAsync(
         [FromRoute] Guid packageId,
         [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromHeader(Name = "X-Unlock-Proof")] string? unlockProof,
+        [FromHeader(Name = "X-Access-Session")] string? accessSession,
         [FromServices] IContentStorageHandler storageHandler,
         [FromServices] IBlobStorageHandler blobStorageHandler,
-        [FromServices] IDownloadTokenService tokenService,
+        [FromServices] IAccessSessionService accessSessionService,
         [FromServices] IOptions<DownloadSettings> downloadOptions,
-        [FromServices] LinkGenerator linkGenerator,
         [FromServices] TimeProvider timeProvider,
         [FromServices] ShareItMetrics metrics,
-        HttpContext httpContext,
         ClaimsPrincipal claimsPrincipal,
+        HttpContext httpContext,
         ILogger<LogCategory> logger,
         CancellationToken cancellationToken)
     {
@@ -385,7 +389,7 @@ public static class ContentEndpoints
 
         activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
-        // Shell first: no items, no names, no tokens, no blob reads.
+        // Shell first: no items, no names, no session, no blob reads.
         var package = await storageHandler.GetPackageShellAsync(packageId, cancellationToken);
         if (package is null || package.IsPrivate.HasValue && package.IsPrivate.Value && (userIdentity.IsGuest || package.UserId != userIdentity.Id))
         {
@@ -440,25 +444,29 @@ public static class ContentEndpoints
 
         activity?.SetTag("shareit.package.items", withContent.Contents.Count);
 
-        // Purely accessing the link consumes one access, claimed atomically:
-        // once the package's access limit is reached, any further view —
-        // another person, a second tab, or a refresh — is rejected here.
-        var claim = await storageHandler.IncrementPackageAccessCountAsync(packageId, cancellationToken);
-        if (!claim.Success)
+        // A session is read-only validation. If it is valid, this re-fetch does
+        // not consume another access; if it is missing or stale, the claim
+        // below creates a new one after preparation succeeds.
+        AccessSessionTicket? existingSession = null;
+        if (!string.IsNullOrWhiteSpace(accessSession))
         {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Package access limit reached",
-                Detail = "The maximum number of accesses for this package has been reached",
-                Status = StatusCodes.Status410Gone
-            });
+            existingSession = await accessSessionService.ValidateAsync(
+                accessSession,
+                packageId,
+                userIdentity.Id,
+                userIdentity.IsGuest,
+                cancellationToken);
+            activity?.SetTag("shareit.access.session_reused", existingSession is not null);
         }
 
-        metrics.AccessClaimed();
-
-        // The response must reflect the access that was just claimed. The
-        // package was loaded before the claim, so the counters are stale.
-        withContent = withContent with { CurrentDownloadCount = claim.NewCount };
+        // An exhausted package with no valid session cannot succeed below, and
+        // answering 410 here avoids reading and buffering inline S3 payloads
+        // (or turning a missing object into a 500) for a request that is
+        // already known to fail.
+        if (existingSession is null && withContent.IsAccessLimitReached)
+        {
+            return AccessLimitReachedProblem();
+        }
 
         var inlineLimitBytes = downloadOptions.Value.InlinePayloadLimitBytes;
         var inlineBudgetBytes = downloadOptions.Value.InlinePayloadBudgetBytes;
@@ -468,7 +476,7 @@ public static class ContentEndpoints
         // number of items is already known.
         List<ContentItemInPackage> items = [with(capacity: withContent.Contents.Count)];
         var inlineItemCount = 0;
-        var tokenItemCount = 0;
+        var deferredItemCount = 0;
         var orderedContents = withContent.Contents
             .OrderBy(content => content.CreatedAt)
             .ThenBy(content => content.Id.ToString("N"), StringComparer.Ordinal);
@@ -499,64 +507,101 @@ public static class ContentEndpoints
             }
             else
             {
-                var token = await tokenService.GenerateTokenAsync(content.Id, userIdentity.Id, cancellationToken);
-                metrics.TokenIssued();
-                tokenItemCount++;
-                var downloadUrl = linkGenerator.GetUriByName(
-                    httpContext,
-                    "DownloadContentWithToken",
-                    new { packageId = withContent.Id, contentId = content.Id })!;
-
+                // Nothing is minted here: the package's access session already
+                // authorizes a lazy download when the recipient clicks the item.
+                deferredItemCount++;
                 items.Add(new ContentItemInPackage
                 {
                     Id = content.Id,
                     Kind = KindOf(content.ContentType),
                     Size = content.Size,
-                    Meta = content.Meta,
-                    DownloadToken = token.Token,
-                    DownloadUrl = downloadUrl,
-                    TokenExpiresAt = token.ExpiresAt
+                    Meta = content.Meta
                 });
             }
+        }
+
+        // Claim last: all response preparation above can still fail without
+        // consuming an access, and the counter plus session commit together.
+        AccessSessionTicket ticket;
+        var accessClaimed = false;
+
+        if (existingSession is not null)
+        {
+            ticket = existingSession;
+            metrics.AccessSessionReused();
+        }
+        else
+        {
+            var creation = await accessSessionService.CreateAsync(
+                packageId,
+                userIdentity.Id,
+                userIdentity.IsGuest,
+                cancellationToken);
+
+            if (!creation.Success || creation.Ticket is null)
+            {
+                return AccessLimitReachedProblem();
+            }
+
+            ticket = creation.Ticket;
+            accessClaimed = true;
+            metrics.AccessClaimed();
+
+            // The response must reflect the access that was just claimed. The
+            // package was loaded before the claim, so its counter is stale.
+            withContent = withContent with { CurrentAccessCount = creation.NewAccessCount };
         }
 
         var response = new ContentPackageDetailsResponse
         {
             Package = ContentPackageResponse.FromPackage(withContent),
-            Items = items
+            Items = items,
+            AccessSession = new AccessSessionResponse
+            {
+                Token = ticket.Token,
+                ExpiresAt = ticket.ExpiresAt
+            }
         };
 
         activity?.SetTag("shareit.package.inline_items", inlineItemCount);
-        activity?.SetTag("shareit.package.token_items", tokenItemCount);
+        activity?.SetTag("shareit.package.deferred_items", deferredItemCount);
         activity?.SetTag("shareit.package.inline_bytes", inlineSpentBytes);
+        activity?.SetTag("shareit.package.access_claimed", accessClaimed);
         activity?.SetTag("shareit.package.result", "opened");
+
+        // The body carries the access session token.
+        httpContext.Response.Headers.CacheControl = "no-store";
 
         return TypedResults.Ok(response);
     }
 
     /// <summary>
-    /// Downloads content data using a temporary token.
+    /// Downloads content data using the package's access session. The session
+    /// stays valid, so retries and parallel downloads never consume another
+    /// access.
     /// </summary>
-    private static async Task<Results<FileStreamHttpResult, ProblemHttpResult>> DownloadContentWithTokenAsync(
+    private static async Task<Results<FileStreamHttpResult, ProblemHttpResult>> DownloadContentAsync(
         [FromRoute] Guid packageId,
         [FromRoute] Guid contentId,
-        [FromHeader(Name = "X-File-Token")] string token,
+        [FromHeader(Name = "X-Access-Session")] string? accessSession,
         [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler storageHandler,
         [FromServices] IBlobStorageHandler blobStorageHandler,
-        [FromServices] IDownloadTokenService tokenService,
+        [FromServices] IAccessSessionService accessSessionService,
+        [FromServices] TimeProvider timeProvider,
         [FromServices] ShareItMetrics metrics,
         ClaimsPrincipal claimsPrincipal,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.download");
 
-        if (string.IsNullOrWhiteSpace(token))
+        if (string.IsNullOrWhiteSpace(accessSession))
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Missing download token",
-                Detail = "A download token must be provided in the X-File-Token header",
+                Title = "Missing access session",
+                Detail = "An access session must be provided in the X-Access-Session header",
                 Status = StatusCodes.Status400BadRequest
             });
         }
@@ -573,27 +618,45 @@ public static class ContentEndpoints
 
         activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
-        // Read-only validation first: a failing blob read must not burn the
-        // token.
-        var validationResult = await tokenService.ValidateTokenAsync(token, userIdentity.Id, cancellationToken);
-        if (!validationResult.IsValid)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Invalid download token",
-                Detail = validationResult.ErrorMessage ?? "The download token is invalid or has expired",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
+        // Read-only validation: downloads never consume the session.
+        var session = await accessSessionService.ValidateAsync(
+            accessSession,
+            packageId,
+            userIdentity.Id,
+            userIdentity.IsGuest,
+            cancellationToken);
 
-        // Verify the token was issued for this content
-        if (validationResult.ContentId != contentId)
+        if (session is null)
         {
+            // The session row cascades away when its package is deleted. In
+            // that case 401 would be misleading; distinguish a dead package
+            // from a merely expired/invalid session.
+            var packageShell = await storageHandler.GetPackageShellAsync(packageId, cancellationToken);
+            if (packageShell is null)
+            {
+                return TypedResults.Problem(new ProblemDetails
+                {
+                    Title = "Package not found",
+                    Detail = $"Package with ID {packageId} was not found",
+                    Status = StatusCodes.Status404NotFound
+                });
+            }
+
+            if (packageShell.IsExpired(timeProvider.GetUtcNow()))
+            {
+                return TypedResults.Problem(new ProblemDetails
+                {
+                    Title = "Package expired",
+                    Detail = "This package has expired and is no longer available",
+                    Status = StatusCodes.Status410Gone
+                });
+            }
+
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Token mismatch",
-                Detail = "The download token is not valid for this content",
-                Status = StatusCodes.Status400BadRequest
+                Title = "Invalid access session",
+                Detail = "The access session is invalid or has expired",
+                Status = StatusCodes.Status401Unauthorized
             });
         }
 
@@ -606,6 +669,16 @@ public static class ContentEndpoints
                 Title = "Content not in package",
                 Detail = "The requested content is not part of the specified package",
                 Status = StatusCodes.Status404NotFound
+            });
+        }
+
+        if (package.IsExpired(timeProvider.GetUtcNow()))
+        {
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Package expired",
+                Detail = "This package has expired and is no longer available",
+                Status = StatusCodes.Status410Gone
             });
         }
 
@@ -622,7 +695,7 @@ public static class ContentEndpoints
         catch (KeyNotFoundException)
         {
             activity?.SetStatus(ActivityStatusCode.Error, "content not found");
-            // The token stays usable: nothing was streamed and nothing consumed.
+            // The session stays valid: nothing was streamed.
             return TypedResults.Problem(new ProblemDetails
             {
                 Title = "Content not found",
@@ -631,32 +704,19 @@ public static class ContentEndpoints
             });
         }
 
-        // Consume only once the blob is open. Losing the race (another request
-        // used the same token) must not stream anything.
-        var consumed = await tokenService.ConsumeTokenAsync(token, userIdentity.Id, cancellationToken);
-        if (!consumed.IsValid)
-        {
-            await stream.DisposeAsync();
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Invalid download token",
-                Detail = consumed.ErrorMessage ?? "The download token has already been used",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        // The token is consumed and the download is authorized here. The
-        // response body is streamed after this method returns, so this is not
-        // a completed-transfer measurement.
+        // The session authorizes the download. The response body is streamed
+        // after this method returns, so this is not a completed-transfer
+        // measurement.
         metrics.DownloadAuthorized(content.Size);
         activity?.SetTag("shareit.download.authorized", true);
 
+        // A session can serve repeated requests; shared caches must not keep
+        // the response.
+        httpContext.Response.Headers.CacheControl = "no-store";
+
         // No names or MIME types here: both are part of the client-sealed
         // per-item metadata. The browser saves the bytes as an opaque blob.
-        return TypedResults.Stream(
-            stream,
-            "application/octet-stream",
-            enableRangeProcessing: true);
+        return TypedResults.Stream(stream, "application/octet-stream");
     }
 
     /// <summary>
@@ -673,10 +733,18 @@ public static class ContentEndpoints
             AuthenticatedFileLimitBytes = settings.Authenticated.FileLimitMb * 1024L * 1024L,
             AnonymousMaxLifetimeHours = settings.Anonymous.MaxLifetimeHours,
             AuthenticatedMaxLifetimeHours = settings.Authenticated.MaxLifetimeHours,
-            AnonymousMaxDownloadCount = settings.Anonymous.MaxDownloadCount,
-            AuthenticatedMaxDownloadCount = settings.Authenticated.MaxDownloadCount
+            AnonymousMaxAccessCount = settings.Anonymous.MaxAccessCount,
+            AuthenticatedMaxAccessCount = settings.Authenticated.MaxAccessCount
         });
     }
+
+    private static ProblemHttpResult AccessLimitReachedProblem()
+        => TypedResults.Problem(new ProblemDetails
+        {
+            Title = "Package access limit reached",
+            Detail = "The maximum number of accesses for this package has been reached",
+            Status = StatusCodes.Status410Gone
+        });
 
     private static bool TryParseKind(string? kind, out ContentType contentType)
     {
@@ -740,24 +808,24 @@ public static class ContentEndpoints
         return null;
     }
 
-    private static ProblemHttpResult? ValidateMaxDownloadCount(
-        UserIdentity userIdentity, UploadSettings settings, int? maxDownloadCount)
+    private static ProblemHttpResult? ValidateMaxAccessCount(
+        UserIdentity userIdentity, UploadSettings settings, int? maxAccessCount)
     {
-        if (maxDownloadCount is { } count)
+        if (maxAccessCount is { } count)
         {
             if (count <= 0)
             {
                 return BadRequestProblem(
-                    "Invalid download limit",
-                    "MaxDownloadCount must be a positive number.");
+                    "Invalid access limit",
+                    "MaxAccessCount must be a positive number.");
             }
 
             var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
-            if (count > identityLimits.MaxDownloadCount)
+            if (count > identityLimits.MaxAccessCount)
             {
                 return BadRequestProblem(
-                    "Download limit too high",
-                    $"Packages for this identity allow at most {identityLimits.MaxDownloadCount} downloads.");
+                    "Access limit too high",
+                    $"Packages for this identity allow at most {identityLimits.MaxAccessCount} accesses.");
             }
 
             return null;
@@ -766,8 +834,8 @@ public static class ContentEndpoints
         if (userIdentity.IsGuest)
         {
             return BadRequestProblem(
-                "Download limit required",
-                $"Anonymous packages must set MaxDownloadCount of at most {settings.Anonymous.MaxDownloadCount}.");
+                "Access limit required",
+                $"Anonymous packages must set MaxAccessCount of at most {settings.Anonymous.MaxAccessCount}.");
         }
 
         return null;

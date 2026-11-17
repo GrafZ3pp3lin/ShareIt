@@ -11,8 +11,8 @@ Scope: `frontend/src/shared/crypto`, share page, composer flow, package/item sto
 ## 1. Goal
 
 The package id is a bearer credential, but package metadata and content must not be readable without
-proof of the passphrase. `GET /package/{id}` returns names, sizes, types, counters and download tokens
-only after that proof, and only then consumes an access.
+proof of the passphrase. `GET /package/{id}` returns names, sizes, types, counters and an access
+session only after that proof, and only then consumes an access.
 
 Target:
 
@@ -92,13 +92,16 @@ Text and files are the same bytes. The only decision is whether `GET /{id}` carr
 | item | response |
 | --- | --- |
 | stored bytes ≤ `InlinePayloadLimitBytes` (16 KB) **and** the response budget (64 KB) is not spent | `payload` = base64url(bytes) |
-| otherwise | `downloadToken`, `downloadUrl`, `tokenExpiresAt` |
+| otherwise | no payload; download with the package's `accessSession` |
 
-Iterate items in a stable order (by creation), spend the budget, then emit tokens for the rest.
-`Size` is always the stored byte length — no base64 inflation in the database.
+Iterate items in a stable order (by creation) and spend the budget. `Size` is always the stored byte
+length — no base64 inflation in the database. Nothing is issued per deferred item: the session returned
+by the open authorizes the download when the recipient clicks it.
 
 ```ts
-const bytes = item.payload ? base64urlDecode(item.payload) : await download(item.downloadToken);
+const bytes = item.payload
+  ? base64urlDecode(item.payload)
+  : await download(packageId, item.id, accessSession.token);
 const plain = isSealed(bytes) ? await open(itemKey(item.id), bytes, itemAad(packageId, item.id)) : bytes;
 ```
 
@@ -118,7 +121,7 @@ meta(bytes) = sealed( utf8(JSON { name, mime }) )   when the package is protecte
             = utf8(JSON { name, mime })             when it is not
 
 POST /{id}/upload   fields: Id, Kind, Meta (base64url of those bytes), File (content bytes)
-GET  /{id} item     { id, kind, size, meta: base64url(meta bytes), payload? | token? }
+GET  /{id} item     { id, kind, size, meta: base64url(meta bytes), payload? }
 ```
 
 - The server stores `Meta` verbatim as opaque **text** (base64url) in the `contents.meta` column and
@@ -186,20 +189,24 @@ combined  …/s/{packageId}#s=<passphrase>
 ```
 GET /api/v1/content/package/{packageId}
 X-Unlock-Proof: <base64url(verifier)>        # required only if the package has a verifier
+X-Access-Session: <opaque token>             # optional; reuses an existing access
 ```
 
 Server, in order:
 
-1. Load the package shell (id, verifier, expiry, counters). No items, no names, no tokens.
+1. Load the package shell (id, verifier, expiry, counters). No items, no names, no session.
 2. Expired → `410`.
 3. Package has a verifier and the header is missing or does not match (constant-time) → `401`
    generic body. **No counter change, no metadata.**
-4. Atomically claim one access.
-5. Load items, issue tokens, return.
+4. Load content metadata; an empty package → `410` without claiming.
+5. Validate `X-Access-Session` if present. A valid session skips the claim and is returned again.
+6. Prepare inline payloads. Any failure here leaves the counter unchanged.
+7. Atomically claim one access and insert the session in the same transaction; return the items and the
+   session. Concurrent claims serialize on the package row and can never exceed the limit.
 
-Rate limiting: 20 requests / 15 min per `(packageId, remoteIp)` (configurable via
-`RateLimitSettings`), successful unlocks included, then `429` + `Retry-After`. Log failures without
-the proof value; never log the header.
+Rate limiting: 20 package reads / 15 min per `(packageId, remoteIp)` and 120 downloads / 1 min per
+remote IP (configurable via `RateLimitSettings`), successful unlocks included, then `429` +
+`Retry-After`. Log failures without the proof or session value; never log the headers.
 
 `401` vs `404`: knowing the id equals holding the link, so "this id exists and is protected" is not
 treated as a secret. `401` for protected, `404` for unknown.
@@ -208,7 +215,9 @@ Unencrypted packages: no verifier and no proof header. The client cannot discove
 request, so the gate is shown for plain links and an empty submission fetches without a proof — that is
 how unprotected packages open without an extra marker in the link.
 
-Download tokens are **consumed after a successful read**: a failure before streaming does not burn the token; a mid-stream failure cannot be undone.
+Downloads are authorized by the session and **never consume it**: retries, parallel downloads and a
+mid-stream failure all leave the session usable until it expires. A re-fetch with a valid session does
+not consume another access.
 
 ---
 
@@ -222,6 +231,14 @@ Download tokens are **consumed after a successful read**: a failure before strea
 | `UnlockVerifier` | `TEXT`, nullable: base64url HMAC verifier; null for unprotected packages |
 | `UserId`, timestamps, counters, expires, `IsPrivate` | owner, access accounting and expiry |
 | `Title`, `Description` | not stored; the links list names rows by creation timestamp |
+
+`access_sessions`
+
+| Column | Notes |
+| --- | --- |
+| `package_id`, `client_id`, `is_guest` | recipient binding; the client id is a user id or guest id |
+| `token_hash` | SHA-256 hex of the opaque token; the token itself is never stored |
+| `created_at`, `expires_at` | fixed lifetime, never renewed automatically |
 
 `contents`
 
@@ -259,11 +276,13 @@ Retries keep the ids stable; a duplicate create from the same owner returns the 
    Without one: show the gate and make no request until it is submitted. Because protection is not
    discoverable from the link, an empty submission fetches without a proof (unprotected packages open,
    protected ones answer `401`).
-3. `GET /package/{id}` with the proof header when a passphrase was entered.
+3. `GET /package/{id}` with the proof header when a passphrase was entered, plus the stored session
+   when this tab already has one. A valid session avoids claiming another access.
 4. Per item: decode `meta` → `open` or parse → `{ name, mime }`.
-5. Per item content: `payload` → decode, or `token` → fetch; `isSealed(bytes) ? open : bytes`.
+5. Per item content: `payload` → decode, or `accessSession` → fetch; `isSealed(bytes) ? open : bytes`.
 6. Wrong passphrase → `401`, inline error, field kept, no access consumed.
-7. After success, `history.replaceState` removes the fragment; the key stays in memory.
+7. After success, store the session in `sessionStorage` for this package and remove the fragment with
+   `history.replaceState`; the key stays in memory only.
 
 The gate is the whole page until step 3 succeeds; nothing from the package is rendered before.
 
@@ -285,6 +304,9 @@ Improved:
 - Names and real MIME types no longer sit in the database.
 - Every blob is bound to its role, package and item via AAD and the key schedule — moving, relabelling
   or replaying blobs between packages/items fails to decrypt.
+- Access sessions are bearer grants: the token is returned only in the response body, stored in
+  `sessionStorage`, and persisted server-side only as a SHA-256 hash. It is bound to the package and
+  the caller's user/guest id, expires after 15 minutes, and is never put in a URL.
 
 Residual, by design:
 
@@ -296,6 +318,10 @@ Residual, by design:
   passphrase.
 - The verifier is a stable bearer proof: anyone who learns it can unlock without the passphrase. It
   must never be logged or cached by intermediaries.
+- A stolen session token is usable by anyone who also presents the matching user/guest identity until
+  it expires. When DPoP is required, authenticated sessions also need a valid DPoP-bound access token; guest ids
+  are client-generated and therefore only a weak binding. The short lifetime and tab-scoped storage
+  bound the exposure.
 
 ---
 
@@ -320,14 +346,17 @@ Unit (frontend):
 
 Integration (backend):
 
-- `GET` without proof on a protected package → `401`, `CurrentDownloadCount` unchanged.
+- `GET` without proof on a protected package → `401`, `CurrentAccessCount` unchanged.
 - wrong proof → `401`, counter unchanged, no item fields in the body.
 - correct proof → details, counter +1; second call at the limit → `410`.
 - failed attempts hit the rate limit → `429`.
 - unencrypted package → open, no header.
 - `meta` is returned verbatim (byte-for-byte after base64url decoding) and never parsed.
-- payload rule: small → `payload`, large → token, budget exhausted → tokens.
-- token ordering: failed read leaves the token usable; successful download burns it.
+- payload rule: small → `payload`, large → session download; budget exhausted → session downloads.
+- session reuse: a re-fetch with a valid session does not increment the counter.
+- download retries and parallel downloads with the same session all succeed.
+- an expired session → `401`; a package expired during a valid session → `410`.
+- cleanup retains an exhausted package for at least the session lifetime.
 
 ---
 

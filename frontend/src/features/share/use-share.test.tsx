@@ -25,9 +25,9 @@ const packageDetails = (): ContentPackageDetailsResponse => ({
     Id: PACKAGE_ID,
     CreatedAt: new Date().toISOString(),
     ItemCount: 1,
-    MaxDownloadCount: 1,
-    CurrentDownloadCount: 0,
-    RemainingDownloads: 1,
+    MaxAccessCount: 1,
+    CurrentAccessCount: 0,
+    RemainingAccesses: 1,
     ExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString()
   },
   Items: [
@@ -38,7 +38,11 @@ const packageDetails = (): ContentPackageDetailsResponse => ({
       Meta: toBase64Url(utf8(JSON.stringify({ name: null, mime: 'text/plain' }))),
       Payload: toBase64Url(utf8('hello'))
     }
-  ]
+  ],
+  AccessSession: {
+    Token: 'session-1',
+    ExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+  }
 });
 
 type Share = ReturnType<typeof createShare>;
@@ -71,6 +75,7 @@ const renderShare = (initialId = PACKAGE_ID) => {
 describe('createShare', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', `/s/${PACKAGE_ID}`);
+    window.sessionStorage.clear();
     api.getPackageDetails.mockReset();
     api.getPackageDetails.mockResolvedValue({ status: 200, data: packageDetails() });
   });
@@ -98,7 +103,7 @@ describe('createShare', () => {
     state.unlock();
 
     await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
-    expect(api.getPackageDetails).toHaveBeenCalledWith(PACKAGE_ID, undefined);
+    expect(api.getPackageDetails).toHaveBeenCalledWith(PACKAGE_ID, undefined, undefined);
   });
 
   it.each([400, 404])('treats an HTTP %i as gone', async (httpStatus) => {
@@ -135,6 +140,83 @@ describe('createShare', () => {
     expect(state.gateMessage()).toEqual({ title: 'Unable to load this link.', body: 'offline' });
   });
 
+  it('stores the returned session and reuses it on a re-unlock', async () => {
+    const state = renderShare();
+
+    state.unlock();
+    await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
+
+    expect(state.accessSessionToken()).toBe('session-1');
+    expect(window.sessionStorage.getItem(`shareit-access-session:${PACKAGE_ID}`)).toContain('session-1');
+
+    state.unlock();
+    await vi.waitFor(() => expect(api.getPackageDetails).toHaveBeenCalledTimes(2));
+
+    expect(api.getPackageDetails).toHaveBeenLastCalledWith(PACKAGE_ID, undefined, 'session-1');
+  });
+
+  it('returns to the gate when a download reports an expired session', async () => {
+    const state = renderShare();
+
+    state.unlock();
+    await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
+
+    state.sessionExpired('session-1');
+    flush();
+
+    expect(state.status()).toBe('locked');
+    expect(state.gateMessage()).toEqual({
+      title: 'This access has expired.',
+      body: 'Unlock the link again to continue. A one-time link may already be used up — ask the sender for a new one.'
+    });
+    expect(state.details()).toBeNull();
+    expect(state.items()).toEqual([]);
+    expect(state.packageKey()).toBeUndefined();
+    expect(window.sessionStorage.getItem(`shareit-access-session:${PACKAGE_ID}`)).toBeNull();
+  });
+
+  it('ignores a late 401 from a session that has already been replaced', async () => {
+    const state = renderShare();
+
+    state.unlock();
+    await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
+
+    state.sessionExpired('older-session');
+    flush();
+
+    expect(state.status()).toBe('unlocked');
+    expect(state.accessSessionToken()).toBe('session-1');
+  });
+
+  it('clears the stored session and enters gone on a package-gone response', async () => {
+    const state = renderShare();
+
+    state.unlock();
+    await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
+
+    state.packageGone();
+    flush();
+
+    expect(state.status()).toBe('gone');
+    expect(state.details()).toBeNull();
+    expect(state.items()).toEqual([]);
+    expect(state.packageKey()).toBeUndefined();
+    expect(window.sessionStorage.getItem(`shareit-access-session:${PACKAGE_ID}`)).toBeNull();
+  });
+
+  it('sends a stored session even when the client clock says it is expired', async () => {
+    window.sessionStorage.setItem(
+      `shareit-access-session:${PACKAGE_ID}`,
+      JSON.stringify({ Token: 'clock-skewed-session', ExpiresAt: new Date(Date.now() - 1).toISOString() })
+    );
+    const state = renderShare();
+
+    state.unlock();
+    await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
+
+    expect(api.getPackageDetails).toHaveBeenCalledWith(PACKAGE_ID, undefined, 'clock-skewed-session');
+  });
+
   it('falls back to item names and default MIME types for unreadable metadata', async () => {
     api.getPackageDetails.mockResolvedValueOnce({
       status: 200,
@@ -153,8 +235,7 @@ describe('createShare', () => {
             Kind: 'file',
             Size: '2',
             Meta: null,
-            Payload: null,
-            DownloadToken: 'token-1'
+            Payload: null
           }
         ]
       }

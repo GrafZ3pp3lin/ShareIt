@@ -18,14 +18,14 @@ export interface ContentPackageListItem {
    * @nullable
    * @pattern ^-?(?:0|[1-9]\d*)$
    */
-  MaxDownloadCount?: number | string | null;
+  MaxAccessCount?: number | string | null;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
-  CurrentDownloadCount: number | string;
+  CurrentAccessCount: number | string;
   /**
    * @nullable
    * @pattern ^-?(?:0|[1-9]\d*)$
    */
-  RemainingDownloads?: number | string | null;
+  RemainingAccesses?: number | string | null;
   IsExpired: boolean;
   IsProtected: boolean;
 }

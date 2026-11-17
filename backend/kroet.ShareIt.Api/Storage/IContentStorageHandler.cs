@@ -38,8 +38,8 @@ public interface IContentStorageHandler
     Task<ContentPackage?> GetPackageAsync(Guid packageId, bool includeContent = true, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves only the package shell — no items, no tokens, no blob reads.
-    /// Used to check the unlock proof before an access is claimed.
+    /// Retrieves only the package shell — no items, no blob reads. Used to
+    /// check the unlock proof before an access is claimed.
     /// </summary>
     /// <param name="packageId">The unique package identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -83,14 +83,26 @@ public interface IContentStorageHandler
     Task<IReadOnlyList<ExternalContent>> GetContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Atomically claims one access for a package. Opening the link counts as
-    /// an access; the guarded update rejects the claim once the package's
-    /// access limit has been reached.
+    /// Atomically claims one access and stores its session. The guarded update
+    /// rejects the claim once the package's access limit has been reached, and
+    /// the session insert rolls back with it when either step fails.
     /// </summary>
-    /// <param name="packageId">The unique package identifier.</param>
+    /// <param name="session">The session to create; its creation time is also the access time.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result of the claim operation.</returns>
-    Task<DownloadIncrementResult> IncrementPackageAccessCountAsync(Guid packageId, CancellationToken cancellationToken = default);
+    Task<AccessSessionClaimResult> CreateAccessSessionAsync(AccessSession session, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finds an access session by its token hash. Returns null when no session
+    /// has that hash.
+    /// </summary>
+    Task<AccessSession?> GetAccessSessionByTokenHashAsync(string tokenHash, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes sessions whose expiry is at or before the given time.
+    /// </summary>
+    /// <returns>Number of sessions deleted.</returns>
+    Task<long> DeleteExpiredAccessSessionsAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Deletes multiple packages and their content, queueing their blobs in

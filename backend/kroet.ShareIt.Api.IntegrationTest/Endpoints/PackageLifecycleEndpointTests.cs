@@ -32,7 +32,7 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
     public async Task GetPackage_WhenPackageHasNoContent_Returns410WithoutChargingAnAccess()
     {
         var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, maxDownloadCount: 1);
+        var packageId = await CreatePackageAsync(guestId: guestId, maxAccessCount: 1);
 
         var response = await GetPackageAsync(packageId, guestId);
 
@@ -44,7 +44,7 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
         var shell = await Services.GetRequiredService<IContentStorageHandler>()
             .GetPackageShellAsync(packageId);
         Assert.IsNotNull(shell);
-        Assert.AreEqual(0, shell.CurrentDownloadCount, "An empty package must not charge an access.");
+        Assert.AreEqual(0, shell.CurrentAccessCount, "An empty package must not charge an access.");
 
         // After a successful upload the same link must still open and then
         // consume exactly one access.
@@ -53,6 +53,6 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.OK, upload.StatusCode, uploadBody);
 
         var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
-        Assert.AreEqual(1, details.Package.CurrentDownloadCount);
+        Assert.AreEqual(1, details.Package.CurrentAccessCount);
     }
 }

@@ -33,8 +33,8 @@ public sealed class ShareItMetricsTests
         metrics.PackageCreated();
         metrics.PackageDeleted("owner");
         metrics.AccessClaimed();
+        metrics.AccessSessionReused();
         metrics.ItemUploaded(ContentType.File, 11);
-        metrics.TokenIssued();
         metrics.DownloadAuthorized(11);
         metrics.UnlockFailed();
         metrics.RateLimited();
@@ -63,8 +63,7 @@ public sealed class ShareItMetricsTests
         AssertMeasurement(captured, "shareit.package.accesses", 1);
         AssertMeasurement(captured, "shareit.items.uploaded", 1, "kind", "file");
         AssertMeasurement(captured, "shareit.bytes.uploaded", 11);
-        AssertMeasurement(captured, "shareit.tokens.issued", 1);
-        AssertMeasurement(captured, "shareit.tokens.consumed", 1);
+        AssertMeasurement(captured, "shareit.access.sessions_reused", 1);
         AssertMeasurement(captured, "shareit.bytes.authorized", 11);
         AssertMeasurement(captured, "shareit.unlock.failures", 1);
         AssertMeasurement(captured, "shareit.rate.limited", 1);

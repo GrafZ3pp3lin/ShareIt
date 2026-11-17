@@ -10,6 +10,9 @@ type TextBlockProps = {
   packageId: string;
   item: ShareItem;
   packageKey: PackageKey | undefined;
+  accessSessionToken: string | undefined;
+  onAccessExpired?: (failedToken?: string) => void;
+  onPackageGone?: () => void;
 };
 
 const decoder = new TextDecoder();
@@ -32,7 +35,14 @@ export function TextBlock(props: TextBlockProps) {
     setError('');
 
     try {
-      const bytes = await readShareItem(props.packageId, props.item, props.packageKey);
+      const bytes = await readShareItem(
+        props.packageId,
+        props.item,
+        props.packageKey,
+        props.accessSessionToken,
+        props.onAccessExpired,
+        props.onPackageGone
+      );
       if (current !== request) {
         return;
       }

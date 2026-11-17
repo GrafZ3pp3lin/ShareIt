@@ -15,7 +15,7 @@ public sealed class UploadSettings : ISettings
     {
         FileLimitMb = 25,
         MaxLifetimeHours = 6,
-        MaxDownloadCount = 1
+        MaxAccessCount = 1
     };
 
     /// <summary>
@@ -25,7 +25,7 @@ public sealed class UploadSettings : ISettings
     {
         FileLimitMb = 100,
         MaxLifetimeHours = 24 * 30,
-        MaxDownloadCount = 10
+        MaxAccessCount = 10
     };
 
     /// <summary>
@@ -56,7 +56,7 @@ public sealed class UploadIdentitySettings
     /// <summary>
     /// Maximum number of times a package may be accessed.
     /// </summary>
-    public int MaxDownloadCount { get; set; }
+    public int MaxAccessCount { get; set; }
 }
 
 public sealed class UploadSettingsValidator : AbstractValidator<UploadSettings>
@@ -73,8 +73,8 @@ public sealed class UploadSettingsValidator : AbstractValidator<UploadSettings>
 
         RuleFor(x => x.Authenticated.MaxLifetimeHours).GreaterThanOrEqualTo(x => x.Anonymous.MaxLifetimeHours);
 
-        RuleFor(x => x.Anonymous.MaxDownloadCount).GreaterThan(0);
+        RuleFor(x => x.Anonymous.MaxAccessCount).GreaterThan(0);
 
-        RuleFor(x => x.Authenticated.MaxDownloadCount).GreaterThanOrEqualTo(x => x.Anonymous.MaxDownloadCount);
+        RuleFor(x => x.Authenticated.MaxAccessCount).GreaterThanOrEqualTo(x => x.Anonymous.MaxAccessCount);
     }
 }

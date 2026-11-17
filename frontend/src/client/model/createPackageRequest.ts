@@ -14,7 +14,7 @@ export interface CreatePackageRequest {
    * @nullable
    * @pattern ^-?(?:0|[1-9]\d*)$
    */
-  MaxDownloadCount?: number | string | null;
+  MaxAccessCount?: number | string | null;
   /**
    * @nullable
    * @pattern ^-?(?:0|[1-9]\d*)$

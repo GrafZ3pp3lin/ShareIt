@@ -18,11 +18,11 @@ import { seal, SEALED_OVERHEAD_BYTES } from '../../shared/crypto/sealed.ts';
 import { useI18n } from '../../i18n/i18n.tsx';
 import { useAuth } from '../auth/auth-context.tsx';
 import {
-  ANONYMOUS_DOWNLOAD_COUNT,
+  ANONYMOUS_ACCESS_COUNT,
   ANONYMOUS_EXPIRY_INDEX,
-  DEFAULT_DOWNLOAD_COUNT_INDEX,
+  DEFAULT_ACCESS_COUNT_INDEX,
   DEFAULT_EXPIRY_INDEX,
-  DOWNLOAD_COUNT_OPTIONS,
+  ACCESS_COUNT_OPTIONS,
   EXPIRY_OPTIONS
 } from './composer-options.ts';
 
@@ -33,7 +33,7 @@ export type ComposerResult = {
   linkWithPassphrase?: string;
   passphrase?: string;
   expiryLabel: string;
-  downloadsLabel: string;
+  accessesLabel: string;
   passwordLabel: string;
   encrypted: boolean;
   /** True when the result panel shows a link whose item uploads did not all finish. */
@@ -59,7 +59,7 @@ type PartialPackage = {
   nextIndex: number;
   passphrase: string | undefined;
   expiryLabel: string;
-  downloadsLabel: string;
+  accessesLabel: string;
   passwordLabel: string;
   encrypted: boolean;
 };
@@ -86,7 +86,7 @@ export function createComposer() {
   const [customPassphrase, setCustomPassphraseBase] = createSignal('');
   const [generatedPassphrase, setGeneratedPassphrase] = createSignal(generatePassphrase());
   const [expiryIndex, setExpiryIndex] = createSignal(DEFAULT_EXPIRY_INDEX);
-  const [downloadIndex, setDownloadIndex] = createSignal(DEFAULT_DOWNLOAD_COUNT_INDEX);
+  const [accessIndex, setAccessIndex] = createSignal(DEFAULT_ACCESS_COUNT_INDEX);
   const [error, setError] = createSignal<string | null>(null);
   const [result, setResult] = createSignal<ComposerResult | null>(null);
   const [progress, setProgress] = createSignal<ComposerProgress | null>(null);
@@ -102,13 +102,13 @@ export function createComposer() {
 
   // Guests have no pickers: they always get the shortest lifetime and one access.
   const expiry = createMemo(() => EXPIRY_OPTIONS[isAuthenticated() ? expiryIndex() : ANONYMOUS_EXPIRY_INDEX]);
-  const downloadCount = createMemo(() =>
-    isAuthenticated() ? DOWNLOAD_COUNT_OPTIONS[downloadIndex()] : ANONYMOUS_DOWNLOAD_COUNT
+  const accessCount = createMemo(() =>
+    isAuthenticated() ? ACCESS_COUNT_OPTIONS[accessIndex()] : ANONYMOUS_ACCESS_COUNT
   );
 
   const expiryLabel = createMemo(() => t(expiry().labelKey));
-  const downloadsLabel = createMemo(() => {
-    const count = downloadCount();
+  const accessesLabel = createMemo(() => {
+    const count = accessCount();
     if (count == null) {
       return t('options.downloads.unlimited');
     }
@@ -124,7 +124,7 @@ export function createComposer() {
   const summary = createMemo(() =>
     t('options.summary', {
       expiry: expiryLabel(),
-      downloads: downloadsLabel(),
+      downloads: accessesLabel(),
       password: passwordLabel()
     })
   );
@@ -248,7 +248,7 @@ export function createComposer() {
 
   const setDownloads = (index: number) => {
     clearPartial();
-    setDownloadIndex(index);
+    setAccessIndex(index);
   };
 
   const buildItems = (): ComposerItem[] => {
@@ -287,7 +287,7 @@ export function createComposer() {
     nextIndex,
     passphrase: currentPassphrase,
     expiryLabel: labels.expiry,
-    downloadsLabel: labels.downloads,
+    accessesLabel: labels.downloads,
     passwordLabel: labels.password,
     encrypted: Boolean(currentPassphrase)
   });
@@ -301,7 +301,7 @@ export function createComposer() {
       const currentPassphrase = resume ? resume.passphrase : passphrase();
       const labels = {
         expiry: resume?.expiryLabel ?? expiryLabel(),
-        downloads: resume?.downloadsLabel ?? downloadsLabel(),
+        downloads: resume?.accessesLabel ?? accessesLabel(),
         password: resume?.passwordLabel ?? passwordLabel()
       };
       const packageId = resume?.packageId ?? crypto.randomUUID();
@@ -318,7 +318,7 @@ export function createComposer() {
           Id: packageId,
           UnlockVerifier: verifier,
           TimeToLiveHours: expiry().hours,
-          MaxDownloadCount: downloadCount()
+          MaxAccessCount: accessCount()
         });
 
         if (!created.data) {
@@ -414,7 +414,7 @@ export function createComposer() {
         linkWithPassphrase: currentPassphrase ? `${link}#s=${encodeURIComponent(currentPassphrase)}` : undefined,
         passphrase: currentPassphrase,
         expiryLabel: labels.expiry,
-        downloadsLabel: labels.downloads,
+        accessesLabel: labels.downloads,
         passwordLabel: labels.password,
         encrypted: Boolean(currentPassphrase)
       });
@@ -454,7 +454,7 @@ export function createComposer() {
         : undefined,
       passphrase: resume.passphrase,
       expiryLabel: resume.expiryLabel,
-      downloadsLabel: resume.downloadsLabel,
+      accessesLabel: resume.accessesLabel,
       passwordLabel: resume.passwordLabel,
       encrypted: resume.encrypted,
       incomplete: true
@@ -476,7 +476,7 @@ export function createComposer() {
     setCustomPassphraseBase('');
     setGeneratedPassphrase(generatePassphrase());
     setExpiryIndex(DEFAULT_EXPIRY_INDEX);
-    setDownloadIndex(DEFAULT_DOWNLOAD_COUNT_INDEX);
+    setAccessIndex(DEFAULT_ACCESS_COUNT_INDEX);
     setError(null);
     setResult(null);
     setProgress(null);
@@ -520,9 +520,9 @@ export function createComposer() {
     passphraseError,
     isAuthenticated,
     expiryIndex,
-    downloadIndex,
+    accessIndex,
     expiryLabel,
-    downloadsLabel,
+    accessesLabel,
     passwordLabel,
     limitLabel,
     totalSize,

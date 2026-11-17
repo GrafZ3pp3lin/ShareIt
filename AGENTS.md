@@ -26,6 +26,9 @@
 - Routes: `/` composer, `/links` owner links list (authenticated), `/s/:packageId` share gate +
   document, `*` not found. Route wiring lives in `src/shared/routes/route-tree.tsx`.
 - Guests can create links, but only authenticated users can list or delete them.
+- A successful open returns a short-lived, package-wide `X-Access-Session` bearer token (15 minutes)
+  used for re-fetches and downloads; it is stored in `sessionStorage`, never in a URL, and is cleared on
+  a download 401 or package-gone response. See `frontend/AGENTS.md`.
 - Optional client-side encryption uses one passphrase per package, a salt derived from the package id,
   `SIE2` sealed envelopes and per-item sealed `meta`; the API only ever sees opaque bytes and the
   `X-Unlock-Proof` verifier. See `frontend/AGENTS.md` and `docs/crypto-v2.md`.

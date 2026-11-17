@@ -17,6 +17,9 @@ const originalFetch = globalThis.fetch;
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+const problemResponse = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/problem+json' } });
+
 const stubFetch = (handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) => {
   const fetchMock = vi.fn(handler);
   globalThis.fetch = fetchMock;
@@ -33,8 +36,8 @@ describe('getUploadLimits', () => {
         AuthenticatedFileLimitBytes: 200,
         AnonymousMaxLifetimeHours: 6,
         AuthenticatedMaxLifetimeHours: 720,
-        AnonymousMaxDownloadCount: 1,
-        AuthenticatedMaxDownloadCount: 10
+        AnonymousMaxAccessCount: 1,
+        AuthenticatedMaxAccessCount: 10
       })
     );
 
@@ -45,8 +48,8 @@ describe('getUploadLimits', () => {
       AuthenticatedFileLimitBytes: 200,
       AnonymousMaxLifetimeHours: 6,
       AuthenticatedMaxLifetimeHours: 720,
-      AnonymousMaxDownloadCount: 1,
-      AuthenticatedMaxDownloadCount: 10
+      AnonymousMaxAccessCount: 1,
+      AuthenticatedMaxAccessCount: 10
     });
     expect(result.error).toBeUndefined();
   });
@@ -77,7 +80,7 @@ describe('createPackage', () => {
       Id: 'pkg-1',
       UnlockVerifier: null,
       TimeToLiveHours: 24,
-      MaxDownloadCount: 1
+      MaxAccessCount: 1
     };
     const fetchMock = stubFetch(async () => jsonResponse(201, { Id: 'pkg-1', ItemCount: 0 }));
 
@@ -105,24 +108,36 @@ describe('createPackage', () => {
 
 describe('getPackageDetails', () => {
   it('fetches the package with the unlock proof and returns status', async () => {
-    const body = { Package: { Id: 'pkg-1' }, Items: [] };
+    const body = {
+      Package: { Id: 'pkg-1' },
+      Items: [],
+      AccessSession: { Token: 'session-1', ExpiresAt: '2026-11-04T12:15:00Z' }
+    };
     const fetchMock = stubFetch(async () => jsonResponse(200, body));
 
-    const result = await getPackageDetails('pkg-1', 'proof-1');
+    const result = await getPackageDetails('pkg-1', 'proof-1', 'session-1');
 
     expect(result.data).toEqual(body);
     expect(result.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1');
     expect(new Headers(init?.headers).get('X-Unlock-Proof')).toBe('proof-1');
+    expect(new Headers(init?.headers).get('X-Access-Session')).toBe('session-1');
   });
 
   it('omits the unlock proof for a plain link', async () => {
-    const fetchMock = stubFetch(async () => jsonResponse(200, { Package: { Id: 'pkg-1' }, Items: [] }));
+    const fetchMock = stubFetch(async () =>
+      jsonResponse(200, {
+        Package: { Id: 'pkg-1' },
+        Items: [],
+        AccessSession: { Token: 'session-1', ExpiresAt: '2026-11-04T12:15:00Z' }
+      })
+    );
 
     await getPackageDetails('pkg-1');
 
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Unlock-Proof')).toBeNull();
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Access-Session')).toBeNull();
   });
 
   it('returns the response status and error for a rejected unlock', async () => {
@@ -145,10 +160,21 @@ describe('getPackageDetails', () => {
     expect(result.error).toEqual({ Items: [] });
     expect(result.status).toBe(200);
   });
+
+  it('rejects a details response whose access session is null', async () => {
+    const body = { Package: { Id: 'pkg-1' }, Items: [], AccessSession: null };
+    stubFetch(async () => jsonResponse(200, body));
+
+    const result = await getPackageDetails('pkg-1');
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(200);
+  });
 });
 
 describe('downloadContent', () => {
-  it('downloads through the file token and returns the blob', async () => {
+  it('downloads through the access session and returns the blob', async () => {
     const fetchMock = stubFetch(
       async () =>
         new Response(new Blob(['file-bytes']), {
@@ -157,30 +183,41 @@ describe('downloadContent', () => {
         })
     );
 
-    const result = await downloadContent('pkg-1', 'item-1', 'file-token');
+    const result = await downloadContent('pkg-1', 'item-1', 'session-1');
 
     expect(result.data).toBeInstanceOf(Blob);
     expect(result.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1/content/item-1/download');
-    expect(new Headers(init?.headers).get('X-File-Token')).toBe('file-token');
+    expect(new Headers(init?.headers).get('X-Access-Session')).toBe('session-1');
   });
 
   it('returns the ProblemDetails body for a failed download', async () => {
-    const body = { title: 'Gone', detail: 'token already used' };
+    const body = { title: 'Gone', detail: 'session expired' };
     stubFetch(async () => jsonResponse(404, body));
 
-    const result = await downloadContent('pkg-1', 'item-1', 'stale-token');
+    const result = await downloadContent('pkg-1', 'item-1', 'stale-session');
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
     expect(result.status).toBe(404);
   });
 
+  it('does not treat a problem+json error body as file bytes', async () => {
+    const body = { title: 'Invalid access session', detail: 'The access session is invalid or has expired' };
+    stubFetch(async () => problemResponse(401, body));
+
+    const result = await downloadContent('pkg-1', 'item-1', 'stale-session');
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(401);
+  });
+
   it('rejects a successful response that is not a blob', async () => {
     stubFetch(async () => jsonResponse(200, { not: 'a blob' }));
 
-    const result = await downloadContent('pkg-1', 'item-1', 'file-token');
+    const result = await downloadContent('pkg-1', 'item-1', 'session-1');
 
     expect(result.error).toEqual(new Error('Download did not return a blob'));
     expect(result.status).toBe(200);
@@ -194,9 +231,9 @@ describe('listPackages', () => {
     ExpiresAt: null,
     ItemCount: '2',
     TotalSize: '4096',
-    MaxDownloadCount: '3',
-    CurrentDownloadCount: '1',
-    RemainingDownloads: '2',
+    MaxAccessCount: '3',
+    CurrentAccessCount: '1',
+    RemainingAccesses: '2',
     IsExpired: false,
     IsProtected: true
   };
@@ -214,9 +251,9 @@ describe('listPackages', () => {
           ExpiresAt: undefined,
           ItemCount: 2,
           TotalSize: 4096,
-          MaxDownloadCount: 3,
-          CurrentDownloadCount: 1,
-          RemainingDownloads: 2,
+          MaxAccessCount: 3,
+          CurrentAccessCount: 1,
+          RemainingAccesses: 2,
           IsExpired: false,
           IsProtected: true
         }

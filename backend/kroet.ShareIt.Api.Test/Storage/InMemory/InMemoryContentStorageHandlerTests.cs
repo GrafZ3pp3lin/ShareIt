@@ -83,40 +83,37 @@ public class InMemoryContentStorageHandlerTests
     }
 
     [TestMethod]
-    public async Task IncrementPackageAccessCountAsync_HandlesMissingLimitReachedUnlimitedAndSuccess()
+    public async Task CreateAccessSessionAsync_HandlesMissingLimitReachedUnlimitedAndSuccess()
     {
-        var missing = await _handler.IncrementPackageAccessCountAsync(Guid.NewGuid());
+        var missing = await _handler.CreateAccessSessionAsync(NewSession(Guid.NewGuid()));
 
-        var limitedPackage = CreatePackage(maxDownloadCount: 2, currentDownloadCount: 2);
+        var limitedPackage = CreatePackage(maxAccessCount: 2, currentAccessCount: 2);
         await _handler.StorePackageAsync(limitedPackage);
-        var alreadyLimited = await _handler.IncrementPackageAccessCountAsync(limitedPackage.Id);
+        var alreadyLimited = await _handler.CreateAccessSessionAsync(NewSession(limitedPackage.Id));
 
-        var successfulPackage = CreatePackage(maxDownloadCount: 2, currentDownloadCount: 0);
+        var successfulPackage = CreatePackage(maxAccessCount: 2, currentAccessCount: 0);
         await _handler.StorePackageAsync(successfulPackage);
-        var firstIncrement = await _handler.IncrementPackageAccessCountAsync(successfulPackage.Id);
-        var secondIncrement = await _handler.IncrementPackageAccessCountAsync(successfulPackage.Id);
+        var firstIncrement = await _handler.CreateAccessSessionAsync(NewSession(successfulPackage.Id));
+        var secondIncrement = await _handler.CreateAccessSessionAsync(NewSession(successfulPackage.Id));
 
-        var unlimitedPackage = CreatePackage(maxDownloadCount: null, currentDownloadCount: 5);
+        var unlimitedPackage = CreatePackage(maxAccessCount: null, currentAccessCount: 5);
         await _handler.StorePackageAsync(unlimitedPackage);
-        var unlimitedIncrement = await _handler.IncrementPackageAccessCountAsync(unlimitedPackage.Id);
+        var unlimitedIncrement = await _handler.CreateAccessSessionAsync(NewSession(unlimitedPackage.Id));
 
         Assert.IsFalse(missing.Success);
-        Assert.AreEqual(0, missing.NewCount);
+        Assert.AreEqual(0, missing.NewAccessCount);
 
         Assert.IsFalse(alreadyLimited.Success);
-        Assert.AreEqual(2, alreadyLimited.NewCount);
-        Assert.IsTrue(alreadyLimited.LimitReached);
+        Assert.AreEqual(0, alreadyLimited.NewAccessCount);
+        Assert.IsNull(alreadyLimited.MaxAccessCount);
 
         Assert.IsTrue(firstIncrement.Success);
-        Assert.AreEqual(1, firstIncrement.NewCount);
-        Assert.IsFalse(firstIncrement.LimitReached);
+        Assert.AreEqual(1, firstIncrement.NewAccessCount);
         Assert.IsTrue(secondIncrement.Success);
-        Assert.AreEqual(2, secondIncrement.NewCount);
-        Assert.IsTrue(secondIncrement.LimitReached);
+        Assert.AreEqual(2, secondIncrement.NewAccessCount);
 
         Assert.IsTrue(unlimitedIncrement.Success);
-        Assert.AreEqual(6, unlimitedIncrement.NewCount);
-        Assert.IsFalse(unlimitedIncrement.LimitReached);
+        Assert.AreEqual(6, unlimitedIncrement.NewAccessCount);
     }
 
     [TestMethod]
@@ -215,12 +212,12 @@ public class InMemoryContentStorageHandlerTests
         var handler = new InMemoryContentStorageHandler(timeProvider, Options.Create(new DownloadSettings()));
         var activePackage = CreatePackage();
         var expiredPackage = CreatePackage(expiresAt: timeProvider.UtcNow.AddHours(-1));
-        var limitedPackage = CreatePackage(maxDownloadCount: 1);
+        var limitedPackage = CreatePackage(maxAccessCount: 1);
 
         await handler.StorePackageAsync(activePackage);
         await handler.StorePackageAsync(expiredPackage);
         await handler.StorePackageAsync(limitedPackage);
-        await handler.IncrementPackageAccessCountAsync(limitedPackage.Id);
+        await handler.CreateAccessSessionAsync(NewSession(limitedPackage.Id, timeProvider.UtcNow));
 
         // The exhausted package must stay servable for its retention period.
         var retained = await handler.GetPackagesToDeleteAsync();
@@ -237,19 +234,35 @@ public class InMemoryContentStorageHandlerTests
     }
 
     [TestMethod]
-    public async Task IncrementPackageAccessCountAsync_RecordsLastAccessAt()
+    public async Task CreateAccessSessionAsync_RejectsExpiredPackage()
+    {
+        var package = CreatePackage(expiresAt: DateTimeOffset.Parse("2026-03-05T11:59:00+00:00"));
+        await _handler.StorePackageAsync(package);
+
+        var claim = await _handler.CreateAccessSessionAsync(NewSession(package.Id));
+
+        Assert.IsFalse(claim.Success);
+        var stored = await _handler.GetPackageShellAsync(package.Id);
+        Assert.IsNotNull(stored);
+        Assert.AreEqual(0, stored.CurrentAccessCount);
+    }
+
+    [TestMethod]
+    public async Task CreateAccessSessionAsync_RecordsLastAccessAtAndStoresSession()
     {
         var timeProvider = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-16T12:00:00+00:00"));
         var handler = new InMemoryContentStorageHandler(timeProvider);
-        var package = CreatePackage(maxDownloadCount: 2);
+        var package = CreatePackage(maxAccessCount: 2);
         await handler.StorePackageAsync(package);
+        var session = NewSession(package.Id, createdAt: timeProvider.UtcNow);
 
-        var claimed = await handler.IncrementPackageAccessCountAsync(package.Id);
+        var claimed = await handler.CreateAccessSessionAsync(session);
 
         Assert.IsTrue(claimed.Success);
         var stored = await handler.GetPackageShellAsync(package.Id);
         Assert.IsNotNull(stored);
         Assert.AreEqual(timeProvider.UtcNow, stored.LastAccessAt);
+        Assert.IsNotNull(await handler.GetAccessSessionByTokenHashAsync(session.TokenHash));
     }
 
     [TestMethod]
@@ -343,11 +356,23 @@ public class InMemoryContentStorageHandlerTests
         Assert.AreEqual("verifier", shell.UnlockVerifier);
     }
 
+    private static AccessSession NewSession(Guid packageId, DateTimeOffset? createdAt = null)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            PackageId = packageId,
+            ClientId = Guid.NewGuid(),
+            IsGuest = true,
+            TokenHash = Guid.NewGuid().ToString("N"),
+            CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
+            ExpiresAt = (createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00")).AddMinutes(15)
+        };
+
     private static ContentPackage CreatePackage(
         DateTimeOffset? createdAt = null,
         string? unlockVerifier = null,
-        int? maxDownloadCount = null,
-        int currentDownloadCount = 0,
+        int? maxAccessCount = null,
+        int currentAccessCount = 0,
         DateTimeOffset? expiresAt = null)
     {
         return new ContentPackage
@@ -356,8 +381,8 @@ public class InMemoryContentStorageHandlerTests
             CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
             UserId = Guid.NewGuid(),
             UnlockVerifier = unlockVerifier,
-            MaxDownloadCount = maxDownloadCount,
-            CurrentDownloadCount = currentDownloadCount,
+            MaxAccessCount = maxAccessCount,
+            CurrentAccessCount = currentAccessCount,
             ExpiresAt = expiresAt
         };
     }

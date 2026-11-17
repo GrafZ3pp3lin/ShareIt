@@ -14,7 +14,7 @@ export const linkStatus = (item: PackageSummary, now = Date.now()): LinkStatus =
     return 'expired';
   }
 
-  if (item.RemainingDownloads !== null && item.RemainingDownloads <= 0) {
+  if (item.RemainingAccesses !== null && item.RemainingAccesses <= 0) {
     return 'usedUp';
   }
 

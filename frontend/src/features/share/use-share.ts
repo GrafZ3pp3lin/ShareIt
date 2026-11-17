@@ -6,6 +6,7 @@ import { getErrorMessage } from '../../shared/api/error-message.ts';
 import { fromBase64Url } from '../../shared/crypto/base64url.ts';
 import { deriveKeyBits, packageSalt, unlockProof, type PackageKey } from '../../shared/crypto/keys.ts';
 import { decodeMeta, type ItemMeta } from '../../shared/crypto/meta.ts';
+import { clearAccessSession, loadAccessSession, saveAccessSession } from './access-session.ts';
 
 export type ShareStatus = 'locked' | 'unlocking' | 'unlocked' | 'invalid' | 'gone';
 
@@ -15,7 +16,6 @@ export type ShareItem = {
   Size: number;
   Meta?: string | null;
   Payload?: string | null;
-  DownloadToken?: string | null;
   index: number;
   decodedMeta: ItemMeta | null;
   displayName: string;
@@ -66,6 +66,7 @@ export function createShare(packageId: () => string) {
   const [details, setDetails] = createSignal<ContentPackageDetailsResponse | null>(null);
   const [items, setItems] = createSignal<ShareItem[]>([]);
   const [packageKey, setPackageKey] = createSignal<PackageKey | undefined>(undefined);
+  const [accessSessionToken, setAccessSessionToken] = createSignal<string | undefined>(undefined);
   const [passphrase, setPassphrase] = createSignal(initialFragment ?? '');
   const [gateMessage, setGateMessage] = createSignal<GateMessage | null>(null);
 
@@ -94,7 +95,6 @@ export function createShare(packageId: () => string) {
           Size: Number(item.Size),
           Meta: item.Meta,
           Payload: item.Payload,
-          DownloadToken: item.DownloadToken,
           index,
           decodedMeta,
           displayName: decodedMeta?.name ?? fallbackName,
@@ -115,6 +115,7 @@ export function createShare(packageId: () => string) {
     }
 
     if (httpStatus === 400 || httpStatus === 404 || httpStatus === 410) {
+      clearAccessSession(packageId());
       setStatus('gone');
       setGateMessage(null);
       return;
@@ -147,6 +148,7 @@ export function createShare(packageId: () => string) {
     setDetails(null);
     setItems([]);
     setPackageKey(undefined);
+    setAccessSessionToken(undefined);
 
     let key: PackageKey | undefined;
     let proof: string | undefined;
@@ -162,8 +164,10 @@ export function createShare(packageId: () => string) {
       }
     }
 
+    const storedSession = loadAccessSession(id);
+
     try {
-      const outcome = await getPackageDetails(id, proof);
+      const outcome = await getPackageDetails(id, proof, storedSession?.Token);
       if (current !== attempt) {
         return;
       }
@@ -173,12 +177,17 @@ export function createShare(packageId: () => string) {
         return;
       }
 
+      // Persist the grant before decoding: a decode failure must not lose the
+      // access that was just claimed.
+      saveAccessSession(id, outcome.data.AccessSession);
+
       const decodedItems = await decodeItems(outcome.data.Items, key, id);
       if (current !== attempt) {
         return;
       }
 
       setPackageKey(key);
+      setAccessSessionToken(outcome.data.AccessSession.Token);
       setDetails(outcome.data);
       setItems(decodedItems);
       setStatus('unlocked');
@@ -195,12 +204,41 @@ export function createShare(packageId: () => string) {
     }
   };
 
+  const sessionExpired = (failedToken?: string) => {
+    if (failedToken !== undefined && failedToken !== accessSessionToken()) {
+      // A stale request from an older session must not clear a newer grant.
+      return;
+    }
+
+    clearAccessSession(packageId());
+    setAccessSessionToken(undefined);
+    setDetails(null);
+    setItems([]);
+    setPackageKey(undefined);
+    setStatus('locked');
+    setGateMessage({
+      title: t('gate.sessionExpiredTitle'),
+      body: t('gate.sessionExpiredBody')
+    });
+  };
+
+  const packageGone = () => {
+    clearAccessSession(packageId());
+    setAccessSessionToken(undefined);
+    setDetails(null);
+    setItems([]);
+    setPackageKey(undefined);
+    setStatus('gone');
+    setGateMessage(null);
+  };
+
   const start = () => {
     // Cancel any request from the previous package id before starting over.
     attempt += 1;
     setDetails(null);
     setItems([]);
     setPackageKey(undefined);
+    setAccessSessionToken(undefined);
     setGateMessage(null);
     setPassphrase('');
 
@@ -226,9 +264,12 @@ export function createShare(packageId: () => string) {
     details,
     items,
     packageKey,
+    accessSessionToken,
     passphrase,
     setPassphrase,
     gateMessage,
+    sessionExpired,
+    packageGone,
     unlock
   };
 }

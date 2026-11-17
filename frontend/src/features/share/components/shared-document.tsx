@@ -12,6 +12,10 @@ type SharedDocumentProps = {
   items: ShareItem[];
   packageId: string;
   packageKey: PackageKey | undefined;
+  accessSessionToken: string | undefined;
+  accessSessionExpiresAt: string;
+  onAccessExpired: (failedToken?: string) => void;
+  onPackageGone: () => void;
 };
 
 /**
@@ -59,14 +63,24 @@ export function SharedDocument(props: SharedDocumentProps) {
     return t('share.expiresIn', { value: t(days === 1 ? 'share.day' : 'share.days', { count: days }) });
   });
 
-  const downloadsLabel = createMemo(() => {
-    const remaining = props.package.RemainingDownloads;
+  const accessesLabel = createMemo(() => {
+    const remaining = props.package.RemainingAccesses;
     if (remaining == null) {
       return t('share.unlimitedDownloads');
     }
 
     const count = Number(remaining);
     return t(count === 1 ? 'share.downloadLeft' : 'share.downloadsLeft', { count });
+  });
+
+  const accessNote = createMemo(() => {
+    const expires = Date.parse(props.accessSessionExpiresAt);
+    if (Number.isNaN(expires)) {
+      return '';
+    }
+
+    const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(expires);
+    return t('share.accessNote', { time });
   });
 
   const summary = createMemo(() => {
@@ -85,7 +99,7 @@ export function SharedDocument(props: SharedDocumentProps) {
     if (expiry) {
       parts.push(expiry);
     }
-    parts.push(downloadsLabel());
+    parts.push(accessesLabel());
 
     return parts.join(' · ');
   });
@@ -98,19 +112,37 @@ export function SharedDocument(props: SharedDocumentProps) {
       </div>
 
       <For each={textItems()}>
-        {(item) => <TextBlock packageId={props.packageId} item={item} packageKey={props.packageKey} />}
+        {(item) => (
+          <TextBlock
+            packageId={props.packageId}
+            item={item}
+            packageKey={props.packageKey}
+            accessSessionToken={props.accessSessionToken}
+            onAccessExpired={props.onAccessExpired}
+            onPackageGone={props.onPackageGone}
+          />
+        )}
       </For>
 
       <Show when={fileItems().length > 0}>
         <div class="grid gap-2">
           <span class="tiny-label">{t('share.filesLabel')}</span>
           <For each={fileItems()}>
-            {(item) => <FileRow packageId={props.packageId} item={item} packageKey={props.packageKey} />}
+            {(item) => (
+              <FileRow
+                packageId={props.packageId}
+                item={item}
+                packageKey={props.packageKey}
+                accessSessionToken={props.accessSessionToken}
+                onAccessExpired={props.onAccessExpired}
+                onPackageGone={props.onPackageGone}
+              />
+            )}
           </For>
         </div>
       </Show>
 
-      <p class="font-mono text-[10.5px] leading-relaxed text-muted">{t('share.accessNote')}</p>
+      <p class="font-mono text-[10.5px] leading-relaxed text-muted">{accessNote()}</p>
     </div>
   );
 }

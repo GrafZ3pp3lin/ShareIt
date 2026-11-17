@@ -47,8 +47,8 @@ export function LinkRow(props: LinkRowProps) {
     return t(span.past ? 'links.expiredAgo' : 'links.expiresIn', { value: spanLabel(span) });
   };
 
-  const downloadsLabel = () => {
-    const remaining = props.item.RemainingDownloads;
+  const accessesLabel = () => {
+    const remaining = props.item.RemainingAccesses;
     if (remaining == null) {
       return t('links.unlimited');
     }
@@ -58,15 +58,15 @@ export function LinkRow(props: LinkRowProps) {
   const statusNote = () => {
     if (props.status === 'usedUp') {
       return t('links.usedUpNote', {
-        current: props.item.CurrentDownloadCount,
-        max: props.item.MaxDownloadCount ?? props.item.CurrentDownloadCount
+        current: props.item.CurrentAccessCount,
+        max: props.item.MaxAccessCount ?? props.item.CurrentAccessCount
       });
     }
     if (props.status === 'expired') {
       return expiryLabel() ?? t('links.status.expired');
     }
 
-    return [expiryLabel(), downloadsLabel()].filter((part) => part !== null).join(' · ');
+    return [expiryLabel(), accessesLabel()].filter((part) => part !== null).join(' · ');
   };
 
   return (

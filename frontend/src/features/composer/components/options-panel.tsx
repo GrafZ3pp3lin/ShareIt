@@ -1,14 +1,14 @@
 import { For, Show } from 'solid-js';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import type { PassphraseStrength } from '../../../shared/crypto/passphrase.ts';
-import { DOWNLOAD_COUNT_OPTIONS, EXPIRY_OPTIONS } from '../composer-options.ts';
+import { ACCESS_COUNT_OPTIONS, EXPIRY_OPTIONS } from '../composer-options.ts';
 import type { PasswordMode } from '../use-composer.ts';
 import { PasswordControl } from './password-control.tsx';
 
 type OptionsPanelProps = {
   isAuthenticated: boolean;
   expiryIndex: number;
-  downloadIndex: number;
+  accessIndex: number;
   passwordMode: PasswordMode;
   customPassphrase: string;
   customError: string | null;
@@ -22,8 +22,8 @@ type OptionsPanelProps = {
 };
 
 /**
- * Expanded link options: expiry, downloads and password. Guests only get the
- * password row; the fixed expiry/download values stay in the collapsed summary.
+ * Expanded link options: expiry, accesses and password. Guests only get the
+ * password row; the fixed expiry/access values stay in the collapsed summary.
  */
 export function OptionsPanel(props: OptionsPanelProps) {
   const { t } = useI18n();
@@ -56,10 +56,10 @@ export function OptionsPanel(props: OptionsPanelProps) {
           </span>
           <select
             class="cursor-pointer border-0 bg-transparent font-mono text-xs font-medium text-ink outline-none"
-            value={props.downloadIndex}
+            value={props.accessIndex}
             onChange={(event) => props.onDownloadsChange(Number(event.currentTarget.value))}
           >
-            <For each={DOWNLOAD_COUNT_OPTIONS}>
+            <For each={ACCESS_COUNT_OPTIONS}>
               {(count, index) => <option value={index()}>{downloadLabel(count)}</option>}
             </For>
           </select>

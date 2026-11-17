@@ -39,11 +39,11 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         const string insertPackageSql = """
                                         INSERT INTO content_packages (
                                             id, created_at, user_id, is_private,
-                                            max_download_count, current_download_count, last_access_at,
+                                            max_access_count, current_access_count, last_access_at,
                                             expires_at, unlock_verifier
                                         ) VALUES (
                                             @Id, @CreatedAt, @UserId, @IsPrivate,
-                                            @MaxDownloadCount, 0, @LastAccessAt,
+                                            @MaxAccessCount, 0, @LastAccessAt,
                                             @ExpiresAt, @UnlockVerifier
                                         );
                                         """;
@@ -59,7 +59,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                 package.CreatedAt,
                 package.UserId,
                 package.IsPrivate,
-                package.MaxDownloadCount,
+                package.MaxAccessCount,
                 package.LastAccessAt,
                 package.ExpiresAt,
                 package.UnlockVerifier
@@ -140,7 +140,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         const string getPackageSql = """
                                      SELECT
                                          id, created_at, user_id, is_private,
-                                         max_download_count, current_download_count, last_access_at, expires_at,
+                                         max_access_count, current_access_count, last_access_at, expires_at,
                                          unlock_verifier
                                      FROM content_packages
                                      WHERE id = @PackageId
@@ -197,7 +197,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
 
         const string listSql = """
                                SELECT
-                                   p.id, p.created_at, p.expires_at, p.max_download_count, p.current_download_count,
+                                   p.id, p.created_at, p.expires_at, p.max_access_count, p.current_access_count,
                                    p.unlock_verifier,
                                    (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = p.id) AS item_count,
                                    (SELECT COALESCE(SUM(c.size), 0)::bigint FROM contents c WHERE c.package_id = p.id) AS total_size
@@ -236,8 +236,8 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             ExpiresAt = row.ExpiresAt,
             ItemCount = row.ItemCount,
             TotalSize = row.TotalSize,
-            MaxDownloadCount = row.MaxDownloadCount,
-            CurrentDownloadCount = row.CurrentDownloadCount,
+            MaxAccessCount = row.MaxAccessCount,
+            CurrentAccessCount = row.CurrentAccessCount,
             IsProtected = row.UnlockVerifier is not null
         }).ToList();
 
@@ -256,7 +256,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         const string getPackagesSql = """
                                       SELECT
                                           id, created_at, user_id, is_private,
-                                          max_download_count, current_download_count, last_access_at, expires_at,
+                                          max_access_count, current_access_count, last_access_at, expires_at,
                                           unlock_verifier
                                       FROM content_packages
                                       WHERE id = ANY(@PackageIds)
@@ -356,43 +356,106 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     }
 
     /// <inheritdoc />
-    public async Task<DownloadIncrementResult> IncrementPackageAccessCountAsync(
-        Guid packageId, 
+    public async Task<AccessSessionClaimResult> CreateAccessSessionAsync(
+        AccessSession session,
         CancellationToken cancellationToken = default)
     {
-        // Atomic claim of one access: the guarded UPDATE makes concurrent
-        // claims serialize on the package row, so the counter can never
-        // exceed the configured limit.
+        // Atomic claim of one access plus its session: the guarded UPDATE
+        // serializes concurrent claims on the package row, and the insert
+        // rolls back if the session cannot be stored. The request path only
+        // reaches this after all response preparation has succeeded.
         const string incrementSql = """
                                     UPDATE content_packages
-                                        SET current_download_count = current_download_count + 1,
+                                        SET current_access_count = current_access_count + 1,
                                             last_access_at = @AccessedAt
                                     WHERE id = @PackageId
-                                      AND (max_download_count IS NULL OR current_download_count < max_download_count)
-                                    RETURNING current_download_count, max_download_count
+                                      AND (max_access_count IS NULL OR current_access_count < max_access_count)
+                                      AND (expires_at IS NULL OR expires_at > @AccessedAt)
+                                    RETURNING current_access_count, max_access_count
                                     """;
+        const string insertSessionSql = """
+                                        INSERT INTO access_sessions (
+                                            id, package_id, client_id, is_guest, token_hash,
+                                            created_at, expires_at
+                                        ) VALUES (
+                                            @Id, @PackageId, @ClientId, @IsGuest, @TokenHash,
+                                            @CreatedAt, @ExpiresAt
+                                        )
+                                        """;
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        var claim = await connection.QuerySingleOrDefaultAsync<AccessCountDbDto>(
+            new CommandDefinition(
+                incrementSql,
+                new { PackageId = session.PackageId, AccessedAt = session.CreatedAt },
+                transaction,
+                cancellationToken: cancellationToken));
+
+        if (claim == null)
+        {
+            _logger.LogWarning("Failed to claim an access - package {PackageId} not found, expired, or exhausted", session.PackageId);
+            return new AccessSessionClaimResult(false, 0, null);
+        }
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            insertSessionSql,
+            new
+            {
+                session.Id,
+                session.PackageId,
+                session.ClientId,
+                session.IsGuest,
+                session.TokenHash,
+                session.CreatedAt,
+                session.ExpiresAt
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+
+        await transaction.CommitAsync(cancellationToken);
+
+        return new AccessSessionClaimResult(
+            true,
+            claim.CurrentAccessCount,
+            claim.MaxAccessCount);
+    }
+
+    /// <inheritdoc />
+    public async Task<AccessSession?> GetAccessSessionByTokenHashAsync(
+        string tokenHash,
+        CancellationToken cancellationToken = default)
+    {
+        const string selectSql = """
+                                 SELECT id, package_id, client_id, is_guest, token_hash,
+                                        created_at, expires_at
+                                 FROM access_sessions
+                                 WHERE token_hash = @TokenHash
+                                 """;
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        var result = await connection.QuerySingleOrDefaultAsync<DownloadCountDbDto>(
-            incrementSql,
-            new { PackageId = packageId, AccessedAt = _timeProvider.GetUtcNow() });
+        var dto = await connection.QuerySingleOrDefaultAsync<AccessSessionDbDto>(
+            new CommandDefinition(selectSql, new { TokenHash = tokenHash }, cancellationToken: cancellationToken));
 
-        if (result == null)
-        {
-            _logger.LogWarning("Failed to increment access count - package {PackageId} not found", packageId);
-            return new DownloadIncrementResult(false, 0, null, false);
-        }
+        return dto is null ? null : MapToAccessSession(dto);
+    }
 
-        var limitReached = result.MaxDownloadCount.HasValue && 
-                          result.CurrentDownloadCount >= result.MaxDownloadCount.Value;
+    /// <inheritdoc />
+    public async Task<long> DeleteExpiredAccessSessionsAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        const string deleteSql = "DELETE FROM access_sessions WHERE expires_at <= @Now";
 
-        return new DownloadIncrementResult(
-            true,
-            result.CurrentDownloadCount,
-            result.MaxDownloadCount,
-            limitReached);
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        return await connection.ExecuteAsync(
+            new CommandDefinition(deleteSql, new { Now = now }, cancellationToken: cancellationToken));
     }
 
     /// <inheritdoc />
@@ -586,8 +649,8 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                                              UNION
                                              SELECT id
                                              FROM content_packages
-                                             WHERE max_download_count IS NOT NULL
-                                               AND current_download_count >= max_download_count
+                                             WHERE max_access_count IS NOT NULL
+                                               AND current_access_count >= max_access_count
                                                AND last_access_at <= @ExhaustedBefore
                                              """;
 
@@ -617,13 +680,13 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                                        COUNT(*) FILTER (WHERE NOT (
                                            (expires_at IS NOT NULL AND expires_at <= @Now)
                                            OR (
-                                               max_download_count IS NOT NULL
-                                               AND current_download_count >= max_download_count
+                                               max_access_count IS NOT NULL
+                                               AND current_access_count >= max_access_count
                                                AND last_access_at <= @ExhaustedBefore
                                            )
                                        ))::int AS active_packages,
                                        COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= @Now)::int AS expired_packages,
-                                       COUNT(*) FILTER (WHERE max_download_count IS NOT NULL AND current_download_count >= max_download_count)::int AS exhausted_packages,
+                                       COUNT(*) FILTER (WHERE max_access_count IS NOT NULL AND current_access_count >= max_access_count)::int AS exhausted_packages,
                                        COUNT(*) FILTER (WHERE unlock_verifier IS NOT NULL)::int AS protected_packages,
                                        COUNT(*) FILTER (WHERE is_private IS TRUE)::int AS private_packages,
                                        COUNT(*) FILTER (WHERE NOT EXISTS (
@@ -715,6 +778,23 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     }
     
     /// <summary>
+    /// Maps a DTO to the AccessSession domain model.
+    /// </summary>
+    private static AccessSession MapToAccessSession(AccessSessionDbDto dbDto)
+    {
+        return new AccessSession
+        {
+            Id = dbDto.Id,
+            PackageId = dbDto.PackageId,
+            ClientId = dbDto.ClientId,
+            IsGuest = dbDto.IsGuest,
+            TokenHash = dbDto.TokenHash,
+            CreatedAt = dbDto.CreatedAt,
+            ExpiresAt = dbDto.ExpiresAt
+        };
+    }
+
+    /// <summary>
     /// Maps a DTO to ContentPackage domain model.
     /// </summary>
     private static ContentPackage MapToContentPackage(PackageDbDto dbDto)
@@ -726,8 +806,8 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             UserId = dbDto.UserId,
             IsPrivate = dbDto.IsPrivate,
             UnlockVerifier = dbDto.UnlockVerifier,
-            MaxDownloadCount = dbDto.MaxDownloadCount,
-            CurrentDownloadCount = dbDto.CurrentDownloadCount,
+            MaxAccessCount = dbDto.MaxAccessCount,
+            CurrentAccessCount = dbDto.CurrentAccessCount,
             LastAccessAt = dbDto.LastAccessAt,
             ExpiresAt = dbDto.ExpiresAt
         };
@@ -742,8 +822,8 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         public DateTimeOffset CreatedAt { get; init; }
         public Guid? UserId { get; init; }
         public bool? IsPrivate { get; init; }
-        public int? MaxDownloadCount { get; init; }
-        public int CurrentDownloadCount { get; init; }
+        public int? MaxAccessCount { get; init; }
+        public int CurrentAccessCount { get; init; }
         public DateTimeOffset? LastAccessAt { get; init; }
         public DateTimeOffset? ExpiresAt { get; init; }
         public string? UnlockVerifier { get; init; }
@@ -759,18 +839,32 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         public DateTimeOffset? ExpiresAt { get; init; }
         public int ItemCount { get; init; }
         public long TotalSize { get; init; }
-        public int? MaxDownloadCount { get; init; }
-        public int CurrentDownloadCount { get; init; }
+        public int? MaxAccessCount { get; init; }
+        public int CurrentAccessCount { get; init; }
         public string? UnlockVerifier { get; init; }
     }
 
     /// <summary>
-    /// DTO for mapping download count results.
+    /// DTO for mapping access count results.
     /// </summary>
-    private class DownloadCountDbDto
+    private class AccessCountDbDto
     {
-        public int CurrentDownloadCount { get; init; }
-        public int? MaxDownloadCount { get; init; }
+        public int CurrentAccessCount { get; init; }
+        public int? MaxAccessCount { get; init; }
+    }
+
+    /// <summary>
+    /// DTO for mapping access session rows.
+    /// </summary>
+    private class AccessSessionDbDto
+    {
+        public Guid Id { get; init; }
+        public Guid PackageId { get; init; }
+        public Guid ClientId { get; init; }
+        public bool IsGuest { get; init; }
+        public string TokenHash { get; init; } = string.Empty;
+        public DateTimeOffset CreatedAt { get; init; }
+        public DateTimeOffset ExpiresAt { get; init; }
     }
 
     /// <summary>

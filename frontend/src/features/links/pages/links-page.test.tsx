@@ -43,9 +43,9 @@ const makePackage = (overrides: Partial<PackageSummary>): PackageSummary => ({
   ExpiresAt: hoursFromNow(6 * 24),
   ItemCount: 3,
   TotalSize: 26.4 * 1024 * 1024,
-  MaxDownloadCount: 1,
-  CurrentDownloadCount: 0,
-  RemainingDownloads: 1,
+  MaxAccessCount: 1,
+  CurrentAccessCount: 0,
+  RemainingAccesses: 1,
   IsExpired: false,
   IsProtected: true,
   ...overrides
@@ -57,8 +57,8 @@ const usedUp = makePackage({
   CreatedAt: '2026-11-02T11:05:00Z',
   ItemCount: 1,
   TotalSize: 62 * 1024,
-  CurrentDownloadCount: 1,
-  RemainingDownloads: 0,
+  CurrentAccessCount: 1,
+  RemainingAccesses: 0,
   IsProtected: false
 });
 const expiring = makePackage({
@@ -67,7 +67,7 @@ const expiring = makePackage({
   ExpiresAt: hoursFromNow(12),
   ItemCount: 2,
   TotalSize: 1024,
-  RemainingDownloads: 3
+  RemainingAccesses: 3
 });
 
 const renderPage = () =>
@@ -102,7 +102,7 @@ describe('<LinksPage />', () => {
     expect(screen.getByText('used up')).toBeInTheDocument();
     expect(screen.getAllByText('protected').length).toBeGreaterThan(0);
     expect(screen.getByText('no passphrase')).toBeInTheDocument();
-    expect(screen.getByText(/1 of 1 access used/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 accesses used/)).toBeInTheDocument();
 
     const copyButtons = screen.getAllByRole('button', { name: 'copy link' });
     expect(copyButtons[0]).toBeEnabled();

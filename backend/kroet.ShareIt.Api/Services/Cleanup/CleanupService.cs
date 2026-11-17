@@ -8,9 +8,9 @@ using Microsoft.Extensions.Options;
 namespace kroet.ShareIt.Api.Services.Cleanup;
 
 /// <summary>
-/// Background service that periodically cleans up expired tokens, expired
-/// packages, exhausted packages after their retention window, and queued blob
-/// deletions.
+/// Background service that periodically cleans up expired access sessions,
+/// expired packages, exhausted packages after their retention window, and
+/// queued blob deletions.
 /// </summary>
 public class CleanupService : BackgroundService
 {
@@ -72,13 +72,31 @@ public class CleanupService : BackgroundService
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            var tokenService = scope.ServiceProvider.GetRequiredService<IDownloadTokenService>();
+            var accessSessionService = scope.ServiceProvider.GetRequiredService<IAccessSessionService>();
             var contentStorageHandler = scope.ServiceProvider.GetRequiredService<IContentStorageHandler>();
             var storageHandler = scope.ServiceProvider.GetRequiredService<IStorageHandler>();
 
-            // Cleanup expired tokens
-            var tokensDeleted = await tokenService.CleanupExpiredTokensAsync(cancellationToken);
-            activity?.SetTag("shareit.cleanup.tokens_deleted", tokensDeleted);
+            // Cleanup expired access sessions. This is independent of package
+            // metadata deletion: a transient session-cleanup failure must not
+            // skip the rest of the cleanup pass.
+            var sessionsDeleted = 0L;
+            var sessionCleanupSucceeded = true;
+            try
+            {
+                sessionsDeleted = await accessSessionService.CleanupExpiredAsync(cancellationToken);
+                activity?.SetTag("shareit.cleanup.sessions_deleted", sessionsDeleted);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                sessionCleanupSucceeded = false;
+                activity?.SetTag("shareit.cleanup.session_cleanup_succeeded", false);
+                activity?.AddException(ex);
+                _logger.LogError(ex, "Error cleaning up expired access sessions during cleanup");
+            }
 
             // Cleanup expired packages and exhausted packages whose download
             // retention period has elapsed. Metadata deletion and blob queueing
@@ -110,7 +128,10 @@ public class CleanupService : BackgroundService
             if (packageDeletionSucceeded)
             {
                 _metrics.PackageDeleted("cleanup", packagesDeleted);
-                _heartbeat.RecordSuccess(_timeProvider.GetUtcNow());
+                if (sessionCleanupSucceeded)
+                {
+                    _heartbeat.RecordSuccess(_timeProvider.GetUtcNow());
+                }
             }
 
             // Blob deletion is independent of package metadata cleanup. A queue
@@ -133,11 +154,11 @@ public class CleanupService : BackgroundService
                 _logger.LogError(ex, "Error processing queued blob deletions during cleanup");
             }
 
-            if (tokensDeleted > 0 || packagesDeleted > 0 || blobsDeleted > 0)
+            if (sessionsDeleted > 0 || packagesDeleted > 0 || blobsDeleted > 0)
             {
                 _logger.LogInformation(
-                    "Cleanup completed: {TokensDeleted} tokens, {PackagesDeleted} packages, {BlobsDeleted} blobs deleted",
-                    tokensDeleted, packagesDeleted, blobsDeleted);
+                    "Cleanup completed: {SessionsDeleted} sessions, {PackagesDeleted} packages, {BlobsDeleted} blobs deleted",
+                    sessionsDeleted, packagesDeleted, blobsDeleted);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

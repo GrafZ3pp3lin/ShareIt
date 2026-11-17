@@ -165,6 +165,21 @@ describe('customFetch', () => {
     expect(result.data).toBeInstanceOf(Blob);
   });
 
+  it('parses problem+json error responses', async () => {
+    globalThis.fetch = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ title: 'Invalid access session' }), {
+          status: 401,
+          headers: { 'content-type': 'application/problem+json' }
+        })
+    );
+
+    const result = await customFetch<{ data: unknown; status: number }>('/api/v1/content/package/1/content/2/download');
+
+    expect(result.data).toEqual({ title: 'Invalid access session' });
+    expect(result.status).toBe(401);
+  });
+
   it('leaves the body undefined for malformed JSON', async () => {
     globalThis.fetch = vi.fn<typeof fetch>(
       async () => new Response('not json', { headers: { 'content-type': 'application/json' } })

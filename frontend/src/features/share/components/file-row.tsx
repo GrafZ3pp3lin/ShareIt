@@ -10,6 +10,9 @@ type FileRowProps = {
   packageId: string;
   item: ShareItem;
   packageKey: PackageKey | undefined;
+  accessSessionToken: string | undefined;
+  onAccessExpired?: (failedToken?: string) => void;
+  onPackageGone?: () => void;
 };
 
 const saveBlob = (bytes: Uint8Array<ArrayBuffer>, name: string, mime: string) => {
@@ -22,9 +25,9 @@ const saveBlob = (bytes: Uint8Array<ArrayBuffer>, name: string, mime: string) =>
 };
 
 /**
- * One file row. The content is fetched lazily on click, so reading the page
- * does not spend every file's single-use token. Errors stay with the row and
- * can be retried without re-unlocking the package.
+ * One file row. The content is fetched lazily on click through the package's
+ * access session, so reading the page does not spend every item's download.
+ * Errors stay with the row and can be retried without re-unlocking the package.
  */
 export function FileRow(props: FileRowProps) {
   const { t } = useI18n();
@@ -39,7 +42,14 @@ export function FileRow(props: FileRowProps) {
     setError('');
 
     try {
-      const bytes = await readShareItem(props.packageId, props.item, props.packageKey);
+      const bytes = await readShareItem(
+        props.packageId,
+        props.item,
+        props.packageKey,
+        props.accessSessionToken,
+        props.onAccessExpired,
+        props.onPackageGone
+      );
       if (current !== request) {
         return;
       }
