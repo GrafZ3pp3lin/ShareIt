@@ -21,7 +21,10 @@ public interface IBlobStorageHandler
     /// </summary>
     /// <param name="blobId">The unique blob identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Stream containing the blob data.</returns>
+    /// <returns>
+    /// Stream containing the blob data. The caller must dispose it; disposal
+    /// also releases the provider response and its connection.
+    /// </returns>
     /// <exception cref="KeyNotFoundException">Thrown when blob is not found.</exception>
     Task<Stream> DownloadAsync(string blobId, CancellationToken cancellationToken = default);
 

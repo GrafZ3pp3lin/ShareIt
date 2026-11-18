@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -196,8 +197,13 @@ public abstract class ShareItApiTestBase
     }
 
     /// <summary>
-    /// Sends a multipart POST of one item to an existing package.
+    /// Sends a multipart POST of one item to an existing package. The parts are
+    /// ordered as the endpoint requires: metadata first, then the payload.
     /// </summary>
+    /// <param name="declaredSize">
+    /// Value of the <c>Size</c> part. Defaults to the actual payload length;
+    /// pass a different value to exercise size validation.
+    /// </param>
     protected async Task<HttpResponseMessage> SendUploadItemAsync(
         Guid packageId,
         string kind,
@@ -206,25 +212,47 @@ public abstract class ShareItApiTestBase
         Guid? contentId = null,
         Guid? guestId = null,
         Guid? userId = null,
-        string fileName = "item.bin")
+        string fileName = "item.bin",
+        long? declaredSize = null)
     {
         using var form = new MultipartFormDataContent
         {
             { new StringContent((contentId ?? Guid.NewGuid()).ToString()), "Id" },
             { new StringContent(kind), "Kind" },
-            { new StringContent(meta), "Meta" }
+            { new StringContent(meta), "Meta" },
+            {
+                new StringContent((declaredSize ?? bytes.Length).ToString(CultureInfo.InvariantCulture)),
+                "Size"
+            }
         };
 
         var fileContent = new ByteArrayContent(bytes);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         form.Add(fileContent, "File", fileName);
 
+        return await SendRawUploadAsync(packageId, form, guestId, userId);
+    }
+
+    /// <summary>
+    /// Sends an arbitrary multipart body to the upload endpoint so tests can
+    /// exercise part order, missing parts and extra parts.
+    /// </summary>
+    protected async Task<HttpResponseMessage> SendRawUploadAsync(
+        Guid packageId,
+        HttpContent content,
+        Guid? guestId = null,
+        Guid? userId = null)
+    {
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload")
         {
-            Content = form
+            Content = content
         };
         AddIdentity(request, guestId, userId);
-        return await Client.SendAsync(request);
+
+        var response = await Client.SendAsync(request);
+        // The endpoint may stop reading after the metadata parts, in which case
+        // the request content must not be reused or disposed twice.
+        return response;
     }
 
     /// <summary>
@@ -239,15 +267,11 @@ public abstract class ShareItApiTestBase
         {
             { new StringContent(Guid.NewGuid().ToString()), "Id" },
             { new StringContent("file"), "Kind" },
-            { new StringContent("bWV0YQ"), "Meta" }
+            { new StringContent("bWV0YQ"), "Meta" },
+            { new StringContent("1"), "Size" }
         };
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload")
-        {
-            Content = form
-        };
-        AddIdentity(request, guestId, userId);
-        return await Client.SendAsync(request);
+        return await SendRawUploadAsync(packageId, form, guestId, userId);
     }
 
     protected Task<HttpResponseMessage> GetPackageAsync(

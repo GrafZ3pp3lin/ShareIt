@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ShareItem } from './use-share.ts';
-import { AccessSessionExpiredError, readShareItem } from './read-item.ts';
+import { AccessSessionExpiredError, fetchShareItem, readShareItem } from './read-item.ts';
 import { toBase64Url } from '../../shared/crypto/base64url.ts';
 import { utf8 } from '../../shared/crypto/bytes.ts';
 import { deriveKeyBits, itemAad, itemKey, packageSalt } from '../../shared/crypto/keys.ts';
 import { seal } from '../../shared/crypto/sealed.ts';
 
 const api = vi.hoisted(() => ({
-  downloadContent: vi.fn()
+  downloadContent: vi.fn(),
+  downloadContentResponse: vi.fn()
 }));
 
 vi.mock('../../shared/api/content.ts', () => api);
@@ -105,5 +106,37 @@ describe('readShareItem', () => {
     );
 
     expect(onSessionExpired).toHaveBeenCalledWith(undefined);
+  });
+});
+
+describe('fetchShareItem', () => {
+  it('returns the raw response for a streaming save', async () => {
+    const response = new Response('streamed');
+    api.downloadContentResponse.mockResolvedValue({ response, status: 200 });
+
+    await expect(fetchShareItem(PACKAGE_ID, makeItem({ Payload: null }), 'session-1')).resolves.toBe(response);
+    expect(api.downloadContentResponse).toHaveBeenCalledWith(PACKAGE_ID, ITEM_ID, 'session-1');
+  });
+
+  it('reports an expired session on a 401 download', async () => {
+    api.downloadContentResponse.mockResolvedValue({ status: 401, error: new Error('session expired') });
+    const onSessionExpired = vi.fn();
+
+    await expect(
+      fetchShareItem(PACKAGE_ID, makeItem({ Payload: null }), 'stale-session', onSessionExpired)
+    ).rejects.toThrow('session expired');
+
+    expect(onSessionExpired).toHaveBeenCalledWith('stale-session');
+  });
+
+  it('reports a package-gone download on a 410 response', async () => {
+    api.downloadContentResponse.mockResolvedValue({ status: 410, error: new Error('package expired') });
+    const onPackageGone = vi.fn();
+
+    await expect(
+      fetchShareItem(PACKAGE_ID, makeItem({ Payload: null }), 'session-1', undefined, onPackageGone)
+    ).rejects.toThrow('package expired');
+
+    expect(onPackageGone).toHaveBeenCalledTimes(1);
   });
 });

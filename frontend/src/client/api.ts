@@ -163,6 +163,11 @@ export type uploadFileToPackageResponse413 = {
   status: 413;
 };
 
+export type uploadFileToPackageResponse415 = {
+  data: ProblemDetails;
+  status: 415;
+};
+
 export type uploadFileToPackageResponse500 = {
   data: ProblemDetails;
   status: 500;
@@ -178,6 +183,7 @@ export type uploadFileToPackageResponseError = (
   | uploadFileToPackageResponse404
   | uploadFileToPackageResponse409
   | uploadFileToPackageResponse413
+  | uploadFileToPackageResponse415
   | uploadFileToPackageResponse500
 ) & {
   headers: Headers;
@@ -204,6 +210,7 @@ export const uploadFileToPackage = async (
   if (uploadContentRequest.Meta !== undefined && uploadContentRequest.Meta !== null) {
     formData.append(`Meta`, uploadContentRequest.Meta);
   }
+  formData.append(`Size`, uploadContentRequest.Size.toString());
   if (uploadContentRequest.File !== undefined && uploadContentRequest.File !== null) {
     formData.append(`File`, uploadContentRequest.File);
   }

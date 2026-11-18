@@ -27,6 +27,24 @@ export const customFetch = async <T>(url: string, options: RequestInit = {}): Pr
   return { data: body, status: response.status, headers: response.headers } as T;
 };
 
+/**
+ * Parses an RFC 7807 problem response without consuming non-JSON error bodies.
+ * Used by the hand-written raw-response download path to stay in step with the
+ * generated client.
+ */
+export const parseProblem = async (response: Response): Promise<unknown> => {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('json')) {
+    return undefined;
+  }
+
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+};
+
 const parseBody = async (response: Response): Promise<unknown> => {
   const contentType = response.headers.get('content-type') ?? '';
   if (contentType.includes('application/json') || contentType.includes('+json')) {

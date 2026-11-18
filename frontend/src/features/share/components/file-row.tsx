@@ -3,7 +3,8 @@ import { useI18n } from '../../../i18n/i18n.tsx';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
 import type { PackageKey } from '../../../shared/crypto/keys.ts';
 import { formatBytes } from '../../../shared/format-bytes.ts';
-import { readShareItem } from '../read-item.ts';
+import { fetchShareItem, readShareItem } from '../read-item.ts';
+import { saveBlob, saveResponseStream } from '../save-file.ts';
 import type { ShareItem } from '../use-share.ts';
 
 type FileRowProps = {
@@ -13,15 +14,6 @@ type FileRowProps = {
   accessSessionToken: string | undefined;
   onAccessExpired?: (failedToken?: string) => void;
   onPackageGone?: () => void;
-};
-
-const saveBlob = (bytes: Uint8Array<ArrayBuffer>, name: string, mime: string) => {
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  link.click();
-  URL.revokeObjectURL(url);
 };
 
 /**
@@ -42,6 +34,23 @@ export function FileRow(props: FileRowProps) {
     setError('');
 
     try {
+      const token = props.accessSessionToken;
+
+      // An unencrypted item that is not inlined can be written straight to
+      // disk. Encrypted bytes have to be buffered until the envelope is opened.
+      if (!props.packageKey && props.item.Payload == null && token) {
+        const streamed = await saveResponseStream(props.item.displayName, () =>
+          fetchShareItem(props.packageId, props.item, token, props.onAccessExpired, props.onPackageGone)
+        );
+
+        if (streamed !== 'unsupported') {
+          if (current === request) {
+            setState('idle');
+          }
+          return;
+        }
+      }
+
       const bytes = await readShareItem(
         props.packageId,
         props.item,

@@ -98,6 +98,29 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
+    public async Task UploadItem_PayloadAboveLimitWithSmallDeclaredSize_Returns413AndStoresNothing()
+    {
+        // A client can lie about the declared size; the streaming limit must
+        // stop the payload before it reaches storage.
+        var guestId = Guid.NewGuid();
+        var packageId = await CreatePackageAsync(guestId: guestId);
+
+        var response = await SendUploadItemAsync(
+            packageId,
+            "file",
+            OversizedFile,
+            declaredSize: 1024,
+            guestId: guestId);
+
+        Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        var problem = await ReadProblemAsync(response);
+        Assert.AreEqual("File too large", problem.Title);
+
+        Assert.AreEqual(0, (await GetDatabaseCountsAsync()).ContentCount);
+        Assert.AreEqual(0, await CountStoredObjectsAsync());
+    }
+
+    [TestMethod]
     public async Task UploadItem_FileAboveGuestLimitWithinAuthenticatedLimit_SucceedsForOwner()
     {
         var userId = Guid.NewGuid();

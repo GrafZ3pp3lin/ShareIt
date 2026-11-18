@@ -5,6 +5,7 @@ import {
   createPackage,
   deletePackage,
   downloadContent,
+  downloadContentResponse,
   getPackageDetails,
   getUploadLimits,
   listPackages,
@@ -224,6 +225,39 @@ describe('downloadContent', () => {
   });
 });
 
+describe('downloadContentResponse', () => {
+  it('returns the unread response so the caller can stream the body', async () => {
+    const fetchMock = stubFetch(
+      async () =>
+        new Response('file-bytes', {
+          status: 200,
+          headers: { 'content-type': 'application/octet-stream' }
+        })
+    );
+
+    const result = await downloadContentResponse('pkg-1', 'item-1', 'session-1');
+
+    expect(result.status).toBe(200);
+    expect(result.error).toBeUndefined();
+    expect(await result.response?.text()).toBe('file-bytes');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1/content/item-1/download');
+    expect(new Headers(init?.headers).get('X-Access-Session')).toBe('session-1');
+  });
+
+  it('returns the ProblemDetails body and status for a failed request', async () => {
+    const body = { title: 'Invalid access session', detail: 'The access session is invalid' };
+    stubFetch(async () => problemResponse(401, body));
+
+    const result = await downloadContentResponse('pkg-1', 'item-1', 'stale-session');
+
+    expect(result.response).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(401);
+  });
+});
+
 describe('listPackages', () => {
   const listItem = {
     Id: 'pkg-1',
@@ -338,7 +372,7 @@ describe('uploadItem', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('posts the item fields and bytes to the package upload endpoint', async () => {
+  it('posts the item fields, declared size and bytes to the package upload endpoint', async () => {
     const result = await uploadItem('pkg-1', uploadRequest());
 
     expect(result.data?.Id).toBe('fake-package');
@@ -350,11 +384,22 @@ describe('uploadItem', () => {
     expect(xhr.form?.get('Id')).toBe('item-1');
     expect(xhr.form?.get('Kind')).toBe('file');
     expect(xhr.form?.get('Meta')).toBe('bWV0YQ');
+    expect(xhr.form?.get('Size')).toBe('5');
     const entry = xhr.form?.get('File');
     expect(entry).toBeInstanceOf(File);
     if (entry instanceof File) {
       expect(entry.name).toBe('notes.txt');
     }
+  });
+
+  it('resolves as canceled without sending when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await uploadItem('pkg-1', uploadRequest(), undefined, controller.signal);
+
+    expect(result.canceled).toBe(true);
+    expect(FakeXhr.sent).toHaveLength(0);
   });
 
   it('reports upload progress through the callback', async () => {

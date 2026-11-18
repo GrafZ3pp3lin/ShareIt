@@ -1,6 +1,10 @@
+using System.Buffers;
 using System.Buffers.Text;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Security.Claims;
+using System.Text;
 using kroet.Permission.AspNetCore;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content.Dtos;
@@ -13,8 +17,10 @@ using kroet.ShareIt.Api.User;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace kroet.ShareIt.Api.Content;
@@ -29,6 +35,12 @@ public static class ContentEndpoints
     /// cannot be used as <see cref="ILogger{T}"/> type arguments).
     /// </summary>
     private sealed class LogCategory { }
+
+    /// <summary>
+    /// Extra bytes allowed for the final multipart boundary and headers when a
+    /// duplicate upload is drained before its idempotent response.
+    /// </summary>
+    private const long DrainTrailerAllowanceBytes = 64 * 1024;
 
     /// <summary>
     /// Maps all content management endpoints to the route group.
@@ -74,6 +86,7 @@ public static class ContentEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)
+            .Produces<ProblemDetails>(StatusCodes.Status415UnsupportedMediaType)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
             .WithName("UploadFileToPackage")
             .WithTags("Content", "Package");
@@ -97,7 +110,8 @@ public static class ContentEndpoints
             .MapGet("/{packageId:guid}/content/{contentId:guid}/download", DownloadContentAsync)
             .RequirePermission("Download.File")
             .RequireRateLimiting(RateLimitPolicies.Download)
-            // .NET 11 describes FileStreamHttpResult as a binary string schema.
+            // The handler writes the stream manually and returns EmptyHttpResult,
+            // but this result type keeps the OpenAPI body schema binary.
             .Produces<FileStreamHttpResult>(contentType: Application.Octet)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
@@ -227,9 +241,17 @@ public static class ContentEndpoints
     /// The bytes and the opaque metadata are stored verbatim; the server never
     /// parses the metadata.
     /// </summary>
-    private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult>> UploadContentToPackageAsync(
+    /// <remarks>
+    /// The body is a <c>multipart/form-data</c> request whose parts are ordered:
+    /// <c>Id</c>, <c>Kind</c>, <c>Meta</c>, <c>Size</c>, then <c>File</c> last.
+    /// Metadata parts are validated before the payload is read, and duplicate
+    /// metadata parts are rejected before storage. The endpoint buffers only
+    /// the small metadata parts; the payload is streamed through the blob
+    /// store's bounded probe/part buffer and is never buffered on disk.
+    /// </remarks>
+    private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult, EmptyHttpResult>>
+        UploadContentToPackageAsync(
         [FromRoute] Guid packageId,
-        [FromForm] UploadContentRequest request,
         [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler contentStorageHandler,
         [FromServices] IStorageHandler storageHandler,
@@ -237,6 +259,7 @@ public static class ContentEndpoints
         [FromServices] IOptions<UploadSettings> uploadOptions,
         [FromServices] ShareItMetrics metrics,
         ClaimsPrincipal claimsPrincipal,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.upload");
@@ -274,83 +297,311 @@ public static class ContentEndpoints
             });
         }
 
-        if (request.Id is not { } contentId || contentId == Guid.Empty)
-        {
-            return BadRequestProblem("Content id required", "The client must supply a non-empty content id.");
-        }
-
-        if (!TryParseKind(request.Kind, out var contentType))
-        {
-            return BadRequestProblem("Invalid kind", "Kind must be either 'text' or 'file'.");
-        }
-
-        if (!Base64UrlText.TryDecode(request.Meta, out var metaBytes))
-        {
-            return BadRequestProblem("Invalid meta", "Meta must be base64url text.");
-        }
-
-        if (metaBytes.Length > UnlockProof.MaxMetaBytes)
+        if (!TryGetMultipartBoundary(httpContext.Request, out var boundary))
         {
             return BadRequestProblem(
-                "Meta too large",
-                $"Meta must decode to at most {UnlockProof.MaxMetaBytes} bytes.");
+                "Invalid content type",
+                "The upload must be sent as multipart/form-data with a boundary.");
         }
-
-        if (request.File is null || request.File.Length == 0)
-        {
-            return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
-        }
-
-        activity?.SetTag("shareit.content.kind", KindOf(contentType));
-        activity?.SetTag("shareit.content.size_bytes", request.File.Length);
 
         var settings = uploadOptions.Value;
         var fileLimitBytes = FileLimitBytes(userIdentity, settings);
-        if (request.File.Length > fileLimitBytes)
-        {
-            return FileTooLargeProblem(contentId, fileLimitBytes);
-        }
 
-        // Idempotent retry: a repeated upload with the same item id must not
-        // create a duplicate row or fail on the primary key.
-        var existing = await contentStorageHandler.GetContentAsync(contentId, cancellationToken);
-        if (existing is not null)
+        // Metadata errors are answered before the payload is read. Some clients
+        // may surface that early response as a network error, but draining up
+        // to Kestrel's request-body limit for every malformed request would be
+        // worse. Only a matching idempotent retry drains, because that one has
+        // already succeeded and must not look like a failed upload.
+        var reader = new MultipartReader(boundary, httpContext.Request.Body);
+        Guid? contentId = null;
+        string? kind = null;
+        string? meta = null;
+        long? declaredSize = null;
+        var seenParts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (true)
         {
-            if (existing.PackageId != packageId)
+            MultipartSection? section;
+
+            try
             {
-                return TypedResults.Problem(new ProblemDetails
-                {
-                    Title = "Content id already in use",
-                    Detail = "Content with this id already exists in another package.",
-                    Status = StatusCodes.Status409Conflict
-                });
+                section = await reader.ReadNextSectionAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+            {
+                return TypedResults.Empty;
+            }
+            catch (InvalidDataException)
+            {
+                // Malformed multipart framing must be a client error, not a 500.
+                return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
+            }
+            catch (IOException)
+            {
+                // The body ended before its final boundary.
+                return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
             }
 
-            var existingPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
-            activity?.SetTag("shareit.package.result", "existing");
-            return TypedResults.Ok(ContentPackageResponse.FromPackage(existingPackage ?? package));
+            if (section is null)
+            {
+                break;
+            }
+
+            if (!TryGetPartName(section, out var partName))
+            {
+                return BadRequestProblem("Invalid upload", "Each part must be form-data with a name.");
+            }
+
+            if (!seenParts.Add(partName))
+            {
+                return BadRequestProblem("Invalid upload", $"Duplicate part '{partName}'.");
+            }
+
+            // Metadata must arrive first: the checks below run before a single
+            // payload byte is read, and a duplicate retry never stores bytes.
+            if (!string.Equals(partName, "File", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryGetPartTextLimit(partName, out var partLimit))
+                {
+                    return BadRequestProblem("Invalid upload", $"Unknown part '{partName}'.");
+                }
+
+                string? value;
+                try
+                {
+                    value = await ReadPartTextAsync(section.Body, partLimit, cancellationToken);
+                }
+                catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+                {
+                    return TypedResults.Empty;
+                }
+                catch (InvalidDataException)
+                {
+                    return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
+                }
+                catch (IOException)
+                {
+                    return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
+                }
+
+                if (value is null)
+                {
+                    return BadRequestProblem("Invalid upload", $"The {partName} part is too long.");
+                }
+
+                switch (partName.ToLowerInvariant())
+                {
+                    case "id":
+                        if (!Guid.TryParse(value, out var parsedId) || parsedId == Guid.Empty)
+                        {
+                            return BadRequestProblem("Content id required", "The client must supply a non-empty content id.");
+                        }
+
+                        contentId = parsedId;
+                        break;
+                    case "kind":
+                        kind = value;
+                        break;
+                    case "meta":
+                        meta = value;
+                        break;
+                    case "size":
+                        if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedSize)
+                            || parsedSize < 0)
+                        {
+                            return BadRequestProblem("Invalid size", "Size must be a non-negative number of bytes.");
+                        }
+
+                        declaredSize = parsedSize;
+                        break;
+                }
+
+                continue;
+            }
+
+            if (contentId is not { } itemId || itemId == Guid.Empty)
+            {
+                return BadRequestProblem("Content id required", "The client must supply a non-empty content id.");
+            }
+
+            if (!TryParseKind(kind, out var contentType))
+            {
+                return BadRequestProblem("Invalid kind", "Kind must be either 'text' or 'file'.");
+            }
+
+            if (meta is null || !Base64UrlText.TryDecode(meta, out var metaBytes))
+            {
+                return BadRequestProblem("Invalid meta", "Meta must be base64url text.");
+            }
+
+            if (metaBytes.Length > UnlockProof.MaxMetaBytes)
+            {
+                return BadRequestProblem(
+                    "Meta too large",
+                    $"Meta must decode to at most {UnlockProof.MaxMetaBytes} bytes.");
+            }
+
+            if (declaredSize is not { } itemSize)
+            {
+                return BadRequestProblem("Invalid size", "Size must be a non-negative number of bytes.");
+            }
+
+            if (itemSize == 0)
+            {
+                return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
+            }
+
+            if (itemSize > fileLimitBytes)
+            {
+                return FileTooLargeProblem(itemId, fileLimitBytes);
+            }
+
+            activity?.SetTag("shareit.content.kind", KindOf(contentType));
+            activity?.SetTag("shareit.content.size_bytes", itemSize);
+
+            // Idempotent retry: a repeated upload with the same item id must not
+            // create a duplicate row or fail on the primary key. Reusing the id
+            // for different content is a conflict, not a silent success.
+            var existing = await contentStorageHandler.GetContentAsync(itemId, cancellationToken);
+            if (existing is not null)
+            {
+                // Decide conflicts before reading the payload. Only an
+                // idempotent success drains the re-sent body so the client can
+                // receive the response instead of a connection reset.
+                if (existing.PackageId != packageId)
+                {
+                    return TypedResults.Problem(new ProblemDetails
+                    {
+                        Title = "Content id already in use",
+                        Detail = "Content with this id already exists in another package.",
+                        Status = StatusCodes.Status409Conflict
+                    });
+                }
+
+                if (existing.ContentType != contentType
+                    || existing.Size != itemSize
+                    || !string.Equals(existing.Meta, meta, StringComparison.Ordinal))
+                {
+                    return TypedResults.Problem(new ProblemDetails
+                    {
+                        Title = "Content id reused with different content",
+                        Detail = "This content id was already used for an item with different kind, size or metadata.",
+                        Status = StatusCodes.Status409Conflict
+                    });
+                }
+
+                await DrainRequestBodyAsync(
+                    httpContext.Request,
+                    itemSize + DrainTrailerAllowanceBytes,
+                    cancellationToken);
+
+                var existingPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+                activity?.SetTag("shareit.package.result", "existing");
+                return TypedResults.Ok(ContentPackageResponse.FromPackage(existingPackage ?? package));
+            }
+
+            var now = timeProvider.GetUtcNow();
+            var content = new Api.Models.Content
+            {
+                Id = itemId,
+                PackageId = packageId,
+                ContentType = contentType,
+                CreatedAt = now,
+                Size = itemSize,
+                UserId = userIdentity.Id,
+                Meta = meta
+            };
+
+            await using var payload = new DeclaredLengthStream(section.Body, fileLimitBytes, itemSize);
+
+            try
+            {
+                await storageHandler.StoreContentAsync(content, payload, cancellationToken);
+            }
+            catch (ContentTooLargeException)
+            {
+                // The client sent more bytes than its limit allows, whatever it
+                // declared. Storage compensation already removed any partial blob.
+                return FileTooLargeProblem(itemId, fileLimitBytes);
+            }
+            catch (ContentLengthMismatchException)
+            {
+                // The stream stopped forwarding at the first extra byte. Drain
+                // the rest only to preserve the 413 answer when the client also
+                // exceeded the absolute identity limit.
+                bool exceededLimit;
+                try
+                {
+                    exceededLimit = await payload.DrainToLimitAsync(cancellationToken);
+                }
+                catch (RequestBodyTruncatedException)
+                {
+                    return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
+                }
+                catch (InvalidDataException)
+                {
+                    return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
+                }
+                catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+                {
+                    return TypedResults.Empty;
+                }
+
+                return exceededLimit
+                    ? FileTooLargeProblem(itemId, fileLimitBytes)
+                    : BadRequestProblem(
+                        "Content size mismatch",
+                        "The uploaded content length does not match the declared size.");
+            }
+            catch (RequestBodyTruncatedException)
+            {
+                return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
+            }
+            catch (InvalidDataException)
+            {
+                return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
+            }
+            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+            {
+                return TypedResults.Empty;
+            }
+
+            // File is contractually the last part. A well-formed trailing
+            // section means the client violated the contract; remove the
+            // just-stored item so the 400 is not misleading.
+            try
+            {
+                var trailing = await reader.ReadNextSectionAsync(cancellationToken);
+                if (trailing is not null)
+                {
+                    await DeleteRejectedUploadAsync(storageHandler, itemId);
+                    return BadRequestProblem("Invalid upload", "The File part must be the last part.");
+                }
+            }
+            catch (InvalidDataException)
+            {
+                await DeleteRejectedUploadAsync(storageHandler, itemId);
+                return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
+            }
+            catch (IOException)
+            {
+                await DeleteRejectedUploadAsync(storageHandler, itemId);
+                return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
+            }
+            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+            {
+                return TypedResults.Empty;
+            }
+
+            metrics.ItemUploaded(contentType, itemSize);
+            activity?.SetTag("shareit.package.result", "uploaded");
+
+            var updatedPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+
+            return TypedResults.Ok(ContentPackageResponse.FromPackage(updatedPackage ?? package));
         }
 
-        var now = timeProvider.GetUtcNow();
-        var content = new Api.Models.Content
-        {
-            Id = contentId,
-            PackageId = packageId,
-            ContentType = contentType,
-            CreatedAt = now,
-            Size = request.File.Length,
-            UserId = userIdentity.Id,
-            Meta = request.Meta
-        };
-
-        await using var stream = request.File.OpenReadStream();
-        await storageHandler.StoreContentAsync(content, stream, cancellationToken);
-        metrics.ItemUploaded(contentType, request.File.Length);
-        activity?.SetTag("shareit.package.result", "uploaded");
-
-        var updatedPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
-
-        return TypedResults.Ok(ContentPackageResponse.FromPackage(updatedPackage ?? package));
+        return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
     }
 
     /// <summary>
@@ -580,7 +831,7 @@ public static class ContentEndpoints
     /// stays valid, so retries and parallel downloads never consume another
     /// access.
     /// </summary>
-    private static async Task<Results<FileStreamHttpResult, ProblemHttpResult>> DownloadContentAsync(
+    private static async Task<Results<EmptyHttpResult, ProblemHttpResult>> DownloadContentAsync(
         [FromRoute] Guid packageId,
         [FromRoute] Guid contentId,
         [FromHeader(Name = "X-Access-Session")] string? accessSession,
@@ -716,7 +967,40 @@ public static class ContentEndpoints
 
         // No names or MIME types here: both are part of the client-sealed
         // per-item metadata. The browser saves the bytes as an opaque blob.
-        return TypedResults.Stream(stream, "application/octet-stream");
+        httpContext.Response.ContentType = Application.Octet;
+        // The stored size is authoritative; sending it lets the browser show
+        // real progress and detect a truncated transfer.
+        httpContext.Response.ContentLength = content.Size;
+
+        try
+        {
+            // Copy explicitly instead of returning a file result: this keeps
+            // the S3 stream's lifetime explicit (it is disposed with its
+            // connection), and a client disconnect cancels the transfer
+            // instead of surfacing as a server error.
+            await stream.CopyToAsync(httpContext.Response.Body, 64 * 1024, httpContext.RequestAborted);
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            // The client went away mid-download; nothing was persisted.
+        }
+        catch (IOException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            // The connection broke while writing; also a client-side stop.
+        }
+        catch (Exception) when (!httpContext.Response.HasStarted)
+        {
+            // Nothing was written yet: let the error handler replace the
+            // streamed response instead of leaving a stale content length.
+            httpContext.Response.ContentLength = null;
+            throw;
+        }
+        finally
+        {
+            await stream.DisposeAsync();
+        }
+
+        return TypedResults.Empty;
     }
 
     /// <summary>
@@ -757,6 +1041,161 @@ public static class ContentEndpoints
         }
 
         return string.Equals(kind, "file", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Reads the boundary of a <c>multipart/form-data</c> request. Without a
+    /// boundary, <see cref="MultipartReader"/> would scan the body with a
+    /// delimiter the client never sent.
+    /// </summary>
+    private static bool TryGetMultipartBoundary(HttpRequest request, [NotNullWhen(true)] out string? boundary)
+    {
+        boundary = null;
+
+        if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var contentType)
+            || !string.Equals(contentType.MediaType.Value, "multipart/form-data", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // RFC 2046 allows a quoted boundary parameter. MediaTypeHeaderValue
+        // preserves those quotes, but MultipartReader expects the raw value.
+        var boundarySegment = HeaderUtilities.RemoveQuotes(contentType.Boundary);
+        if (!boundarySegment.HasValue || boundarySegment.Length is 0 or > 70)
+        {
+            return false;
+        }
+
+        boundary = boundarySegment.Value;
+        return true;
+    }
+
+    /// <summary>
+    /// Extracts the form-data part name. Other dispositions (attachments, a
+    /// missing name) are rejected before their content is read.
+    /// </summary>
+    private static bool TryGetPartName(MultipartSection section, [NotNullWhen(true)] out string? partName)
+    {
+        partName = null;
+
+        if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var disposition)
+            || !disposition.DispositionType.Equals("form-data", StringComparison.OrdinalIgnoreCase)
+            || !disposition.Name.HasValue)
+        {
+            return false;
+        }
+
+        partName = disposition.Name.Value;
+        return !string.IsNullOrEmpty(partName);
+    }
+
+    /// <summary>
+    /// Per-part read limit for the small text parts. The meta limit leaves
+    /// room for base64url expansion of the maximum decoded size.
+    /// </summary>
+    private static bool TryGetPartTextLimit(string partName, out int limitBytes)
+    {
+        limitBytes = partName.ToLowerInvariant() switch
+        {
+            "id" => 64,
+            "kind" => 16,
+            "meta" => (UnlockProof.MaxMetaBytes * 4 / 3) + 8,
+            "size" => 20,
+            _ => 0
+        };
+
+        return limitBytes > 0;
+    }
+
+    /// <summary>
+    /// Reads and discards at most <paramref name="maxBytes"/> of the remaining
+    /// request body before an idempotent response. Closing the connection while
+    /// the client is still uploading can surface as a network error, which
+    /// would make a client retry an upload the server has already accepted.
+    /// The bound prevents a duplicate request from making the server read up to
+    /// Kestrel's whole request-body limit.
+    /// </summary>
+    private static async Task DrainRequestBodyAsync(
+        HttpRequest request,
+        long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+            var drained = 0L;
+
+            try
+            {
+                while (drained < maxBytes)
+                {
+                    var readSize = (int)Math.Min(buffer.Length, maxBytes - drained);
+                    var read = await request.Body.ReadAsync(buffer.AsMemory(0, readSize), cancellationToken);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    drained += read;
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The client stopped sending; the response is still the best answer.
+        }
+        catch (IOException)
+        {
+            // The connection broke; nothing left to drain.
+        }
+    }
+
+    /// <summary>
+    /// Removes an item that was stored before a trailing multipart section was
+    /// discovered. Best effort only: the 400 is still the correct response, and
+    /// any leftover object is handled by the normal cleanup queue.
+    /// </summary>
+    private static async Task DeleteRejectedUploadAsync(IStorageHandler storageHandler, Guid contentId)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await storageHandler.DeleteContentAsync(contentId, timeout.Token);
+        }
+        catch
+        {
+            // Best effort; the request must still report the contract error.
+        }
+    }
+
+    /// <summary>
+    /// Reads a small text part, returning null when it is longer than the
+    /// limit so a hostile client cannot make the endpoint buffer metadata.
+    /// </summary>
+    private static async Task<string?> ReadPartTextAsync(
+        Stream body,
+        int limitBytes,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[limitBytes + 1];
+        var total = 0;
+
+        while (total < buffer.Length)
+        {
+            var read = await body.ReadAsync(buffer.AsMemory(total), cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        return total > limitBytes ? null : Encoding.UTF8.GetString(buffer, 0, total).Trim();
     }
 
     private static string KindOf(ContentType contentType)

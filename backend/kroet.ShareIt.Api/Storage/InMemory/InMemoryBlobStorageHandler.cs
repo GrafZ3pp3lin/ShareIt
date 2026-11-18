@@ -12,10 +12,10 @@ public class InMemoryBlobStorageHandler : IBlobStorageHandler
 {
     private readonly Dictionary<Guid, InMemoryContentBlob> _blobs = new();
 
-    public Task<string> UploadAsync(Stream stream, string contentType, string fileName, CancellationToken cancellationToken = default)
+    public async Task<string> UploadAsync(Stream stream, string contentType, string fileName, CancellationToken cancellationToken = default)
     {
         using var memoryStream = new MemoryStream();
-        stream.CopyTo(memoryStream);
+        await stream.CopyToAsync(memoryStream, cancellationToken);
 
         var blob = new InMemoryContentBlob
         {
@@ -27,7 +27,7 @@ public class InMemoryBlobStorageHandler : IBlobStorageHandler
         
         _blobs.Add(blob.Id, blob);
         
-        return Task.FromResult(blob.Id.ToString());
+        return blob.Id.ToString();
     }
 
     public Task<Stream> DownloadAsync(string blobId, CancellationToken cancellationToken = default)

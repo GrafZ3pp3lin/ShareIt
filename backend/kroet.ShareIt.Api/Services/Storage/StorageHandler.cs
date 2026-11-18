@@ -1,3 +1,4 @@
+using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage;
 
@@ -49,7 +50,15 @@ public class StorageHandler : IStorageHandler
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to store content {ContentId} (blob and/or metadata)", content.Id);
+            if (IsExpectedClientFailure(ex, cancellationToken))
+            {
+                _logger.LogDebug(ex, "Content upload {ContentId} ended with a client error", content.Id);
+            }
+            else
+            {
+                _logger.LogError(ex, "Failed to store content {ContentId} (blob and/or metadata)", content.Id);
+            }
+
             if (!string.IsNullOrEmpty(externalUrl))
             {
                 // The request may have caused this failure by being canceled.
@@ -67,6 +76,10 @@ public class StorageHandler : IStorageHandler
             throw;
         }
     }
+
+    private static bool IsExpectedClientFailure(Exception exception, CancellationToken cancellationToken)
+        => exception is ContentTooLargeException or ContentLengthMismatchException or RequestBodyTruncatedException
+            || exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
 
     /// <inheritdoc />
     public async Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)

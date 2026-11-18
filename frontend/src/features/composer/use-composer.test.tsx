@@ -152,6 +152,106 @@ describe('createComposer', () => {
     expect(retriedItem[1].Id).toBe(firstItemId);
   });
 
+  it('reuses the sealed metadata when retrying an encrypted upload', async () => {
+    api.uploadItem.mockResolvedValueOnce({ error: { title: 'lost response' } });
+
+    const composer = renderComposer();
+    composer.setText('secret');
+    composer.setPasswordMode('generate');
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.error()).toContain('lost response'));
+    const firstMeta = addedItem(0).Meta;
+    expect(isSealed(fromBase64Url(firstMeta))).toBe(true);
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+
+    // A fresh IV would make the server treat the retry as a conflicting item.
+    expect(addedItem(1).Meta).toBe(firstMeta);
+  });
+
+  it('restores a resumable partial when a resumed item no longer fits the limit', async () => {
+    let resolveLimits: ((value: { data: ReturnType<typeof uploadLimits> }) => void) | undefined;
+    api.getUploadLimits.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLimits = resolve;
+      })
+    );
+    api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
+
+    const composer = renderComposer();
+    composer.addFiles([new File([new Uint8Array(2 * 1024 * 1024)], 'late.bin')]);
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.error()).toContain('storage unreachable'));
+    expect(composer.partial()).not.toBeNull();
+
+    await vi.waitFor(() => expect(resolveLimits).toBeTypeOf('function'));
+    resolveLimits?.({ data: uploadLimits(1024 * 1024) });
+    await vi.waitFor(() => expect(composer.limitLabel()).toBe('limit 1 MB/file'));
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.error()).toContain('late.bin'));
+
+    expect(composer.partial()).not.toBeNull();
+    expect(api.uploadItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not recheck already-uploaded items when resuming', async () => {
+    let resolveLimits: ((value: { data: ReturnType<typeof uploadLimits> }) => void) | undefined;
+    api.getUploadLimits.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLimits = resolve;
+      })
+    );
+    api.uploadItem
+      .mockResolvedValueOnce({ data: { Id: 'package-1' } })
+      .mockResolvedValueOnce({ error: { title: 'storage unreachable' } })
+      .mockResolvedValueOnce({ data: { Id: 'package-1' } });
+
+    const composer = renderComposer();
+    composer.addFiles([
+      new File([new Uint8Array(2 * 1024 * 1024)], 'first.bin'),
+      new File([new Uint8Array(1024 * 1024)], 'second.bin')
+    ]);
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.error()).toContain('storage unreachable'));
+    expect(composer.partial()?.nextIndex).toBe(1);
+
+    await vi.waitFor(() => expect(resolveLimits).toBeTypeOf('function'));
+    // The stored first item is now larger than the limit, but it is already
+    // part of the package; only the pending second item matters.
+    resolveLimits?.({ data: uploadLimits(1.5 * 1024 * 1024) });
+    await vi.waitFor(() => expect(composer.limitLabel()).toBe('limit 2 MB/file'));
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+
+    expect(api.createPackage).toHaveBeenCalledTimes(1);
+    expect(api.uploadItem).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects pasted text that exceeds the submit limit', async () => {
+    api.getUploadLimits.mockResolvedValue({ data: uploadLimits(1024 * 1024) });
+    const composer = renderComposer();
+    await vi.waitFor(() => expect(composer.limitLabel()).toBe('limit 1 MB/file'));
+
+    composer.setText('x'.repeat(1024 * 1024 + 1));
+    flush();
+
+    composer.handleSubmit();
+
+    await vi.waitFor(() => expect(composer.error()).toContain('content.txt'));
+    expect(composer.error()).toContain('1 MB');
+    expect(api.createPackage).not.toHaveBeenCalled();
+    expect(api.uploadItem).not.toHaveBeenCalled();
+  });
+
   it('blocks submit for an invalid custom passphrase', () => {
     const composer = renderComposer();
     composer.setText('hello');
@@ -190,6 +290,37 @@ describe('createComposer', () => {
     expect(composer.files().map((file) => file.name)).toEqual(['small.jpg']);
     expect(composer.error()).toContain('big.bin');
     expect(composer.error()).toContain('2 MB');
+  });
+
+  it('hands the original file to the upload without copying it when unencrypted', async () => {
+    const composer = renderComposer();
+    const file = makeFile();
+    composer.addFiles([file]);
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+
+    expect(addedItem(0).File).toBe(file);
+  });
+
+  it('rejects an oversized file at submit when the limit arrived after it was added', async () => {
+    api.getUploadLimits.mockResolvedValue({ data: uploadLimits(1024 * 1024) });
+    const composer = renderComposer();
+
+    // Added before the limits request resolves, so the add-time check cannot
+    // run yet. Submit must re-check instead of uploading the file.
+    composer.addFiles([new File([new Uint8Array(2 * 1024 * 1024)], 'late.bin')]);
+    flush();
+    await vi.waitFor(() => expect(composer.limitLabel()).toBe('limit 1 MB/file'));
+    expect(composer.files()).toHaveLength(1);
+
+    composer.handleSubmit();
+
+    await vi.waitFor(() => expect(composer.error()).toContain('late.bin'));
+    expect(composer.error()).toContain('1 MB');
+    expect(api.createPackage).not.toHaveBeenCalled();
+    expect(api.uploadItem).not.toHaveBeenCalled();
   });
 
   it('deduplicates the same file selected repeatedly', () => {

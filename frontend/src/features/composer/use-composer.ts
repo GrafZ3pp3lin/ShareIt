@@ -50,8 +50,8 @@ export type ComposerProgress = {
 };
 
 type ComposerItem =
-  | { id: string; kind: 'text'; bytes: Uint8Array<ArrayBuffer>; meta: ItemMeta }
-  | { id: string; kind: 'file'; file: File; meta: ItemMeta };
+  | { id: string; kind: 'text'; bytes: Uint8Array<ArrayBuffer>; meta: ItemMeta; sealedMeta?: string }
+  | { id: string; kind: 'file'; file: File; meta: ItemMeta; sealedMeta?: string };
 
 type PartialPackage = {
   packageId: string;
@@ -292,6 +292,35 @@ export function createComposer() {
     encrypted: Boolean(currentPassphrase)
   });
 
+  /**
+   * Re-checks the items right before the first network call. The form can be
+   * edited while limits load, and a resumed attempt may carry items that no
+   * longer fit the current identity's limit.
+   */
+  const validateSubmit = (items: ComposerItem[], startIndex = 0): string | null => {
+    if (items.length === 0) {
+      return t('errors.missingContent');
+    }
+
+    // On resume, items before nextIndex are already stored. Re-checking them
+    // would block the retry if the limit changed in the meantime.
+    const pending = items.slice(startIndex);
+    const limit = fileBytesLeft();
+    if (limit == null) {
+      // Limits are advisory when they could not be loaded; the server enforces
+      // them and reports a 413 per item.
+      return null;
+    }
+
+    const oversized = pending
+      .filter((item) => (item.kind === 'file' ? item.file.size : item.bytes.length) > limit)
+      .map((item) => itemName(item));
+
+    return oversized.length > 0
+      ? t('composer.errors.fileTooLarge', { names: oversized.join(', '), limit: formatMb(limit) })
+      : null;
+  };
+
   const runSubmit = async (resume?: PartialPackage) => {
     setSubmitting(true);
     setError(null);
@@ -299,6 +328,17 @@ export function createComposer() {
     try {
       const items = resume?.items ?? buildItems();
       const currentPassphrase = resume ? resume.passphrase : passphrase();
+
+      const validationError = validateSubmit(items, resume?.nextIndex ?? 0);
+      if (validationError) {
+        setProgress(null);
+        setError(validationError);
+        if (resume) {
+          setPartial(resume);
+        }
+        return;
+      }
+
       const labels = {
         expiry: resume?.expiryLabel ?? expiryLabel(),
         downloads: resume?.accessesLabel ?? accessesLabel(),
@@ -345,17 +385,31 @@ export function createComposer() {
           totalBytes: plainSize
         });
 
-        let bytes: Uint8Array<ArrayBuffer>;
-        let metaBytes: Uint8Array<ArrayBuffer>;
+        let payload: Blob;
+        let meta: string;
         try {
-          // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
-          bytes = item.kind === 'file' ? new Uint8Array(await item.file.arrayBuffer()) : item.bytes;
           if (key) {
             // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
-            bytes = await seal(await itemKey(key, item.id), bytes, itemAad(packageId, item.id));
+            const plain = item.kind === 'file' ? new Uint8Array(await item.file.arrayBuffer()) : item.bytes;
+            // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
+            const sealed = await seal(await itemKey(key, item.id), plain, itemAad(packageId, item.id));
+            payload = new Blob([sealed], { type: 'application/octet-stream' });
+          } else {
+            // Unencrypted items are handed to the browser as they are: no
+            // arrayBuffer copy and no second File wrapper. The browser streams
+            // the original file straight from disk.
+            payload = item.kind === 'file' ? item.file : new Blob([item.bytes], { type: 'application/octet-stream' });
           }
-          // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
-          metaBytes = await encodeMeta(item.meta, key, packageId, item.id);
+
+          if (item.sealedMeta) {
+            // Reuse the exact sealed meta across retries. It contains a random
+            // IV, and the server uses it as part of the idempotency fingerprint.
+            meta = item.sealedMeta;
+          } else {
+            // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
+            meta = toBase64Url(await encodeMeta(item.meta, key, packageId, item.id));
+            item.sealedMeta = meta;
+          }
         } catch {
           setProgress(null);
           setError(t('errors.encrypt', { fileName }));
@@ -369,7 +423,7 @@ export function createComposer() {
           total: items.length,
           fileName,
           sentBytes: 0,
-          totalBytes: bytes.length
+          totalBytes: payload.size
         });
 
         // oxlint-disable-next-line no-await-in-loop -- items are uploaded one at a time for progress/cancel
@@ -378,10 +432,8 @@ export function createComposer() {
           {
             Id: item.id,
             Kind: item.kind,
-            Meta: toBase64Url(metaBytes),
-            File: new File([bytes], item.kind === 'text' ? 'content.txt' : fileName, {
-              type: 'application/octet-stream'
-            }),
+            Meta: meta,
+            File: payload,
             FileName: item.kind === 'text' ? 'content.txt' : fileName
           },
           (sentBytes, totalBytes) => {

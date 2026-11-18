@@ -13,7 +13,6 @@ using kroet.ShareIt.Api.Services.Storage;
 using kroet.ShareIt.Api.Storage.Extensions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -133,11 +132,10 @@ try
     {
         options.Limits.MaxRequestBodySize = maxRequestBodySizeBytes;
     });
-    builder.Services.Configure<FormOptions>(options =>
-    {
-        options.MultipartBodyLengthLimit = maxRequestBodySizeBytes;
-        options.ValueLengthLimit = 1024 * 1024;
-    });
+
+    // Uploads are read from Request.Body with MultipartReader, so no form
+    // buffering options apply: the per-identity file limit is enforced while
+    // streaming, and Kestrel's body limit stays the outer bound.
 
     // Blob Storage configuration
     builder.Services.AddBlobStorage(configuration);

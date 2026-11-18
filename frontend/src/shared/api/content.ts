@@ -2,6 +2,7 @@ import {
   createPackage as createPackageGenerated,
   deletePackage as deletePackageGenerated,
   downloadContent as downloadContentGenerated,
+  getDownloadContentUrl,
   getPackage as getPackageGenerated,
   getUploadLimits as getUploadLimitsGenerated,
   listPackages as listPackagesGenerated
@@ -14,7 +15,7 @@ import type {
   ContentPackageResponse,
   CreatePackageRequest
 } from '../../client/model/index.ts';
-import { getAuthHeaders, absoluteApiUrl } from './fetch-client.ts';
+import { getAuthHeaders, absoluteApiUrl, parseProblem } from './fetch-client.ts';
 import { getRuntimeConfig } from '../config/runtime-config.ts';
 
 export type ApiResult<T> = {
@@ -135,6 +136,10 @@ export type UploadItemResult = ApiResult<ContentPackageResponse> & {
  * Uploads a single item — text bytes or file bytes — with real progress
  * reporting via XHR. Resolves with `canceled: true` when the signal was
  * aborted before completion.
+ *
+ * The body is streamed from the Blob by the browser; the client never reads
+ * the bytes into memory. The parts are ordered as the endpoint requires:
+ * metadata first, then the payload last.
  */
 export async function uploadItem(
   packageId: string,
@@ -142,8 +147,19 @@ export async function uploadItem(
   onProgress?: UploadProgressCallback,
   signal?: AbortSignal
 ): Promise<UploadItemResult> {
+  if (signal?.aborted) {
+    return { canceled: true };
+  }
+
   const uploadUrl = absoluteApiUrl(`/api/v1/content/package/${packageId}/upload`);
   const headers = await getAuthHeaders(uploadUrl, 'POST');
+
+  // Token/DPoP generation is asynchronous; the signal may have been aborted
+  // while we were waiting. An already-aborted signal will not fire again.
+  if (signal?.aborted) {
+    return { canceled: true };
+  }
+
   const baseUrl = getRuntimeConfig().apiBaseUrl;
 
   return new Promise((resolve) => {
@@ -151,6 +167,7 @@ export async function uploadItem(
     form.append('Id', item.Id);
     form.append('Kind', item.Kind);
     form.append('Meta', item.Meta);
+    form.append('Size', String(item.File.size));
     form.append('File', item.File, item.FileName);
 
     const xhr = new XMLHttpRequest();
@@ -168,11 +185,17 @@ export async function uploadItem(
       });
     }
 
+    const abort = () => xhr.abort();
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort);
+    };
+
     if (signal) {
-      signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      signal.addEventListener('abort', abort, { once: true });
     }
 
     xhr.addEventListener('load', () => {
+      cleanup();
       if (xhr.status >= 200 && xhr.status < 300) {
         if (isContentPackageResponse(xhr.response)) {
           resolve({
@@ -186,8 +209,14 @@ export async function uploadItem(
         resolve({ error: xhr.response ?? new Error(`Upload failed with status ${xhr.status}`) });
       }
     });
-    xhr.addEventListener('abort', () => resolve({ canceled: true }));
-    xhr.addEventListener('error', () => resolve({ error: new Error('Network error during upload') }));
+    xhr.addEventListener('abort', () => {
+      cleanup();
+      resolve({ canceled: true });
+    });
+    xhr.addEventListener('error', () => {
+      cleanup();
+      resolve({ error: new Error('Network error during upload') });
+    });
     xhr.send(form);
   });
 }
@@ -249,6 +278,36 @@ export async function downloadContent(
     return { data: result.data, status: result.status };
   }
   return { error: new Error('Download did not return a blob'), status: result.status };
+}
+
+export type DownloadResponseResult = {
+  response?: Response;
+  error?: unknown;
+  status?: number;
+};
+
+/**
+ * Fetches an item body as a raw `Response` so a caller can pipe it straight to
+ * a writable destination. The generated client parses the body into a `Blob`,
+ * which copies the whole file into memory first.
+ */
+export async function downloadContentResponse(
+  packageId: string,
+  contentId: string,
+  accessSession: string
+): Promise<DownloadResponseResult> {
+  const url = absoluteApiUrl(getDownloadContentUrl(packageId, contentId));
+  const headers = {
+    ...(await getAuthHeaders(url, 'GET')),
+    'X-Access-Session': accessSession
+  };
+
+  const response = await fetch(url, { headers });
+  if (isSuccess(response.status)) {
+    return { response, status: response.status };
+  }
+
+  return { error: await parseProblem(response), status: response.status };
 }
 
 export async function listPackages(cursor?: string): Promise<ApiResult<PackageListPage>> {

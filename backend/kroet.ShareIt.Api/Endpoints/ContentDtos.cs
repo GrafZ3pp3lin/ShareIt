@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using kroet.ShareIt.Api.Models;
 
 namespace kroet.ShareIt.Api.Content.Dtos;
@@ -41,12 +42,17 @@ public class CreatePackageRequest
 
 /// <summary>
 /// Multipart request adding a single item (text or file bytes) to a package.
+/// This type only describes the wire format for OpenAPI; the endpoint reads the
+/// parts directly from <c>HttpContext.Request.Body</c> so the payload is never
+/// buffered. Parts must be sent in order: <c>Id</c>, <c>Kind</c>, <c>Meta</c>,
+/// <c>Size</c>, then <c>File</c> last.
 /// </summary>
 public class UploadContentRequest
 {
     /// <summary>
     /// Client-generated item ID. Stable across retries; a repeated upload with
-    /// the same id is idempotent for the package owner.
+    /// the same id and the same kind, size and meta is idempotent for the
+    /// package owner. Reusing the id for different content is a conflict.
     /// </summary>
     public Guid? Id { get; set; }
 
@@ -62,7 +68,17 @@ public class UploadContentRequest
     public string? Meta { get; set; }
 
     /// <summary>
-    /// Content bytes: sealed or plaintext, for both text and file items.
+    /// Exact number of bytes in the <c>File</c> part. Used for the upload
+    /// limit check and the idempotency fingerprint; the server verifies it
+    /// against the bytes it actually read.
+    /// </summary>
+    [Required]
+    [Range(0, long.MaxValue)]
+    public required long Size { get; set; }
+
+    /// <summary>
+    /// Content bytes: sealed or plaintext, for both text and file items. Must
+    /// be the last part of the request.
     /// </summary>
     public IFormFile? File { get; set; }
 }

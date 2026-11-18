@@ -104,6 +104,81 @@ public class S3BlobStorageHandlerIntegrationTests
     }
 
     [TestMethod]
+    public async Task UploadAsync_BodyLargerThanPartBuffer_UsesMultipartAndRoundTrips()
+    {
+        // Above the 1 MiB probe and the 8 MiB part size, so this takes the
+        // multipart path and needs more than one part.
+        var content = new byte[(9 * 1024 * 1024) + 17];
+        for (var index = 0; index < content.Length; index += 4096)
+        {
+            content[index] = (byte)(index % 251);
+        }
+
+        await using var stream = new MemoryStream(content);
+
+        var blobId = await _handler.UploadAsync(stream, "application/octet-stream", "large.bin");
+
+        var metadata = await _inspectionClient.GetObjectMetadataAsync(new GetObjectMetadataRequest
+        {
+            BucketName = _bucketName,
+            Key = blobId
+        });
+        Assert.AreEqual((long)content.Length, metadata.ContentLength);
+
+        await using var downloaded = await _handler.DownloadAsync(blobId);
+        using var downloadedContent = new MemoryStream();
+        await downloaded.CopyToAsync(downloadedContent);
+
+        Assert.AreEqual(content.Length, downloadedContent.Length);
+        Assert.AreEqual(content[0], downloadedContent.GetBuffer()[0]);
+        Assert.AreEqual(content[^1], downloadedContent.GetBuffer()[content.Length - 1]);
+        CollectionAssert.AreEqual(content, downloadedContent.ToArray());
+    }
+
+
+    [TestMethod]
+    public async Task UploadAsync_BodyExactlyProbeBufferSize_UsesSinglePutObject()
+    {
+        // Exactly the probe size must not take the multipart path. A multipart
+        // ETag carries a "-<part count>" suffix; a PutObject ETag does not.
+        var content = new byte[1024 * 1024];
+        await using var stream = new MemoryStream(content);
+
+        var blobId = await _handler.UploadAsync(stream, "application/octet-stream", "exact.bin");
+
+        var metadata = await _inspectionClient.GetObjectMetadataAsync(new GetObjectMetadataRequest
+        {
+            BucketName = _bucketName,
+            Key = blobId
+        });
+        Assert.AreEqual((long)content.Length, metadata.ContentLength);
+        Assert.IsFalse(
+            metadata.ETag.Contains('-'),
+            $"A body of exactly the probe size should use PutObject, but the ETag was {metadata.ETag}.");
+    }
+
+    [TestMethod]
+    public async Task UploadAsync_WhenStreamFailsAfterFirstPart_AbortsMultipartAndStoresNothing()
+    {
+        await using var stream = new ThrowingAfterBytesStream(8 * 1024 * 1024);
+
+        await Assert.ThrowsAsync<IOException>(
+            () => _handler.UploadAsync(stream, "application/octet-stream", "aborted.bin"));
+
+        var objects = await _inspectionClient.ListObjectsV2Async(new ListObjectsV2Request
+        {
+            BucketName = _bucketName
+        });
+        Assert.AreEqual(0, objects.S3Objects?.Count ?? 0);
+
+        var uploads = await _inspectionClient.ListMultipartUploadsAsync(new ListMultipartUploadsRequest
+        {
+            BucketName = _bucketName
+        });
+        Assert.AreEqual(0, uploads.MultipartUploads?.Count ?? 0);
+    }
+
+    [TestMethod]
     public async Task UploadAsync_WhenBucketAlreadyExists_StoresBothObjects()
     {
         await _inspectionClient.PutBucketAsync(_bucketName);
@@ -280,5 +355,45 @@ public class S3BlobStorageHandlerIntegrationTests
         return new S3BlobStorageHandler(
             Options.Create(settings),
             NullLogger<S3BlobStorageHandler>.Instance);
+    }
+
+    private sealed class ThrowingAfterBytesStream(long byteCount) : Stream
+    {
+        private long _remaining = byteCount;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            if (_remaining == 0)
+            {
+                throw new IOException("Simulated stream failure after the first multipart part.");
+            }
+
+            var read = (int)Math.Min(buffer.Length, _remaining);
+            buffer.Span[..read].Clear();
+            _remaining -= read;
+            return ValueTask.FromResult(read);
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

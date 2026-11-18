@@ -63,7 +63,7 @@ Features consume cross-cutting concerns from `src/shared/*` (`api`, `crypto`, `c
 The app never calls generated SDK functions directly except through `src/shared/api/`:
 
 - `fetch-client.ts` — `customFetch()` is the Orval mutator. It adds the runtime API base URL and identity headers: DPoP + bearer for an OIDC user, otherwise the persisted guest ID (`X-Guest-ID`, `localStorage` key `shareit-guest-id`). The unlock proof is only attached per call by `getPackageDetails`, never globally.
-- `content.ts` — `ApiResult` wrappers around the generated calls: `createPackage`, `uploadItem` (XHR, real progress + `AbortSignal` cancellation), `getPackageDetails(id, unlockProof)`, `downloadContent`, `listPackages`, `deletePackage` and `getUploadLimits`. It also narrows generated `number | string` int64 fields.
+- `content.ts` — `ApiResult` wrappers around the generated calls: `createPackage`, `uploadItem` (XHR, real progress + `AbortSignal` cancellation, `Size` part), `getPackageDetails(id, unlockProof)`, `downloadContent` (buffered `Blob`), `downloadContentResponse` (raw `Response` for streaming saves), `listPackages`, `deletePackage` and `getUploadLimits`. It also narrows generated `number | string` int64 fields.
 - `error-message.ts` — `getErrorMessage()` normalizes error shapes (string, `Error`, RFC7807 `ProblemDetails`, generic `{message}`) into a display string.
 
 ### Composer flow
@@ -73,14 +73,14 @@ The app never calls generated SDK functions directly except through `src/shared/
 1. Generate the package id and one item id per text/file once per attempt.
 2. When a passphrase is set, derive the package key from the id (`keys.ts`) and compute the unlock verifier.
 3. `POST /package` with `Id` and `UnlockVerifier` (null when password-off).
-4. Per item: seal content + `meta` when protected, then `POST /package/{id}/upload` with `Id`, `Kind`, `Meta`, `File` — one item per request, with progress/cancel and stable ids for retries.
+4. Per item: seal content + `meta` when protected, then `POST /package/{id}/upload` with `Id`, `Kind`, `Meta`, `Size`, `File` — one item per request, with progress/cancel and stable ids for retries. Parts must arrive in that order: the API validates the metadata before it reads the payload, and the browser streams the file from disk (unencrypted items are never read into JS memory).
 5. The result shows the plain link and, when protected, the `#s=` combined link plus the passphrase (shown once).
 
-Per-file size limits come from `GET /package/limits` (anonymous vs authenticated), applied client-side before upload and enforced server-side. A duplicate create with the owner's id is idempotent.
+Per-file size limits come from `GET /package/limits` (anonymous vs authenticated), applied when files are added **and re-checked at submit**, then enforced server-side while streaming. A duplicate create with the owner's id is idempotent; reusing an item id with a different kind/size/meta is a `409`.
 
 ### Share flow
 
-`src/features/share/use-share.ts` is a `locked → unlocking → unlocked | invalid | gone` state machine. A plain link renders the gate with no request until submit; a `#s=` link derives the proof and fetches immediately (skeleton, no gate flash), then `history.replaceState` removes the fragment after success. `GET /package/{id}` carries `X-Unlock-Proof` plus any stored `X-Access-Session`; a valid session reuses the access instead of claiming another, and a wrong proof gets `401` before any access is counted. Text and file metadata are decoded per item; content comes from inline `payload` or a session-authorized download, and only then is the `SIE2` envelope opened. The session token lives in `sessionStorage` for the package lifetime (15 minutes) and is never put in a URL. `access-session.ts` owns that storage helper; the server is the authority for expiry, and the helper clears the token on a download `401` or a `410`/`404` package-gone response.
+`src/features/share/use-share.ts` is a `locked → unlocking → unlocked | invalid | gone` state machine. A plain link renders the gate with no request until submit; a `#s=` link derives the proof and fetches immediately (skeleton, no gate flash), then `history.replaceState` removes the fragment after success. `GET /package/{id}` carries `X-Unlock-Proof` plus any stored `X-Access-Session`; a valid session reuses the access instead of claiming another, and a wrong proof gets `401` before any access is counted. Text and file metadata are decoded per item; content comes from inline `payload` or a session-authorized download, and only then is the `SIE2` envelope opened. Unencrypted downloads use `save-file.ts`: when `showSaveFilePicker` exists, `response.body.pipeTo(createWritable())` writes straight to disk; otherwise the buffered `Blob` path is used. The session token lives in `sessionStorage` for the package lifetime (15 minutes) and is never put in a URL. `access-session.ts` owns that storage helper; the server is the authority for expiry, and the helper clears the token on a download `401` or a `410`/`404` package-gone response.
 
 ### Auth (OIDC)
 

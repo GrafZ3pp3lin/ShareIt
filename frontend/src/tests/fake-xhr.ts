@@ -67,6 +67,16 @@ export class FakeXhr {
     FakeXhr.#add(this.#listeners, name, listener);
   }
 
+  removeEventListener(name: string, listener: XhrListener) {
+    const existing = this.#listeners.get(name);
+    if (existing) {
+      this.#listeners.set(
+        name,
+        existing.filter((entry) => entry !== listener)
+      );
+    }
+  }
+
   send(form: FormData) {
     this.#form = form;
     FakeXhr.sent.push(this);

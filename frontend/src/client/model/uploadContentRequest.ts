@@ -13,5 +13,11 @@ export interface UploadContentRequest {
   Kind?: string | null;
   /** @nullable */
   Meta?: string | null;
+  /**
+   * @minimum 0
+   * @maximum 9223372036854776000
+   * @pattern ^-?(?:0|[1-9]\d*)$
+   */
+  Size: number | string;
   File?: null | IFormFile;
 }

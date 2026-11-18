@@ -6,7 +6,8 @@ import { FileRow } from './file-row.tsx';
 import type { ShareItem } from '../use-share.ts';
 
 const read = vi.hoisted(() => ({
-  readShareItem: vi.fn()
+  readShareItem: vi.fn(),
+  fetchShareItem: vi.fn()
 }));
 
 vi.mock('../read-item.ts', () => read);
@@ -50,6 +51,7 @@ describe('<FileRow />', () => {
 
   beforeEach(() => {
     read.readShareItem.mockReset();
+    read.fetchShareItem.mockReset();
     createObjectURL.mockClear();
     revokeObjectURL.mockClear();
     vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
@@ -133,6 +135,67 @@ describe('<FileRow />', () => {
 
     await vi.waitFor(() => expect(read.readShareItem).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole('button', { name: 'download' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('streams an unencrypted item to a picked file instead of buffering it', async () => {
+    const chunks: Uint8Array[] = [];
+    const writable = new WritableStream<Uint8Array>({
+      write: (chunk) => {
+        chunks.push(chunk);
+      }
+    });
+    const showSaveFilePicker = vi.fn(async () => ({ createWritable: async () => writable }));
+    vi.stubGlobal('showSaveFilePicker', showSaveFilePicker);
+    read.fetchShareItem.mockResolvedValue(new Response('file-bytes', { status: 200 }));
+
+    renderRow();
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    await vi.waitFor(() =>
+      expect(read.fetchShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, 'session-1', undefined, undefined)
+    );
+    await vi.waitFor(() => expect(chunks).toHaveLength(1));
+    expect(new TextDecoder().decode(chunks[0])).toBe('file-bytes');
+    expect(showSaveFilePicker).toHaveBeenCalledWith({ suggestedName: 'report.pdf' });
+    expect(read.readShareItem).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'download' })).toBeInTheDocument();
+  });
+
+  it('treats a canceled save dialog as a no-op', async () => {
+    const canceled = Object.assign(new Error('canceled'), { name: 'AbortError' });
+    vi.stubGlobal(
+      'showSaveFilePicker',
+      vi.fn(async () => {
+        throw canceled;
+      })
+    );
+
+    renderRow();
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'download' })).toBeEnabled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(read.readShareItem).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the buffered save when the picker is blocked', async () => {
+    const blocked = Object.assign(new Error('blocked'), { name: 'SecurityError' });
+    vi.stubGlobal(
+      'showSaveFilePicker',
+      vi.fn(async () => {
+        throw blocked;
+      })
+    );
+    read.readShareItem.mockResolvedValue(utf8('file-bytes'));
+
+    renderRow();
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    await vi.waitFor(() => expect(read.readShareItem).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+    expect(read.fetchShareItem).not.toHaveBeenCalled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
