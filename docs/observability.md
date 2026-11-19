@@ -1,8 +1,8 @@
 # Application observability
 
-The API pushes OpenTelemetry metrics and traces plus Serilog logs to a single
-OTLP collector endpoint when one is configured. It does **not** expose a
-Prometheus `/metrics` endpoint. The collector is expected to run on the
+The API pushes OpenTelemetry metrics, traces and logs to a single OTLP
+collector endpoint when one is configured. It does **not** expose a Prometheus
+`/metrics` endpoint. The collector is expected to run on the
 internal network; no observability endpoint is publicly routed.
 
 The shared collector/Grafana stack lives in the `kroet.server` repository; this
@@ -10,13 +10,14 @@ application only exports telemetry.
 
 ## Configuration
 
-Metrics and traces use the standard OpenTelemetry environment variables:
+Metrics, traces and logs use the standard OpenTelemetry environment variables:
 
 | Setting | Environment variable |
 |---|---|
 | Endpoint | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | Metrics endpoint | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` |
 | Traces endpoint | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` |
+| Logs endpoint | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` |
 | Protocol | `OTEL_EXPORTER_OTLP_PROTOCOL` |
 | Disable the SDK | `OTEL_SDK_DISABLED` |
 | Trace sampler | `OTEL_TRACES_SAMPLER` |
@@ -40,10 +41,10 @@ At startup the API creates the configured S3 bucket before it starts serving
 requests. The S3 health check then uses `HeadBucket`, which requires
 `s3:ListBucket` in addition to the bucket creation permission.
 
-Logs are configured separately in `appsettings.Production.json` under
-`Serilog:WriteTo` using the `OpenTelemetry` sink. The sink also honors the
-standard OTLP endpoint/protocol environment variables, so the endpoint can be
-overridden without changing the file.
+Logs are exported through the OpenTelemetry logging provider, which shares the
+same resource and exporter settings as metrics and traces. They are only
+exported when a shared or logs-specific endpoint is configured; otherwise the
+API logs to the console only.
 
 Example container configuration:
 
@@ -166,14 +167,24 @@ retention by default) and exposes them through its Jaeger-compatible API.
 
 ## Logs
 
-Serilog continues to write the existing console logs, and an additional
-OpenTelemetry sink exports log events to the same OTLP endpoint. The sink batches
-and retries exports while the collector is temporarily unavailable.
+Logs use `Microsoft.Extensions.Logging` with the OpenTelemetry logging provider
+registered in `ObservabilityExtensions`. The provider batches and retries
+exports while the collector is temporarily unavailable, and it shares the
+metrics/traces resource (`service.name`, `service.version`,
+`deployment.environment.name`).
 
-The sink automatically attaches the current `TraceId` and `SpanId` to exported
-log records, so request logs can be followed from VictoriaLogs into the matching
-trace in Grafana. Existing logs that fire outside a request (for example during
-startup) simply have no trace context.
+Message template values are exported as structured attributes
+(`ParseStateValues`), the rendered message is the record body
+(`IncludeFormattedMessage`), and `ILogger.BeginScope` values are exported as
+attributes (`IncludeScopes`). The provider attaches the current `TraceId` and
+`SpanId` automatically, so request logs can be followed from VictoriaLogs into
+the matching trace in Grafana. Logs that fire outside a request (for example
+during startup) simply have no trace context.
+
+The console uses the default `simple` formatter. Log level filtering is
+configured under `Logging:LogLevel` in `appsettings.json`;
+`Microsoft.AspNetCore` is set to `Warning` so request logs come from the API's
+own middleware (`RequestLoggingMiddleware`) as one structured line per request.
 
 Logs include the normal application log fields. Ensure the collector and
 Grafana access are restricted to administrators; do not add secrets or tokens
@@ -189,12 +200,6 @@ OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
 dotnet run --project kroet.ShareIt.Api
 ```
 
-The endpoint variable enables metrics and traces. Then verify in the collector
-that the `shareit-api` service reports them. There is no `/metrics` endpoint to
-call on the API.
-
-The OpenTelemetry Serilog sink is only configured in
-`appsettings.Production.json`. A default Development run therefore keeps logs
-on the console. To export logs locally, either add the sink to
-`appsettings.Development.json` or run with `ASPNETCORE_ENVIRONMENT=Production`
-and provide local storage settings.
+The endpoint variable enables metrics, traces and logs. Then verify in the
+collector that the `shareit-api` service reports all three. There is no
+`/metrics` endpoint to call on the API.

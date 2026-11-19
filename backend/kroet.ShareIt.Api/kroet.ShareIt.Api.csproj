@@ -22,8 +22,6 @@
         <PackageReference Include="OpenTelemetry.Instrumentation.AWS" />
         <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
         <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
-        <PackageReference Include="Serilog.AspNetCore" />
-        <PackageReference Include="Serilog.Sinks.OpenTelemetry" />
     </ItemGroup>
 
     <ItemGroup>

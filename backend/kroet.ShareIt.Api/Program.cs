@@ -17,12 +17,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using Serilog;
 
-// The initial "bootstrap" logger is able to log errors during start-up. It's completely replaced by the
-// logger configured by `AddObservability()` below, once configuration and dependency-injection
-// have both been set up successfully.
-Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateBootstrapLogger();
+WebApplication? app = null;
 
 try
 {
@@ -174,6 +170,7 @@ try
     // - A plain challenge/forbid scheme answers denied anonymous requests with
     //   401/403 instead of throwing (no interactive sign-in exists server-side).
     var authAuthority = configuration["Auth:Authority"];
+    var authAudience = configuration["Auth:Audience"];
     builder.Services.AddAuthentication(options =>
         {
             options.DefaultChallengeScheme = ApiChallengeHandler.SchemeName;
@@ -187,7 +184,6 @@ try
 
     if (!string.IsNullOrEmpty(authAuthority))
     {
-        var authAudience = configuration["Auth:Audience"];
         // Local Keycloak twins run on plain http; every real deployment keeps the default.
         var requireHttpsMetadata = configuration.GetValue("Auth:RequireHttpsMetadata", true);
         builder.Services.AddOptions<DpopSettings>().BindConfiguration(DpopSettings.SectionName);
@@ -272,14 +268,6 @@ try
                 }
             };
         });
-
-        if (string.IsNullOrEmpty(authAudience))
-        {
-            Log.Warning(
-                "Auth:Authority is configured without Auth:Audience — audience validation is disabled. " +
-                "Tokens issued to any client of {Authority} are accepted; set Auth:Audience to restrict them to this API.",
-                authAuthority);
-        }
     }
 
     builder.Services.AddAuthorization();
@@ -322,7 +310,15 @@ try
 
     });
 
-    var app = builder.Build();
+    app = builder.Build();
+
+    if (!string.IsNullOrEmpty(authAuthority) && string.IsNullOrEmpty(authAudience))
+    {
+        app.Logger.LogWarning(
+            "Auth:Authority is configured without Auth:Audience — audience validation is disabled. " +
+            "Tokens issued to any client of {Authority} are accepted; set Auth:Audience to restrict them to this API.",
+            authAuthority);
+    }
 
     var metrics = app.Services.GetRequiredService<ShareItMetrics>();
     metrics.SetBuildInfo(
@@ -331,7 +327,7 @@ try
 
     app.UseForwardedHeaders();
 
-    app.UseSerilogRequestLogging();
+    app.UseRequestLogging();
     
     var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
     app.UseCors(policy =>
@@ -343,7 +339,7 @@ try
             // No origins configured — stay permissive, but call it out in production.
             if (app.Environment.IsProduction())
             {
-                Log.Warning("No CORS origins configured (Cors:AllowedOrigins) — falling back to AllowAnyOrigin.");
+                app.Logger.LogWarning("No CORS origins configured (Cors:AllowedOrigins) — falling back to AllowAnyOrigin.");
             }
 
             policy.AllowAnyOrigin();
@@ -390,12 +386,17 @@ try
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "An unhandled exception occurred during bootstrapping");
+    if (app is null)
+    {
+        await Console.Error.WriteLineAsync($"An unhandled exception occurred during bootstrapping: {ex}");
+    }
+    else
+    {
+        app.Logger.LogCritical(ex, "An unhandled exception occurred during bootstrapping");
+        await app.DisposeAsync();
+    }
+
     return 1;
-}
-finally
-{
-    Log.CloseAndFlush();
 }
 
 // Declared public so the integration test project can boot the API

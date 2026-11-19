@@ -2,17 +2,16 @@ using System.Reflection;
 using kroet.ShareIt.Api.Services.Metrics;
 using kroet.ShareIt.Api.Storage.Postgres;
 using Npgsql;
+using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using Serilog;
 
 namespace kroet.ShareIt.Api.Services.Observability;
 
 /// <summary>
-/// Registers application metrics and traces when an OTLP endpoint is
-/// configured. Serilog's OTLP sink is configured separately in appsettings,
-/// keeping logging configuration out of code.
+/// Registers application metrics, traces and logs when an OTLP endpoint is
+/// configured. All three signals share one OpenTelemetry resource.
 /// </summary>
 public static class ObservabilityExtensions
 {
@@ -27,6 +26,7 @@ public static class ObservabilityExtensions
         var sharedEndpoint = configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
         var metricsEndpoint = configuration["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"];
         var tracesEndpoint = configuration["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"];
+        var logsEndpoint = configuration["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"];
 
         var metricsExportEnabled = !sdkDisabled &&
                                    (!string.IsNullOrWhiteSpace(sharedEndpoint) ||
@@ -34,6 +34,9 @@ public static class ObservabilityExtensions
         var tracesExportEnabled = !sdkDisabled &&
                                   (!string.IsNullOrWhiteSpace(sharedEndpoint) ||
                                    !string.IsNullOrWhiteSpace(tracesEndpoint));
+        var logsExportEnabled = !sdkDisabled &&
+                                (!string.IsNullOrWhiteSpace(sharedEndpoint) ||
+                                 !string.IsNullOrWhiteSpace(logsEndpoint));
 
         // Snapshots are SQL-only. In-memory storage deliberately has no
         // snapshot provider, so only register the refresher when both the SQL
@@ -44,7 +47,7 @@ public static class ObservabilityExtensions
             builder.Services.AddHostedService<MetricsSnapshotService>();
         }
 
-        if (metricsExportEnabled || tracesExportEnabled)
+        if (metricsExportEnabled || tracesExportEnabled || logsExportEnabled)
         {
             var openTelemetry = builder.Services.AddOpenTelemetry()
                 .ConfigureResource(resource => resource
@@ -73,10 +76,19 @@ public static class ObservabilityExtensions
                     .AddAWSInstrumentation()
                     .AddOtlpExporter());
             }
-        }
 
-        builder.Services.AddSerilog((_, loggerConfiguration) =>
-            loggerConfiguration.ReadFrom.Configuration(builder.Configuration));
+            if (logsExportEnabled)
+            {
+                openTelemetry.WithLogging(
+                    logging => logging.AddOtlpExporter(),
+                    options =>
+                    {
+                        options.IncludeScopes = true;
+                        options.IncludeFormattedMessage = true;
+                        options.ParseStateValues = true;
+                    });
+            }
+        }
 
         return builder;
     }
