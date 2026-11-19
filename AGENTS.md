@@ -1,12 +1,15 @@
 # AGENTS.md
 
 ## Scope
-- Repo has two major areas: `backend/` (.NET 11, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript).
+- Repo has two major areas: `backend/` (.NET 11, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript). The root `apphost.cs` is the Aspire orchestration entry point.
 
 ### Run everything with Aspire
-- `dotnet run --project backend/kroet.ShareIt.AppHost` starts the AuthTwin, API, frontend
+- `dotnet run apphost.cs` from the repo root starts the AuthTwin, API, frontend
   (`pnpm dev`), PostgreSQL 18, and RustFS together. It requires the Aspire CLI
   (`dotnet tool install -g Aspire.Cli`), a running Docker daemon, and `pnpm`.
+  `aspire run` also works with Aspire CLI 17 or later.
+- The AppHost is the file-based `apphost.cs`; it registers the API and AuthTwin by path with
+  `AddDotnetProject`, so there is no AppHost project or `ProjectReference` to keep in sync.
 - Ports are pinned to 8190 (AuthTwin), 5155 (API), and 3001 (frontend) to match
   `frontend/public/env.js`; change them in both places if you move a service.
 
@@ -35,8 +38,8 @@
   `docs/crypto-v2.md`.
 
 ### Backend (.NET)
-- NuGet versions are centralized in `backend/Directory.Packages.props` (Central Package Management). Project files list packages without a `Version`; add or bump versions only there. Check for updates with `dotnet list kroet.ShareIt.slnx package --outdated` from `backend/`.
-- The `Aspire.AppHost.Sdk` version sits in `kroet.ShareIt.AppHost/kroet.ShareIt.AppHost.csproj` (SDK references cannot use CPM). Keep it in step with the `Aspire.Hosting.*` versions in `Directory.Packages.props`.
+- NuGet versions for backend projects are centralized in `backend/Directory.Packages.props` (Central Package Management). Project files list packages without a `Version`; add or bump versions only there. Check for updates with `dotnet list kroet.ShareIt.slnx package --outdated` from `backend/`.
+- The AppHost's Aspire package versions live in the `#:package` directives at the top of `apphost.cs`; keep them in lockstep and check them with `dotnet list apphost.cs package --outdated` from the repo root.
 - `kroet.ShareIt.Api/Dockerfile` copies `Directory.Packages.props` before `dotnet restore`; add any new central build file to that restore layer too.
 - Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`) against the real PostgreSQL and RustFS containers. They share those containers, reset the database per test, and use a unique S3 bucket per test; authentication is provided by the `X-Test-User` header (see `Infrastructure/ShareItApiTestBase.cs`).
 - The endpoint, Postgres, and S3 integration tests require a running Docker daemon (Testcontainers). The S3 tests use a RustFS container.

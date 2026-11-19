@@ -9,13 +9,6 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
-  <!-- Keep the Aspire packages and the Aspire.AppHost.Sdk version in
-       kroet.ShareIt.AppHost/kroet.ShareIt.AppHost.csproj in lockstep. -->
-  <ItemGroup Label="Aspire">
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="17.0.0" />
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="17.0.0" />
-  </ItemGroup>
-
   <ItemGroup Label="API">
     <PackageVersion Include="Asp.Versioning.Http" Version="10.2.3" />
     <PackageVersion Include="AWSSDK.S3" Version="4.1.2" />

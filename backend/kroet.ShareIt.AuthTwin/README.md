@@ -37,11 +37,13 @@ dotnet run --project backend/kroet.ShareIt.Api
 cd frontend && pnpm dev
 ```
 
-Or start all three together with the Aspire AppHost:
+Or start all three together from the repository root:
 
 ```bash
-dotnet run --project backend/kroet.ShareIt.AppHost
+dotnet run apphost.cs
 ```
+
+(`aspire run` also works with Aspire CLI 17 or later.)
 
 The AppHost also starts PostgreSQL 18 (content and access-session storage) and RustFS
 (S3-compatible blob storage) as Docker containers. It requires the Aspire CLI
