@@ -19,33 +19,32 @@
     "generate:open-api": "orval --config orval.config.ts"
   },
   "dependencies": {
-    "@solid-primitives/i18n": "3.0.0-next.7",
-    "@solidjs/router": "2.0.0-next.44",
-    "@solidjs/web": "2.0.0-rc.21",
+    "@solid-primitives/i18n": "3.0.0",
+    "@solidjs/router": "2.0.0",
+    "@solidjs/web": "2.0.2",
     "clsx": "2.1.1",
     "oidc-client-ts": "3.5.0",
-    "solid-js": "2.0.0-rc.21"
+    "solid-js": "2.0.2"
   },
   "devDependencies": {
-    "@iconify-json/lucide": "1.2.154",
-    "@solidjs/h": "2.0.0-rc.21",
+    "@iconify-json/lucide": "1.2.156",
     "@solidjs/testing-library": "1.0.0-rc.2",
     "@tailwindcss/vite": "4.3.5",
     "@testing-library/jest-dom": "7.0.1",
     "@types/node": "26.6.6",
-    "@vitest/browser-playwright": "5.1.0",
-    "@vitest/ui": "5.1.0",
+    "@vitest/browser-playwright": "5.1.1",
+    "@vitest/ui": "5.1.1",
     "happy-dom": "21.0.4",
     "knip": "6.45.1",
-    "orval": "8.47.0",
-    "oxfmt": "0.78.0",
-    "oxlint": "1.93.0",
+    "orval": "8.48.0",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
     "oxlint-tsgolint": "7.0.2007",
     "tailwindcss": "4.3.5",
     "typescript": "7.0.2",
     "unplugin-icons": "24.0.0",
     "vite": "8.3.8",
     "vite-plugin-solid": "3.0.0-next.27",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   }
 }

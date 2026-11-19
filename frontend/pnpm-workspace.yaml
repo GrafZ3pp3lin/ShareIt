@@ -20,7 +20,19 @@ minimumReleaseAgeIgnoreMissingTime: false
 # release; a glob like `@scope/*` is allowed only without a version. pnpm appends
 # here when an immature version is approved at the prompt — prune entries once
 # the version they name has aged past the cutoff, or the hole stays open.
-minimumReleaseAgeExclude: []
+minimumReleaseAgeExclude:
+  # Exact versions: each entry opens the gate for one release only. Prune entries
+  # once the release they name has aged past the cutoff.
+  - solid-js@2.0.2
+  - '@solidjs/web@2.0.2'
+  - '@solidjs/signals@2.0.2'
+  - '@solidjs/compiler@2.0.2'
+  - '@solidjs/compiler-darwin-arm64@2.0.2'
+  - '@solidjs/compiler-darwin-x64@2.0.2'
+  - '@solidjs/compiler-linux-arm64-gnu@2.0.2'
+  - '@solidjs/compiler-linux-x64-gnu@2.0.2'
+  - '@solidjs/compiler-wasm32-wasi@2.0.2'
+  - '@solidjs/compiler-win32-x64-msvc@2.0.2'
 
 # Reject a version published with weaker credentials than earlier versions of
 # the same package had — a package that shipped via npm trusted publishing or
