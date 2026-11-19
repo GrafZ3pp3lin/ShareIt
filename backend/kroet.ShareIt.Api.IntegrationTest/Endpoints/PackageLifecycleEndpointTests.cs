@@ -19,7 +19,7 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
         var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
         await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
         var response = await GetPackageAsync(packageId, guestId);
 

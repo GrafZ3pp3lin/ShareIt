@@ -190,7 +190,7 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
         var (packageId, _) = await CreatePackageWithItemAsync(
             guestId: guestId, maxAccessCount: 1, unlockVerifier: Verifier());
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
         var response = await GetPackageAsync(packageId, guestId: guestId);
 

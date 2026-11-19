@@ -11,7 +11,7 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
     private readonly List<ContentModel> _contents = [];
     private readonly List<AccessSession> _accessSessions = [];
     private readonly List<string> _pendingBlobDeletions = [];
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private readonly TimeProvider _timeProvider;
     private readonly DownloadSettings _downloadSettings;
 

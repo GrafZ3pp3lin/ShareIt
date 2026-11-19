@@ -69,12 +69,12 @@ internal sealed class StrictJsonObject
     }
 
     public IReadOnlyList<string> Strings(string key) =>
-        Elements(key).Select((e, i) => e.ValueKind == JsonValueKind.String
+        [.. Elements(key).Select((e, i) => e.ValueKind == JsonValueKind.String
             ? e.GetString()!
-            : throw Error($"{Path}.{key}[{i}]", "must be a string")).ToList();
+            : throw Error($"{Path}.{key}[{i}]", "must be a string"))];
 
     public IReadOnlyList<StrictJsonObject> Objects(string key) =>
-        Elements(key).Select((e, i) => new StrictJsonObject(e, $"{Path}.{key}[{i}]")).ToList();
+        [.. Elements(key).Select((e, i) => new StrictJsonObject(e, $"{Path}.{key}[{i}]"))];
 
     public StrictJsonObject? OptionalObject(string key) =>
         TryGet(key, out var value) ? new StrictJsonObject(value, $"{Path}.{key}") : null;
@@ -88,11 +88,11 @@ internal sealed class StrictJsonObject
 
     public static RealmFileException Error(string path, string message) => new($"{path} {message}");
 
-    private IEnumerable<JsonElement> Elements(string key)
+    private List<JsonElement> Elements(string key)
     {
         if (!TryGet(key, out var value)) return [];
         if (value.ValueKind != JsonValueKind.Array) throw Error($"{Path}.{key}", "must be an array");
-        return value.EnumerateArray().ToList();
+        return [.. value.EnumerateArray()];
     }
 
     private bool TryGet(string key, out JsonElement value)

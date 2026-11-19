@@ -11,7 +11,7 @@ using Microsoft.IdentityModel.Tokens;
 namespace kroet.ShareIt.AuthTwin.Test;
 
 [TestClass]
-public sealed class AuthTwinFlowTests
+public sealed partial class AuthTwinFlowTests
 {
     private const string ClientId = "shareit-spa-dev";
     private const string RedirectUri = "http://localhost:3001/auth/callback";
@@ -32,8 +32,8 @@ public sealed class AuthTwinFlowTests
         Assert.AreEqual($"{host.Issuer}/protocol/openid-connect/token", root.GetProperty("token_endpoint").GetString());
         Assert.AreEqual($"{host.Issuer}/protocol/openid-connect/logout", root.GetProperty("end_session_endpoint").GetString());
         Assert.AreEqual($"{host.Issuer}/protocol/openid-connect/certs", root.GetProperty("jwks_uri").GetString());
-        Assert.IsTrue(root.GetProperty("code_challenge_methods_supported").EnumerateArray().Any(v => v.GetString() == "S256"));
-        Assert.IsTrue(root.GetProperty("dpop_signing_alg_values_supported").EnumerateArray().Any(v => v.GetString() == "ES256"));
+        Assert.Contains(v => v.GetString() == "S256", root.GetProperty("code_challenge_methods_supported").EnumerateArray());
+        Assert.Contains(v => v.GetString() == "ES256", root.GetProperty("dpop_signing_alg_values_supported").EnumerateArray());
 
         using var jwks = await GetJsonAsync(client, root.GetProperty("jwks_uri").GetString()!);
         var key = jwks.RootElement.GetProperty("keys").EnumerateArray().Single();
@@ -65,8 +65,8 @@ public sealed class AuthTwinFlowTests
         Assert.AreEqual("DPoP", claims.GetProperty("typ").GetString());
         Assert.AreEqual(key.Jkt, claims.GetProperty("cnf").GetProperty("jkt").GetString());
         Assert.IsTrue(Guid.TryParse(claims.GetProperty("sub").GetString(), out _));
-        StringAssert.Contains(claims.GetProperty("scope").GetString(), "openid");
-        StringAssert.Contains(claims.GetProperty("scope").GetString(), "profile");
+        Assert.Contains("openid", claims.GetProperty("scope").GetString()!, StringComparison.Ordinal);
+        Assert.Contains("profile", claims.GetProperty("scope").GetString()!, StringComparison.Ordinal);
 
         var keys = await GetSigningKeysAsync(client, host.Issuer);
         var handler = new JsonWebTokenHandler();
@@ -115,7 +115,7 @@ public sealed class AuthTwinFlowTests
             client, host.Issuer, secondCode, verifier, otherKey.Proof(TokenEndpoint(host.Issuer), "POST"));
         Assert.AreEqual(HttpStatusCode.BadRequest, wrongStatus);
         Assert.AreEqual("invalid_request", wrong.GetProperty("error").GetString());
-        StringAssert.Contains(wrong.GetProperty("error_description").GetString(), "does not match dpop_jkt");
+        Assert.Contains("does not match dpop_jkt", wrong.GetProperty("error_description").GetString()!, StringComparison.Ordinal);
     }
 
     [TestMethod]
@@ -154,9 +154,9 @@ public sealed class AuthTwinFlowTests
         Assert.AreEqual(HttpStatusCode.Redirect, logout.StatusCode);
         Assert.AreEqual($"{PostLogoutRedirectUri}/?state=logged-out", logout.Headers.Location?.ToString());
 
-        var afterLogout = await RefreshAsync(client, host.Issuer, refreshToken, key.Proof(TokenEndpoint(host.Issuer), "POST"));
-        Assert.AreEqual(HttpStatusCode.BadRequest, afterLogout.Status);
-        Assert.AreEqual("Session not active", afterLogout.Body.GetProperty("error_description").GetString());
+        var (status, body) = await RefreshAsync(client, host.Issuer, refreshToken, key.Proof(TokenEndpoint(host.Issuer), "POST"));
+        Assert.AreEqual(HttpStatusCode.BadRequest, status);
+        Assert.AreEqual("Session not active", body.GetProperty("error_description").GetString());
     }
 
     [TestMethod]
@@ -187,15 +187,18 @@ public sealed class AuthTwinFlowTests
         Assert.AreEqual(1, revokeBody.RootElement.GetProperty("ended").GetInt32());
 
         var refreshToken = tokens.RootElement.GetProperty("refresh_token").GetString()!;
-        var afterRevoke = await RefreshAsync(client, host.Issuer, refreshToken, key.Proof(TokenEndpoint(host.Issuer), "POST"));
-        Assert.AreEqual(HttpStatusCode.BadRequest, afterRevoke.Status);
-        Assert.AreEqual("Session not active", afterRevoke.Body.GetProperty("error_description").GetString());
+        var (status, body) = await RefreshAsync(client, host.Issuer, refreshToken, key.Proof(TokenEndpoint(host.Issuer), "POST"));
+        Assert.AreEqual(HttpStatusCode.BadRequest, status);
+        Assert.AreEqual("Session not active", body.GetProperty("error_description").GetString());
     }
 
     private static HttpClient CreateClient(AuthTwinHost host) =>
         new(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = host.BaseUrl };
 
     private static string TokenEndpoint(string issuer) => $"{issuer}/protocol/openid-connect/token";
+
+    [GeneratedRegex("id=\"kc-form-login\"[^>]*action=\"([^\"]+)\"")]
+    private static partial Regex LoginFormActionRegex();
 
     private static async Task<string> AuthorizeAsync(
         HttpClient client, string issuer, string dpopJkt, string codeChallenge, string? nonce, string state = "test-state")
@@ -217,7 +220,7 @@ public sealed class AuthTwinFlowTests
         Assert.AreEqual(HttpStatusCode.OK, page.StatusCode);
         var html = await page.Content.ReadAsStringAsync();
         var action = WebUtility.HtmlDecode(
-            Regex.Match(html, "id=\"kc-form-login\"[^>]*action=\"([^\"]+)\"").Groups[1].Value);
+            LoginFormActionRegex().Match(html).Groups[1].Value);
         Assert.IsFalse(string.IsNullOrEmpty(action), "The login form action was not found.");
 
         using var login = await client.PostAsync(action, new FormUrlEncodedContent(new Dictionary<string, string>

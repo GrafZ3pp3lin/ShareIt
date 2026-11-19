@@ -82,8 +82,8 @@ public class StorageSelectionTests
         var services = new ServiceCollection();
         services.AddContentStorage(CreateConfiguration(InMemorySettings));
 
-        Assert.IsFalse(services.Any(descriptor =>
-            descriptor.ServiceType == typeof(IMetricsSnapshotProvider)));
+        Assert.DoesNotContain(descriptor =>
+            descriptor.ServiceType == typeof(IMetricsSnapshotProvider), services);
     }
 
     [TestMethod]

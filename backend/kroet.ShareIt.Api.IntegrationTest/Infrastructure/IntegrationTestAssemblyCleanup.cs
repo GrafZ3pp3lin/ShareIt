@@ -1,7 +1,7 @@
 namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 
 [TestClass]
-public sealed class IntegrationTestAssemblyCleanup
+public static class IntegrationTestAssemblyCleanup
 {
     [AssemblyCleanup]
     public static async Task CleanupAsync()

@@ -11,6 +11,7 @@ using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Services.Cleanup;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Time.Testing;
 using Npgsql;
 
 namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
@@ -39,9 +40,9 @@ public abstract class ShareItApiTestBase
 
     protected string BucketName { get; private set; } = null!;
 
-    protected MutableTimeProvider TimeProvider { get; private set; } = null!;
+    protected FakeTimeProvider TimeProvider { get; private set; } = null!;
 
-    protected PostgresIntegrationDatabase Database => EndpointTestStorage.Database;
+    protected static PostgresIntegrationDatabase Database => EndpointTestStorage.Database;
 
     protected AmazonS3Client S3Client => _s3Client;
 
@@ -64,14 +65,14 @@ public abstract class ShareItApiTestBase
         await EndpointTestStorage.ResetDatabaseAsync();
 
         BucketName = $"shareit-e2e-{Guid.NewGuid():N}";
-        TimeProvider = new MutableTimeProvider(DateTimeOffset.UtcNow);
+        TimeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
 
         var settings = new Dictionary<string, string?>(Settings)
         {
             ["ContentStorage:PostgreSqlDb:ConnectionString"] = Database.ConnectionString,
             ["ContentStorage:PostgreSqlDb:AutoInitializeSchema"] = "false",
-            ["BlobStorage:S3:AccessKeyId"] = EndpointTestStorage.RustFs.AccessKeyId,
-            ["BlobStorage:S3:SecretAccessKey"] = EndpointTestStorage.RustFs.SecretAccessKey,
+            ["BlobStorage:S3:AccessKeyId"] = RustFsContainer.AccessKeyId,
+            ["BlobStorage:S3:SecretAccessKey"] = RustFsContainer.SecretAccessKey,
             ["BlobStorage:S3:ServiceUrl"] = EndpointTestStorage.RustFs.ServiceUrl,
             ["BlobStorage:S3:BucketName"] = BucketName
         };
@@ -134,7 +135,7 @@ public abstract class ShareItApiTestBase
         Guid? guestId = null,
         Guid? userId = null)
     {
-        var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package")
+        using var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package")
         {
             Content = JsonContent.Create(request, options: JsonOptions)
         };
@@ -208,7 +209,6 @@ public abstract class ShareItApiTestBase
         Guid? contentId = null,
         Guid? guestId = null,
         Guid? userId = null,
-        string fileName = "item.bin",
         long? declaredSize = null)
     {
         var content = new ByteArrayContent(bytes)
@@ -240,7 +240,7 @@ public abstract class ShareItApiTestBase
         Guid? guestId = null,
         Guid? userId = null)
     {
-        var request = new HttpRequestMessage(
+        using var request = new HttpRequestMessage(
             HttpMethod.Put,
             $"/api/v1/content/package/{packageId}/content/{contentId}")
         {
@@ -259,14 +259,14 @@ public abstract class ShareItApiTestBase
         return await Client.SendAsync(request);
     }
 
-    protected Task<HttpResponseMessage> GetPackageAsync(
+    protected async Task<HttpResponseMessage> GetPackageAsync(
         Guid packageId,
         Guid? guestId = null,
         Guid? userId = null,
         string? unlockProof = null,
         string? accessSession = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/content/package/{packageId}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/content/package/{packageId}");
         AddIdentity(request, guestId, userId);
         if (unlockProof is not null)
         {
@@ -277,7 +277,7 @@ public abstract class ShareItApiTestBase
             request.Headers.Add("X-Access-Session", accessSession);
         }
 
-        return Client.SendAsync(request);
+        return await Client.SendAsync(request);
     }
 
     /// <summary>
@@ -300,7 +300,7 @@ public abstract class ShareItApiTestBase
     /// <summary>
     /// Sends GET /packages with an optional page size and cursor.
     /// </summary>
-    protected Task<HttpResponseMessage> ListPackagesAsync(
+    protected async Task<HttpResponseMessage> ListPackagesAsync(
         Guid? guestId = null,
         Guid? userId = null,
         int? take = null,
@@ -318,9 +318,9 @@ public abstract class ShareItApiTestBase
         }
 
         var url = "/api/v1/content/packages" + (query.Count > 0 ? "?" + string.Join("&", query) : string.Empty);
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
         AddIdentity(request, guestId, userId);
-        return Client.SendAsync(request);
+        return await Client.SendAsync(request);
     }
 
     protected static string DownloadUrl(Guid packageId, Guid contentId)
@@ -329,13 +329,13 @@ public abstract class ShareItApiTestBase
     /// <summary>
     /// Fetches a content item with the package's access session.
     /// </summary>
-    protected Task<HttpResponseMessage> SendDownloadAsync(
+    protected async Task<HttpResponseMessage> SendDownloadAsync(
         string downloadUrl,
         string? accessSession,
         Guid? guestId,
         Guid? userId = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
         if (accessSession is not null)
         {
             request.Headers.Add("X-Access-Session", accessSession);
@@ -348,14 +348,14 @@ public abstract class ShareItApiTestBase
         {
             request.Headers.Add(TestAuthHandler.UserIdHeader, userId.Value.ToString());
         }
-        return Client.SendAsync(request);
+        return await Client.SendAsync(request);
     }
 
-    protected Task<HttpResponseMessage> DeletePackageAsync(Guid packageId, Guid? guestId = null, Guid? userId = null)
+    protected async Task<HttpResponseMessage> DeletePackageAsync(Guid packageId, Guid? guestId = null, Guid? userId = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/content/packages/{packageId}");
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/content/packages/{packageId}");
         AddIdentity(request, guestId, userId);
-        return Client.SendAsync(request);
+        return await Client.SendAsync(request);
     }
 
     /// <summary>
@@ -392,7 +392,7 @@ public abstract class ShareItApiTestBase
     /// <summary>
     /// Reads package/content row counts directly from the real Postgres database.
     /// </summary>
-    protected async Task<(int PackageCount, int ContentCount)> GetDatabaseCountsAsync()
+    protected static async Task<(int PackageCount, int ContentCount)> GetDatabaseCountsAsync()
     {
         await using var connection = new NpgsqlConnection(Database.ConnectionString);
         await connection.OpenAsync();

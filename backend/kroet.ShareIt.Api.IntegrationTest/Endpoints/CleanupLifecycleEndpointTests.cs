@@ -40,10 +40,10 @@ public sealed class CleanupLifecycleEndpointTests : ShareItApiTestBase
             HttpStatusCode.OK,
             download.StatusCode,
             "Cleanup must not invalidate the access session issued by the final access.");
-        CollectionAssert.AreEqual(LargeItemBytes, await download.Content.ReadAsByteArrayAsync());
+        Assert.AreSequenceEqual(LargeItemBytes, await download.Content.ReadAsByteArrayAsync());
 
         // After the retention window the package becomes cleanup-eligible.
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(31);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddMinutes(31));
         await RunCleanupAsync();
 
         Assert.IsNull(await Services.GetRequiredService<IContentStorageHandler>().GetPackageShellAsync(packageId));
@@ -60,7 +60,7 @@ public sealed class CleanupLifecycleEndpointTests : ShareItApiTestBase
         var uploadBody = await upload.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, upload.StatusCode, uploadBody);
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
         await RunCleanupAsync();
 

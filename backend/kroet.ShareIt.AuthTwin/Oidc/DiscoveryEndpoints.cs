@@ -34,7 +34,7 @@ internal static class DiscoveryEndpoints
         return await next(invocation);
     }
 
-    private static object Discovery(TwinUrls urls) => new Dictionary<string, object>
+    private static Dictionary<string, object> Discovery(TwinUrls urls) => new()
     {
         ["issuer"] = urls.Issuer,
         ["authorization_endpoint"] = urls.OidcEndpoint("auth"),

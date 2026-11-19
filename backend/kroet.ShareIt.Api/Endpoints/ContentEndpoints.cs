@@ -240,6 +240,10 @@ public static class ContentEndpoints
     /// Metadata and length are validated before the payload is read; the body
     /// then streams through the blob store's bounded probe/part buffer.
     /// </remarks>
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The payload is disposed by the enclosing 'await using' declaration on every path.")]
     private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult, EmptyHttpResult>>
         UploadContentToPackageAsync(
             [FromRoute] Guid packageId,

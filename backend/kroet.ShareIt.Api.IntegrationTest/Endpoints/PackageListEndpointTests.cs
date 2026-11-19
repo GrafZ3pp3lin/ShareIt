@@ -33,13 +33,12 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         var ownerId = Guid.NewGuid();
         var otherId = Guid.NewGuid();
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(-2);
         var oldest = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(1);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(1));
         var middle = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(1);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(1));
         var newest = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
 
         await CreatePackageAsync(userId: otherId, maxAccessCount: 10, timeToLiveHours: 24);
@@ -49,9 +48,8 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
         var page = await ReadJsonAsync<ContentPackageListResponse>(response);
-        CollectionAssert.AreEqual(
-            new[] { newest, middle, oldest },
-            page.Items.Select(item => item.Id).ToArray());
+        Assert.AreSequenceEqual(
+            [newest, middle, oldest], page.Items.Select(item => item.Id));
         Assert.IsNull(page.NextCursor);
 
         // Rows carry no names and no owner id.
@@ -67,7 +65,7 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
             userId: ownerId, maxAccessCount: 3, timeToLiveHours: 24);
 
         await SendUploadItemAsync(packageId, "file", new byte[10], guestId: null, userId: ownerId);
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(1);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddMinutes(1));
         await SendUploadItemAsync(packageId, "text", new byte[20], guestId: null, userId: ownerId);
 
         var page = await ReadJsonAsync<ContentPackageListResponse>(await ListPackagesAsync(userId: ownerId));
@@ -88,7 +86,7 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
     {
         var ownerId = Guid.NewGuid();
         var unprotected = await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(1);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddMinutes(1));
         var protectedPackage = await CreatePackageAsync(
             userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24, unlockVerifier: Verifier());
 
@@ -109,7 +107,7 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         var created = new List<Guid>();
         for (var i = 0; i < 3; i++)
         {
-            TimeProvider.UtcNow = TimeProvider.UtcNow.AddMinutes(1);
+            TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddMinutes(1));
             created.Add(await CreatePackageAsync(userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24));
         }
 
@@ -118,9 +116,8 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
             await ListPackagesAsync(userId: ownerId, take: 2));
 
         Assert.HasCount(2, firstPage.Items);
-        CollectionAssert.AreEqual(
-            new[] { created[2], created[1] },
-            firstPage.Items.Select(item => item.Id).ToArray());
+        Assert.AreSequenceEqual(
+            [created[2], created[1]], firstPage.Items.Select(item => item.Id));
         Assert.IsNotNull(firstPage.NextCursor);
 
         var secondPage = await ReadJsonAsync<ContentPackageListResponse>(
@@ -138,7 +135,7 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         var packageId = await CreatePackageAsync(
             userId: ownerId, maxAccessCount: 10, timeToLiveHours: 1);
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
         var page = await ReadJsonAsync<ContentPackageListResponse>(await ListPackagesAsync(userId: ownerId));
 

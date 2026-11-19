@@ -11,16 +11,16 @@ internal static class ClientUris
     /// </summary>
     public static bool Matches(IEnumerable<string> patterns, string uri) => patterns.Any(pattern =>
     {
-        if (!pattern.EndsWith('*')) return uri == pattern;
+        if (!pattern.EndsWith('*', StringComparison.Ordinal)) return uri == pattern;
         var prefix = pattern[..^1];
-        return uri.StartsWith(prefix, StringComparison.Ordinal) || (prefix.EndsWith('/') && uri == prefix[..^1]);
+        return uri.StartsWith(prefix, StringComparison.Ordinal) || (prefix.EndsWith('/', StringComparison.Ordinal) && uri == prefix[..^1]);
     });
 
     /// <summary>The origins a client may call from: <c>+</c> stands for the origins of its redirect URIs.</summary>
-    public static IReadOnlyList<string> WebOrigins(ClientModel client) => client.WebOrigins
-        .SelectMany(origin => origin == "+" ? client.RedirectUris.Select(OriginOf).OfType<string>() : [origin])
-        .Distinct()
-        .ToList();
+    public static IReadOnlyList<string> WebOrigins(ClientModel client) =>
+        [.. client.WebOrigins
+            .SelectMany(origin => origin == "+" ? client.RedirectUris.Select(OriginOf).OfType<string>() : [origin])
+            .Distinct()];
 
     public static bool AllowsOrigin(ClientModel client, string origin)
     {

@@ -45,15 +45,13 @@ public class S3BlobStorageSettingsValidatorTests
         var result = new S3BlobStorageSettingsValidator().Validate(settings);
 
         Assert.IsFalse(result.IsValid);
-        CollectionAssert.AreEquivalent(
-            new[]
-            {
+        Assert.AreSequenceEqual(
+            [
                 nameof(S3BlobStorageSettings.AccessKeyId),
                 nameof(S3BlobStorageSettings.SecretAccessKey),
                 nameof(S3BlobStorageSettings.ServiceUrl),
                 nameof(S3BlobStorageSettings.BucketName)
-            },
-            result.Errors.Select(error => error.PropertyName).ToArray());
+            ], result.Errors.Select(error => error.PropertyName), SequenceOrder.InAnyOrder);
     }
 
     private static S3BlobStorageSettings CreateSettings(

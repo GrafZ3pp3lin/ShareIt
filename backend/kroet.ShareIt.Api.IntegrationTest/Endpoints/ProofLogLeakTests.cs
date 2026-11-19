@@ -39,7 +39,7 @@ public sealed class ProofLogLeakTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var logs = _logs.JoinedMessages;
-        StringAssert.Contains(logs, "Failed unlock attempt", "The failed unlock should be logged.");
+        Assert.Contains("Failed unlock attempt", logs, "The failed unlock should be logged.");
         Assert.IsFalse(
             logs.Contains(proof, StringComparison.Ordinal),
             "The unlock proof header value must never appear in logs.");

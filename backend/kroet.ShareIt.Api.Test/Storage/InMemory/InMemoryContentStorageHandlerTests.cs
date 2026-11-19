@@ -1,7 +1,9 @@
+using System.Globalization;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage.InMemory;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using ContentModel = kroet.ShareIt.Api.Models.Content;
 
 namespace kroet.ShareIt.Api.Test.Storage.InMemory;
@@ -168,35 +170,34 @@ public class InMemoryContentStorageHandlerTests
     [TestMethod]
     public async Task GetPackagesToDeleteAsync_ReturnsExpiredImmediatelyAndExhaustedAfterRetention()
     {
-        var timeProvider = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-16T12:00:00+00:00"));
+        var timeProvider = new FakeTimeProvider(DateTimeOffset.Parse("2026-11-16T12:00:00+00:00", CultureInfo.InvariantCulture));
         var handler = new InMemoryContentStorageHandler(timeProvider, Options.Create(new DownloadSettings()));
         var activePackage = CreatePackage();
-        var expiredPackage = CreatePackage(expiresAt: timeProvider.UtcNow.AddHours(-1));
+        var expiredPackage = CreatePackage(expiresAt: timeProvider.GetUtcNow().AddHours(-1));
         var limitedPackage = CreatePackage(maxAccessCount: 1);
 
         await handler.StorePackageAsync(activePackage);
         await handler.StorePackageAsync(expiredPackage);
         await handler.StorePackageAsync(limitedPackage);
-        await handler.CreateAccessSessionAsync(NewSession(limitedPackage.Id, timeProvider.UtcNow));
+        await handler.CreateAccessSessionAsync(NewSession(limitedPackage.Id, timeProvider.GetUtcNow()));
 
         // The exhausted package must stay servable for its retention period.
         var retained = await handler.GetPackagesToDeleteAsync();
-        CollectionAssert.AreEquivalent(new[] { expiredPackage.Id }, retained.ToArray());
+        Assert.AreSequenceEqual([expiredPackage.Id], retained, SequenceOrder.InAnyOrder);
         Assert.DoesNotContain(limitedPackage.Id, retained);
 
-        timeProvider.UtcNow = timeProvider.UtcNow.AddMinutes(31);
+        timeProvider.SetUtcNow(timeProvider.GetUtcNow().AddMinutes(31));
 
         var eligible = await handler.GetPackagesToDeleteAsync();
-        CollectionAssert.AreEquivalent(
-            new[] { expiredPackage.Id, limitedPackage.Id },
-            eligible.ToArray());
+        Assert.AreSequenceEqual(
+            [expiredPackage.Id, limitedPackage.Id], eligible, SequenceOrder.InAnyOrder);
         Assert.DoesNotContain(activePackage.Id, eligible);
     }
 
     [TestMethod]
     public async Task CreateAccessSessionAsync_RejectsExpiredPackage()
     {
-        var package = CreatePackage(expiresAt: DateTimeOffset.Parse("2026-03-05T11:59:00+00:00"));
+        var package = CreatePackage(expiresAt: DateTimeOffset.Parse("2026-03-05T11:59:00+00:00", CultureInfo.InvariantCulture));
         await _handler.StorePackageAsync(package);
 
         var claim = await _handler.CreateAccessSessionAsync(NewSession(package.Id));
@@ -210,18 +211,18 @@ public class InMemoryContentStorageHandlerTests
     [TestMethod]
     public async Task CreateAccessSessionAsync_RecordsLastAccessAtAndStoresSession()
     {
-        var timeProvider = new MutableTimeProvider(DateTimeOffset.Parse("2026-11-16T12:00:00+00:00"));
+        var timeProvider = new FakeTimeProvider(DateTimeOffset.Parse("2026-11-16T12:00:00+00:00", CultureInfo.InvariantCulture));
         var handler = new InMemoryContentStorageHandler(timeProvider);
         var package = CreatePackage(maxAccessCount: 2);
         await handler.StorePackageAsync(package);
-        var session = NewSession(package.Id, createdAt: timeProvider.UtcNow);
+        var session = NewSession(package.Id, createdAt: timeProvider.GetUtcNow());
 
         var claimed = await handler.CreateAccessSessionAsync(session);
 
         Assert.IsTrue(claimed.Success);
         var stored = await handler.GetPackageShellAsync(package.Id);
         Assert.IsNotNull(stored);
-        Assert.AreEqual(timeProvider.UtcNow, stored.LastAccessAt);
+        Assert.AreEqual(timeProvider.GetUtcNow(), stored.LastAccessAt);
         Assert.IsNotNull(await handler.GetAccessSessionByTokenHashAsync(session.TokenHash));
     }
 
@@ -237,9 +238,9 @@ public class InMemoryContentStorageHandlerTests
         Assert.IsTrue(await _handler.DeletePackageAsync(package.Id));
 
         var pending = await _handler.GetPendingBlobDeletionsAsync(10);
-        CollectionAssert.AreEqual(new[] { content.Url }, pending.ToArray());
+        Assert.AreSequenceEqual([content.Url!], pending);
 
-        await _handler.CompleteBlobDeletionAsync(content.Url);
+        await _handler.CompleteBlobDeletionAsync(content.Url!);
         Assert.IsEmpty(await _handler.GetPendingBlobDeletionsAsync(10));
     }
 
@@ -266,7 +267,7 @@ public class InMemoryContentStorageHandlerTests
     public async Task ListPackagesAsync_ReturnsOwnPackagesNewestFirstWithAggregatesAndCursor()
     {
         var ownerId = Guid.NewGuid();
-        var start = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00");
+        var start = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture);
 
         var oldest = CreatePackage(createdAt: start);
         oldest = oldest with { UserId = ownerId };
@@ -321,8 +322,8 @@ public class InMemoryContentStorageHandlerTests
             ClientId = Guid.NewGuid(),
             IsGuest = true,
             TokenHash = Guid.NewGuid().ToString("N"),
-            CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
-            ExpiresAt = (createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00")).AddMinutes(15)
+            CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture),
+            ExpiresAt = (createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture)).AddMinutes(15)
         };
 
     private static ContentPackage CreatePackage(
@@ -335,12 +336,12 @@ public class InMemoryContentStorageHandlerTests
         return new ContentPackage
         {
             Id = Guid.NewGuid(),
-            CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
+            CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture),
             UserId = Guid.NewGuid(),
             UnlockVerifier = unlockVerifier,
             MaxAccessCount = maxAccessCount,
             CurrentAccessCount = currentAccessCount,
-            ExpiresAt = expiresAt ?? DateTimeOffset.Parse("2099-01-01T00:00:00+00:00")
+            ExpiresAt = expiresAt ?? DateTimeOffset.Parse("2099-01-01T00:00:00+00:00", CultureInfo.InvariantCulture)
         };
     }
 
@@ -351,21 +352,11 @@ public class InMemoryContentStorageHandlerTests
             Id = Guid.NewGuid(),
             PackageId = packageId,
             ContentType = ContentType.File,
-            CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
+            CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture),
             Size = 3,
             UserId = Guid.NewGuid(),
             Meta = "bWV0YQ",
             Url = $"blob://{Guid.NewGuid()}"
         };
-    }
-
-    /// <summary>
-    /// Minimal controllable clock for retention-window tests.
-    /// </summary>
-    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
-    {
-        public DateTimeOffset UtcNow { get; set; } = utcNow;
-
-        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 }

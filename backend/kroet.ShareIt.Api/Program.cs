@@ -224,7 +224,7 @@ try
                     // covers the token, method and URI. Plain bearer tokens pass
                     // while Auth:Dpop:Required is false.
                     var authorization = context.Request.Headers.Authorization.ToString();
-                    var separator = authorization.IndexOf(' ');
+                    var separator = authorization.IndexOf(' ', StringComparison.Ordinal);
                     if (separator <= 0)
                     {
                         context.Fail("Malformed Authorization header.");
@@ -275,7 +275,6 @@ try
     builder.Services.AddApiVersioning(options =>
     {
         options.AssumeDefaultVersionWhenUnspecified = true;
-        options.DefaultApiVersion = new ApiVersion(1, 0);
         options.ApiVersionReader = new QueryStringApiVersionReader();
     });
         
@@ -381,7 +380,7 @@ try
     await app.InitializePackageStorageAsync();
     await app.InitializeBlobStorageAsync();
 
-    app.Run();
+    await app.RunAsync();
     return 0;
 }
 catch (Exception ex)
@@ -398,7 +397,3 @@ catch (Exception ex)
 
     return 1;
 }
-
-// Declared public so the integration test project can boot the API
-// with WebApplicationFactory<Program>.
-public partial class Program { }

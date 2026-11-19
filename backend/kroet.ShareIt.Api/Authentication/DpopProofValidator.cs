@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -18,13 +20,13 @@ public sealed record DpopFailure(string ErrorCode, string ErrorDescription);
 /// Result of DPoP proof validation. The C# 15 union makes the two outcomes
 /// exclusive: a failure always carries an error, a success never does.
 /// </summary>
-public union DpopValidationResult(DpopSuccess, DpopFailure)
+public readonly union DpopValidationResult(DpopSuccess, DpopFailure)
 {
-    public bool Succeeded => Value is DpopSuccess;
+    public readonly bool Succeeded => Value is DpopSuccess;
 
-    public string? ErrorCode => Value is DpopFailure failure ? failure.ErrorCode : null;
+    public readonly string? ErrorCode => Value is DpopFailure failure ? failure.ErrorCode : null;
 
-    public string? ErrorDescription => Value is DpopFailure failure ? failure.ErrorDescription : null;
+    public readonly string? ErrorDescription => Value is DpopFailure failure ? failure.ErrorDescription : null;
 
     public static DpopValidationResult Success() => new DpopSuccess();
 
@@ -86,8 +88,8 @@ public sealed class DpopProofValidator(
                 return DpopValidationResult.Failure("invalid_dpop_proof", "Malformed DPoP proof.");
             }
 
-            header = JsonDocument.Parse(Base64UrlEncoder.Decode(segments[0])).RootElement;
-            payload = JsonDocument.Parse(Base64UrlEncoder.Decode(segments[1])).RootElement;
+            header = JsonElement.Parse(Base64UrlEncoder.Decode(segments[0]));
+            payload = JsonElement.Parse(Base64UrlEncoder.Decode(segments[1]));
         }
         catch (Exception ex) when (ex is JsonException or FormatException or ArgumentException)
         {
@@ -203,19 +205,19 @@ public sealed class DpopProofValidator(
         var builder = new StringBuilder("DPoP");
         if (!string.IsNullOrEmpty(errorCode))
         {
-            builder.Append($", error=\"{EscapeChallengeValue(errorCode)}\"");
+            builder.Append(CultureInfo.InvariantCulture, $", error=\"{EscapeChallengeValue(errorCode)}\"");
         }
 
         if (!string.IsNullOrEmpty(errorDescription))
         {
-            builder.Append($", error_description=\"{EscapeChallengeValue(errorDescription)}\"");
+            builder.Append(CultureInfo.InvariantCulture, $", error_description=\"{EscapeChallengeValue(errorDescription)}\"");
         }
 
         return builder.ToString();
     }
 
     private static string EscapeChallengeValue(string value) =>
-        value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
 
     /// <summary>
     /// Atomically marks a proof's <c>jti</c> as seen for the replay window.
@@ -257,7 +259,11 @@ public sealed class DpopProofValidator(
         }
     }
 
-    private async Task<DpopValidationResult> VerifySignatureAsync(string proof, JsonWebKey proofKey, string alg)
+    [SuppressMessage(
+        "Security",
+        "CA5404:Do not disable token validation checks",
+        Justification = "A DPoP proof is not an issuer-trusted JWT: its lifetime and binding are checked by the caller against iat, htm, htu and ath, so only the signature is validated here.")]
+    private static async Task<DpopValidationResult> VerifySignatureAsync(string proof, JsonWebKey proofKey, string alg)
     {
         try
         {

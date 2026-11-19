@@ -58,7 +58,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
         var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
 
@@ -74,7 +74,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
 
-        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
+        TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
         var response = await SendCreatePackageAsync(packageId, guestId: guestId, timeToLiveHours: 1);
 
@@ -229,7 +229,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     public async Task DownloadContent_WithContentFromDifferentPackage_Returns404()
     {
         var guestId = Guid.NewGuid();
-        var (firstPackageId, firstContentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (_, firstContentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
         var secondPackageId = await CreatePackageAsync(guestId: guestId);
         var secondUpload = await SendUploadItemAsync(
             secondPackageId, "file", LargeItemBytes, guestId: guestId);
@@ -289,7 +289,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
         var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
 
-        TimeProvider.UtcNow = details.AccessSession.ExpiresAt.AddSeconds(1);
+        TimeProvider.SetUtcNow(details.AccessSession.ExpiresAt.AddSeconds(1));
 
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, contentId),
@@ -338,7 +338,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
             await connection.OpenAsync();
             await connection.ExecuteAsync(
                 "UPDATE content_packages SET expires_at = @ExpiresAt WHERE id = @PackageId",
-                new { ExpiresAt = TimeProvider.UtcNow.AddMinutes(-1), PackageId = packageId });
+                new { ExpiresAt = TimeProvider.GetUtcNow().AddMinutes(-1), PackageId = packageId });
         }
 
         var response = await SendDownloadAsync(

@@ -25,11 +25,10 @@ internal sealed class TokenFactory(RealmModel realm, SigningKey key, TwinUrls ur
 
     /// <summary>openid if asked, every default scope, and the optional scopes that were asked for.</summary>
     public static IReadOnlyList<string> Grant(ClientModel client, IReadOnlyList<string> requested) =>
-        requested.Where(s => s == "openid")
+        [.. requested.Where(s => s == "openid")
             .Concat(client.DefaultScopes)
             .Concat(requested.Where(client.OptionalScopes.Contains))
-            .Distinct()
-            .ToList();
+            .Distinct()];
 
     /// <param name="issuedAt">Control plane only: backdates the tokens, e.g. for an already expired access token.</param>
     /// <param name="accessLifespan">Control plane only: overrides the realm's access token lifespan.</param>
@@ -151,6 +150,6 @@ internal sealed class TokenFactory(RealmModel realm, SigningKey key, TwinUrls ur
 
     private static string TokenType(string? jkt) => jkt is null ? "Bearer" : "DPoP";
 
-    private static object? Confirmation(string? jkt) =>
+    private static Dictionary<string, string>? Confirmation(string? jkt) =>
         jkt is null ? null : new Dictionary<string, string> { ["jkt"] = jkt, ["kc-jkt-type"] = "DPoP" };
 }

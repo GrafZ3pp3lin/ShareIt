@@ -21,7 +21,7 @@ public class InMemoryBlobStorageHandlerTests
         await using var downloaded = await _handler.DownloadAsync(blobId);
         using var buffer = new MemoryStream();
         await downloaded.CopyToAsync(buffer);
-        CollectionAssert.AreEqual(content, buffer.ToArray());
+        Assert.AreSequenceEqual(content, buffer.ToArray());
     }
 
     [TestMethod]

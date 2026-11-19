@@ -6,7 +6,7 @@ public static class UserExtensions
 {
     extension(ClaimsPrincipal claimsPrincipal)
     {
-        private UserIdentity? ToOptionalUserIdentity()
+        private AuthenticatedUserIdentity? ToOptionalUserIdentity()
         {
             var userIdClaim = claimsPrincipal.FindFirst("sub");
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))

@@ -5,6 +5,7 @@ using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.Storage.Postgres;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using ContentModel = kroet.ShareIt.Api.Models.Content;
 
 namespace kroet.ShareIt.Api.IntegrationTest.Storage;
@@ -15,8 +16,8 @@ public class PostgresStorageIntegrationTests
     private static PostgresIntegrationDatabase _database = null!;
 
     private SqlContentStorageHandler _contentStorageHandler = null!;
-    private IMetricsSnapshotProvider _metricsSnapshotProvider = null!;
-    private MutableTimeProvider _timeProvider = null!;
+    private SqlContentStorageHandler _metricsSnapshotProvider = null!;
+    private FakeTimeProvider _timeProvider = null!;
     private DownloadSettings _downloadSettings = null!;
 
     [ClassInitialize]
@@ -51,7 +52,7 @@ public class PostgresStorageIntegrationTests
         });
         _downloadSettings = downloadSettings.Value;
 
-        _timeProvider = new MutableTimeProvider(DateTimeOffset.UtcNow);
+        _timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
         _contentStorageHandler = new SqlContentStorageHandler(
             sqlSettings,
             NullLogger<SqlContentStorageHandler>.Instance,
@@ -79,12 +80,12 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual(package.Id, storedPackage.Id);
         Assert.AreEqual(package.UnlockVerifier, storedPackage.UnlockVerifier);
         Assert.AreEqual(package.MaxAccessCount, storedPackage.MaxAccessCount);
-        Assert.IsTrue(
-            Math.Abs((storedPackage.ExpiresAt - package.ExpiresAt).TotalMilliseconds) < 1,
+        Assert.IsLessThan(
+            1, Math.Abs((storedPackage.ExpiresAt - package.ExpiresAt).TotalMilliseconds),
             "PostgreSQL stores timestamps at microsecond precision.");
         Assert.IsNotNull(storedPackage.LastAccessAt);
-        Assert.IsTrue(
-            Math.Abs((storedPackage.LastAccessAt.Value - lastAccessAt).TotalMilliseconds) < 1,
+        Assert.IsLessThan(
+            1, Math.Abs((storedPackage.LastAccessAt.Value - lastAccessAt).TotalMilliseconds),
             "PostgreSQL stores timestamps at microsecond precision.");
         Assert.IsNotNull(storedPackage.Contents);
         Assert.HasCount(1, storedPackage.Contents);
@@ -176,15 +177,14 @@ public class PostgresStorageIntegrationTests
         // The exhausted package keeps serving its outstanding downloads for
         // the retention period and must not be cleanup-eligible yet.
         var retained = await _contentStorageHandler.GetPackagesToDeleteAsync();
-        CollectionAssert.AreEquivalent(new[] { expiredPackage.Id }, retained.ToArray());
+        Assert.AreSequenceEqual([expiredPackage.Id], retained, SequenceOrder.InAnyOrder);
         Assert.DoesNotContain(limitedPackage.Id, retained);
 
-        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(_downloadSettings.ExhaustedPackageRetentionMinutes + 1);
+        _timeProvider.SetUtcNow(_timeProvider.GetUtcNow().AddMinutes(_downloadSettings.ExhaustedPackageRetentionMinutes + 1));
 
         var eligible = await _contentStorageHandler.GetPackagesToDeleteAsync();
-        CollectionAssert.AreEquivalent(
-            new[] { expiredPackage.Id, limitedPackage.Id },
-            eligible.ToArray());
+        Assert.AreSequenceEqual(
+            [expiredPackage.Id, limitedPackage.Id], eligible, SequenceOrder.InAnyOrder);
         Assert.DoesNotContain(activePackage.Id, eligible);
     }
 
@@ -204,7 +204,7 @@ public class PostgresStorageIntegrationTests
         Assert.IsNull(await _contentStorageHandler.GetContentAsync(content.Id));
 
         var pending = await _contentStorageHandler.GetPendingBlobDeletionsAsync(10);
-        CollectionAssert.AreEqual(new[] { content.Url }, pending.ToArray());
+        Assert.AreSequenceEqual([content.Url], pending);
 
         await _contentStorageHandler.CompleteBlobDeletionAsync(content.Url);
         Assert.IsEmpty(await _contentStorageHandler.GetPendingBlobDeletionsAsync(10));
@@ -316,13 +316,13 @@ public class PostgresStorageIntegrationTests
         var package = CreatePackage(maxAccessCount: 3);
         await _contentStorageHandler.StorePackageAsync(package);
 
-        var first = NewSession(package.Id, expiresAt: _timeProvider.UtcNow.AddMinutes(15));
-        var second = NewSession(package.Id, expiresAt: _timeProvider.UtcNow.AddMinutes(30));
+        var first = NewSession(package.Id, expiresAt: _timeProvider.GetUtcNow().AddMinutes(15));
+        var second = NewSession(package.Id, expiresAt: _timeProvider.GetUtcNow().AddMinutes(30));
         await _contentStorageHandler.CreateAccessSessionAsync(first);
         await _contentStorageHandler.CreateAccessSessionAsync(second);
 
-        _timeProvider.UtcNow = _timeProvider.UtcNow.AddMinutes(16);
-        var deleted = await _contentStorageHandler.DeleteExpiredAccessSessionsAsync(_timeProvider.UtcNow);
+        _timeProvider.SetUtcNow(_timeProvider.GetUtcNow().AddMinutes(16));
+        var deleted = await _contentStorageHandler.DeleteExpiredAccessSessionsAsync(_timeProvider.GetUtcNow());
 
         Assert.AreEqual(1, deleted);
         Assert.IsNull(await _contentStorageHandler.GetAccessSessionByTokenHashAsync(first.TokenHash));

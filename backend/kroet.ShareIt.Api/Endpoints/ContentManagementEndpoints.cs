@@ -68,7 +68,7 @@ public static class ContentManagementEndpoints
 
         return TypedResults.Ok(new ContentPackageListResponse
         {
-            Items = page.Items.Select(summary => ContentPackageListItem.FromSummary(summary, now)).ToList(),
+            Items = [.. page.Items.Select(summary => ContentPackageListItem.FromSummary(summary, now))],
             NextCursor = page.NextCursor
         });
     }

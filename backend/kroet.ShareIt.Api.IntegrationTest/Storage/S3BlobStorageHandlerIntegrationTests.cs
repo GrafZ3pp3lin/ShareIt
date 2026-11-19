@@ -62,8 +62,8 @@ public class S3BlobStorageHandlerIntegrationTests
         await handler.InitializeAsync();
 
         var buckets = await _inspectionClient.ListBucketsAsync();
-        Assert.IsTrue(
-            buckets.Buckets.Any(bucket => bucket.BucketName == bucketName),
+        Assert.Contains(
+            bucket => bucket.BucketName == bucketName, buckets.Buckets,
             "InitializeAsync should create the configured bucket when it does not exist.");
     }
 
@@ -94,13 +94,13 @@ public class S3BlobStorageHandlerIntegrationTests
                 DateTimeStyles.RoundtripKind,
                 out var uploadedAt),
             "The uploaded-at metadata should be a round-trippable timestamp.");
-        Assert.IsTrue(uploadedAt >= uploadedAtLowerBound.AddSeconds(-1));
-        Assert.IsTrue(uploadedAt <= DateTimeOffset.UtcNow.AddSeconds(1));
+        Assert.IsGreaterThanOrEqualTo(uploadedAtLowerBound.AddSeconds(-1), uploadedAt);
+        Assert.IsLessThanOrEqualTo(DateTimeOffset.UtcNow.AddSeconds(1), uploadedAt);
 
         await using var downloaded = await _handler.DownloadAsync(blobId);
         using var downloadedContent = new MemoryStream();
         await downloaded.CopyToAsync(downloadedContent);
-        CollectionAssert.AreEqual(content, downloadedContent.ToArray());
+        Assert.AreSequenceEqual(content, downloadedContent.ToArray());
     }
 
     [TestMethod]
@@ -132,7 +132,7 @@ public class S3BlobStorageHandlerIntegrationTests
         Assert.AreEqual(content.Length, downloadedContent.Length);
         Assert.AreEqual(content[0], downloadedContent.GetBuffer()[0]);
         Assert.AreEqual(content[^1], downloadedContent.GetBuffer()[content.Length - 1]);
-        CollectionAssert.AreEqual(content, downloadedContent.ToArray());
+        Assert.AreSequenceEqual(content, downloadedContent.ToArray());
     }
 
 
@@ -153,7 +153,7 @@ public class S3BlobStorageHandlerIntegrationTests
         });
         Assert.AreEqual((long)content.Length, metadata.ContentLength);
         Assert.IsFalse(
-            metadata.ETag.Contains('-'),
+            metadata.ETag.Contains('-', StringComparison.Ordinal),
             $"A body of exactly the probe size should use PutObject, but the ETag was {metadata.ETag}.");
     }
 
@@ -211,7 +211,7 @@ public class S3BlobStorageHandlerIntegrationTests
 
         var exception = await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => _handler.DownloadAsync(blobId));
 
-        StringAssert.Contains(exception.Message, blobId);
+        Assert.Contains(blobId, exception.Message, StringComparison.Ordinal);
         var innerException = Assert.IsInstanceOfType<AmazonS3Exception>(exception.InnerException);
         Assert.AreEqual(HttpStatusCode.NotFound, innerException.StatusCode);
     }
@@ -295,7 +295,7 @@ public class S3BlobStorageHandlerIntegrationTests
         await using var downloaded = await _handler.DownloadAsync(blobId);
         using var buffer = new MemoryStream();
         await downloaded.CopyToAsync(buffer);
-        CollectionAssert.AreEqual(expected, buffer.ToArray());
+        Assert.AreSequenceEqual(expected, buffer.ToArray());
     }
 
     [TestMethod]
@@ -325,8 +325,8 @@ public class S3BlobStorageHandlerIntegrationTests
     {
         var settings = new S3BlobStorageSettings
         {
-            AccessKeyId = _rustFs.AccessKeyId,
-            SecretAccessKey = _rustFs.SecretAccessKey,
+            AccessKeyId = RustFsContainer.AccessKeyId,
+            SecretAccessKey = RustFsContainer.SecretAccessKey,
             ServiceUrl = serviceUrl ?? _rustFs.ServiceUrl,
             BucketName = bucketName ?? _bucketName
         };

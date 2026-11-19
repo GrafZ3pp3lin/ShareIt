@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using kroet.ShareIt.Api.Configuration;
@@ -5,18 +6,19 @@ using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using Microsoft.Extensions.Time.Testing;
 
 namespace kroet.ShareIt.Api.Test.Storage;
 
 [TestClass]
 public class AccessSessionServiceTests
 {
-    private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00");
+    private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture);
     private static readonly Guid PackageId = Guid.Parse("0192f3ab-7cde-7def-8abc-0123456789ab");
     private static readonly Guid ClientId = Guid.Parse("0192f3ab-7cde-7def-8abc-0123456789ac");
 
     private readonly IContentStorageHandler _storage = Substitute.For<IContentStorageHandler>();
-    private readonly MutableTimeProvider _timeProvider = new(Now);
+    private readonly FakeTimeProvider _timeProvider = new(Now);
     private readonly AccessSessionService _subject;
 
     public AccessSessionServiceTests()
@@ -121,9 +123,4 @@ public class AccessSessionServiceTests
 
     private static string Hash(string token)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-
-    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => utcNow;
-    }
 }

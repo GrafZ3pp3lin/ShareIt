@@ -4,6 +4,7 @@ using kroet.ShareIt.Api.Storage;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using ContentModel = kroet.ShareIt.Api.Models.Content;
+using System.Globalization;
 
 namespace kroet.ShareIt.Api.Test.Services.Storage;
 
@@ -18,7 +19,7 @@ public class StorageHandlerTests
     {
         _contentStorageHandler
             .GetPendingBlobDeletionsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(Array.Empty<string>());
+            .Returns([]);
         return new StorageHandler(_contentStorageHandler, _blobStorageHandler, _logger);
     }
 
@@ -192,7 +193,7 @@ public class StorageHandlerTests
             Id = contentId ?? Guid.NewGuid(),
             PackageId = Guid.NewGuid(),
             ContentType = ContentType.File,
-            CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
+            CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture),
             Size = 3,
             UserId = Guid.NewGuid(),
             Meta = "bWV0YQ"

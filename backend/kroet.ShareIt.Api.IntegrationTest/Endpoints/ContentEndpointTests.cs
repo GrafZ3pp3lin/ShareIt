@@ -76,7 +76,6 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         Assert.AreEqual(packageId, package.Id);
         Assert.AreEqual(0, package.ItemCount);
         Assert.AreEqual(1, package.MaxAccessCount);
-        Assert.IsNotNull(package.ExpiresAt);
 
         // Nothing names a package: neither title/description nor owner id are
         // part of the response anymore.
@@ -97,8 +96,8 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == ShareItActivitySource.Name,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            SampleUsingParentId = (ref ActivityCreationOptions<string> _) => ActivitySamplingResult.AllDataAndRecorded,
+            Sample = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
+            SampleUsingParentId = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = activities.Add
         };
         ActivitySource.AddActivityListener(listener);
@@ -191,11 +190,11 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var textDownload = await SendDownloadAsync(DownloadUrl(packageId, text.Id), details.AccessSession.Token, guestId);
         var textDownloadBody = await textDownload.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, textDownload.StatusCode, textDownloadBody);
-        CollectionAssert.AreEqual(textBytes, await textDownload.Content.ReadAsByteArrayAsync());
+        Assert.AreSequenceEqual(textBytes, await textDownload.Content.ReadAsByteArrayAsync());
 
         var fileDownload = await SendDownloadAsync(DownloadUrl(packageId, file.Id), details.AccessSession.Token, guestId);
         Assert.AreEqual(HttpStatusCode.OK, fileDownload.StatusCode);
-        CollectionAssert.AreEqual(SmallItemBytes, await fileDownload.Content.ReadAsByteArrayAsync());
+        Assert.AreSequenceEqual(SmallItemBytes, await fileDownload.Content.ReadAsByteArrayAsync());
     }
 
     [TestMethod]
@@ -213,8 +212,8 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.OK, retry.StatusCode, retryBody);
         Assert.AreEqual(1, (await ReadJsonAsync<ContentPackageResponse>(retry)).ItemCount);
 
-        var counts = await GetDatabaseCountsAsync();
-        Assert.AreEqual(1, counts.ContentCount);
+        var (_, contentCount) = await GetDatabaseCountsAsync();
+        Assert.AreEqual(1, contentCount);
     }
 
     [TestMethod]
@@ -286,7 +285,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
-        CollectionAssert.AreEqual(LargeItemBytes, await response.Content.ReadAsByteArrayAsync());
+        Assert.AreSequenceEqual(LargeItemBytes, await response.Content.ReadAsByteArrayAsync());
         Assert.AreEqual("application/octet-stream", response.Content.Headers.ContentType!.MediaType);
         Assert.AreEqual("no-store", response.Headers.CacheControl!.ToString());
         Assert.IsNull(response.Content.Headers.ContentDisposition, "The server must not learn or echo a file name.");

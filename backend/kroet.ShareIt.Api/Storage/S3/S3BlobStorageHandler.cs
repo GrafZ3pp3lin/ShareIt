@@ -11,7 +11,7 @@ namespace kroet.ShareIt.Api.Storage.S3;
 /// S3 implementation of the blob storage handler.
 /// Stores files in S3-compatible storage with metadata support.
 /// </summary>
-public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
+public sealed class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
 {
     /// <summary>
     /// Bodies up to this size are buffered once and stored with a single
@@ -469,6 +469,7 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
     public void Dispose()
     {
         _s3Client.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>

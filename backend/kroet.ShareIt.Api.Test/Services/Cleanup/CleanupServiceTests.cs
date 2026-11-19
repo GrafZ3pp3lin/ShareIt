@@ -123,8 +123,8 @@ public class CleanupServiceTests
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == ShareItActivitySource.Name,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            SampleUsingParentId = (ref ActivityCreationOptions<string> _) => ActivitySamplingResult.AllDataAndRecorded,
+            Sample = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
+            SampleUsingParentId = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = activities.Add
         };
         ActivitySource.AddActivityListener(listener);
@@ -138,8 +138,8 @@ public class CleanupServiceTests
         Assert.AreEqual(2, span.GetTagItem("shareit.cleanup.packages_pending"));
         Assert.AreEqual(1, span.GetTagItem("shareit.cleanup.packages_deleted"));
         Assert.AreEqual(3, span.GetTagItem("shareit.cleanup.blobs_deleted"));
-        Assert.AreEqual(true, span.GetTagItem("shareit.cleanup.blob_drain_succeeded"));
-        Assert.AreEqual(true, span.GetTagItem("shareit.cleanup.succeeded"));
+        Assert.IsTrue((bool?)span.GetTagItem("shareit.cleanup.blob_drain_succeeded"));
+        Assert.IsTrue((bool?)span.GetTagItem("shareit.cleanup.succeeded"));
     }
 
     [TestMethod]
@@ -157,8 +157,8 @@ public class CleanupServiceTests
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == ShareItActivitySource.Name,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            SampleUsingParentId = (ref ActivityCreationOptions<string> _) => ActivitySamplingResult.AllDataAndRecorded,
+            Sample = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
+            SampleUsingParentId = (ref _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = activities.Add
         };
         ActivitySource.AddActivityListener(listener);
@@ -213,11 +213,11 @@ public class CleanupServiceTests
 
         await InvokeRunCleanupAsync();
 
-        var deleted = measurements.SingleOrDefault(measurement =>
+        var (name, _, _) = measurements.SingleOrDefault(measurement =>
             measurement.Name == "shareit.packages.deleted" &&
             measurement.Value == 7 &&
             Equals(measurement.Tags.GetValueOrDefault("reason"), "cleanup"));
-        Assert.IsNotNull(deleted.Name);
+        Assert.IsNotNull(name);
         Assert.AreNotEqual(
             0,
             _heartbeat.LastSuccessUnixSeconds,

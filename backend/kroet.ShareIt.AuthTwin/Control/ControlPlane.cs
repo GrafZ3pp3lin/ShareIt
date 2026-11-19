@@ -75,7 +75,7 @@ internal static class ControlPlane
         user.LastName,
         user.Enabled,
         user.EmailVerified,
-        HasPassword = user.HasPassword,
+        user.HasPassword,
     };
 
     private static async Task<T?> ReadAsync<T>(HttpRequest request) where T : class

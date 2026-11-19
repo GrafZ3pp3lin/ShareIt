@@ -21,9 +21,9 @@ internal sealed class RustFsContainer : IAsyncDisposable
         _container = container;
     }
 
-    public string AccessKeyId => AccessKey;
+    public static string AccessKeyId => AccessKey;
 
-    public string SecretAccessKey => SecretKey;
+    public static string SecretAccessKey => SecretKey;
 
     public string ServiceUrl => $"http://{_container.Hostname}:{_container.GetMappedPublicPort(S3Port)}";
 

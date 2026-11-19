@@ -1,0 +1,121 @@
+root = true
+
+# Formatting follows the existing files. Analysis policy is the main purpose
+# of this file: every diagnostic that fires at the highest analyzer level is
+# either fixed in code or explicitly tuned here with the reason.
+[*.cs]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# ---------------------------------------------------------------------------
+# General .NET analyzers
+# ---------------------------------------------------------------------------
+
+# No synchronization context in ASP.NET Core; ConfigureAwait(false) adds noise
+# without changing behavior.
+dotnet_diagnostic.CA2007.severity = none
+
+# This is an application, not a reusable library: public types are entry points
+# and endpoint/DI contracts, so making them internal buys nothing.
+dotnet_diagnostic.CA1515.severity = none
+
+# Nullable reference types are enabled in every project; a library-style
+# ArgumentNullException guard on every public parameter is redundant.
+dotnet_diagnostic.CA1062.severity = none
+
+# JSON/API DTOs use List<T> with settable collection properties because the
+# serializer needs them; read-only collections are not worth the mapping code.
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+
+# URLs travel as strings through configuration, the database, JSON and
+# HttpClient; converting these properties to System.Uri would be incorrect.
+dotnet_diagnostic.CA1054.severity = none
+dotnet_diagnostic.CA1055.severity = none
+dotnet_diagnostic.CA1056.severity = none
+
+# Types are instantiated reflectively by DI, Dapper or System.Text.Json, or are
+# nested DTOs that are only assigned from query results.
+dotnet_diagnostic.CA1812.severity = none
+
+# The DPoP union value is compared through its Value case, never through
+# struct equality.
+dotnet_diagnostic.CA1815.severity = none
+
+# Deliberate broad catches: the top-level handler, the cleanup/metrics
+# background loops and best-effort S3 cleanup all must keep running (and log)
+# on any failure instead of tearing down the host.
+dotnet_diagnostic.CA1031.severity = none
+
+# Internal exception types are always thrown with a fixed message; the
+# standard (string) / (string, Exception) constructors would be dead code.
+dotnet_diagnostic.CA1032.severity = none
+
+# Log sites are low-frequency lifecycle and cleanup events. Source-generated
+# LoggerMessage delegates and their argument-check optimizations would add
+# several partial classes for no measurable gain.
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none
+
+# Login names and realm identifiers are normalized to lower case for
+# case-insensitive lookups; that direction is intentional.
+dotnet_diagnostic.CA1308.severity = none
+
+# Content (the model) and kroet.ShareIt.Api.Content (the endpoint namespace)
+# are established domain names; renaming either would only obscure the API.
+dotnet_diagnostic.CA1724.severity = none
+
+# Returning concrete collections from helpers is a micro-optimization that
+# would leak implementation types into signatures for no practical benefit.
+dotnet_diagnostic.CA1859.severity = none
+
+# Endpoint files live in Endpoints/ but use the established
+# kroet.ShareIt.Api.Content namespace; renaming it would churn the whole API.
+dotnet_style_namespace_match_folder = false
+
+# Constructors with explicit assignment and option validation keep the DI
+# wiring easy to read; primary constructors are used only where they help.
+csharp_style_prefer_primary_constructors = false
+
+# ---------------------------------------------------------------------------
+# Test projects
+# ---------------------------------------------------------------------------
+
+# Shared policy for the three test projects:
+# - CA1001: MSTest fixtures release fields in TestInitialize/TestCleanup.
+# - CA1707: Given_When_Then test names intentionally use underscores.
+# - CA2000/CA2025: HttpClient, Testcontainers and response streams take
+#   ownership; the analyzer cannot see the transfer.
+# - CA2234: tests use relative URI strings for readability.
+# - CA5399: test clients only talk to the loopback HTTP twin.
+# - MSTEST0049: cancellation is the test host's concern, not each call's.
+[**/kroet.ShareIt.Api.Test/**]
+dotnet_diagnostic.CA1001.severity = none
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA2025.severity = none
+dotnet_diagnostic.CA2234.severity = none
+dotnet_diagnostic.CA5399.severity = none
+dotnet_diagnostic.MSTEST0049.severity = none
+
+[**/kroet.ShareIt.Api.IntegrationTest/**]
+dotnet_diagnostic.CA1001.severity = none
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA2025.severity = none
+dotnet_diagnostic.CA2234.severity = none
+dotnet_diagnostic.CA5399.severity = none
+dotnet_diagnostic.MSTEST0049.severity = none
+
+[**/kroet.ShareIt.AuthTwin.Test/**]
+dotnet_diagnostic.CA1001.severity = none
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA2025.severity = none
+dotnet_diagnostic.CA2234.severity = none
+dotnet_diagnostic.CA5399.severity = none
+dotnet_diagnostic.MSTEST0049.severity = none

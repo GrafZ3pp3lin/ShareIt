@@ -28,7 +28,7 @@ public sealed class ShareItMetricsTests
         listener.Start();
 
         using var meterFactory = new TestMeterFactory();
-        var metrics = new ShareItMetrics(meterFactory);
+        using var metrics = new ShareItMetrics(meterFactory);
 
         metrics.PackageCreated();
         metrics.PackageDeleted("owner");
@@ -104,7 +104,7 @@ public sealed class ShareItMetricsTests
             $", but got: {string.Join(", ", measurements.Select(m => $"{m.Name}={m.Value}"))}");
     }
 
-    private static IReadOnlyDictionary<string, object?> ToDictionary(
+    private static Dictionary<string, object?> ToDictionary(
         ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
         var result = new Dictionary<string, object?>();

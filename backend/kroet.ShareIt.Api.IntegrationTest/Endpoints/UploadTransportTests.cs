@@ -268,6 +268,17 @@ public sealed class UploadTransportTests : ShareItApiTestBase
             return Task.FromResult(toCopy);
         }
 
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            var remaining = bytes.Length - _position;
+            var toCopy = Math.Min(buffer.Length, remaining);
+            bytes.AsSpan(_position, toCopy).CopyTo(buffer.Span);
+            _position += toCopy;
+            return ValueTask.FromResult(toCopy);
+        }
+
         public override void Flush()
         {
         }

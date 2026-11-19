@@ -1,6 +1,6 @@
 ﻿namespace kroet.ShareIt.Api.Storage.InMemory;
 
-internal record InMemoryContentBlob
+internal sealed record InMemoryContentBlob
 {
     public required Guid Id { get; init; }
     public required byte[] Data { get; init; }
@@ -10,7 +10,7 @@ internal record InMemoryContentBlob
 
 public class InMemoryBlobStorageHandler : IBlobStorageHandler
 {
-    private readonly Dictionary<Guid, InMemoryContentBlob> _blobs = new();
+    private readonly Dictionary<Guid, InMemoryContentBlob> _blobs = [];
 
     public async Task<string> UploadAsync(Stream stream, string contentType, string fileName, CancellationToken cancellationToken = default)
     {

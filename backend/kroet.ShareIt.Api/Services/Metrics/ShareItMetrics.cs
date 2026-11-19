@@ -8,7 +8,7 @@ namespace kroet.ShareIt.Api.Services.Metrics;
 /// Labels are deliberately bounded to a small set of values; package, user and
 /// content identifiers must never be added here.
 /// </summary>
-public sealed class ShareItMetrics
+public sealed class ShareItMetrics : IDisposable
 {
     /// <summary>
     /// Meter name registered with OpenTelemetry.
@@ -31,6 +31,7 @@ public sealed class ShareItMetrics
 
     private static readonly BuildInfoState UnknownBuildInfo = new("unknown", "unknown");
 
+    private readonly Meter _meter;
     private readonly Counter<long> _packagesCreated;
     private readonly Counter<long> _packagesDeleted;
     private readonly Counter<long> _packageAccesses;
@@ -58,96 +59,96 @@ public sealed class ShareItMetrics
 
     public ShareItMetrics(IMeterFactory meterFactory)
     {
-        var meter = meterFactory.Create(MeterName);
+        _meter = meterFactory.Create(MeterName);
 
-        _packagesCreated = meter.CreateCounter<long>(
+        _packagesCreated = _meter.CreateCounter<long>(
             "shareit.packages.created",
             unit: "{package}",
             description: "Number of content packages created.");
 
-        _packagesDeleted = meter.CreateCounter<long>(
+        _packagesDeleted = _meter.CreateCounter<long>(
             "shareit.packages.deleted",
             unit: "{package}",
             description: "Number of content packages deleted, by reason.");
 
-        _packageAccesses = meter.CreateCounter<long>(
+        _packageAccesses = _meter.CreateCounter<long>(
             "shareit.package.accesses",
             unit: "{access}",
             description: "Number of package access claims.");
 
-        _accessSessionsReused = meter.CreateCounter<long>(
+        _accessSessionsReused = _meter.CreateCounter<long>(
             "shareit.access.sessions_reused",
             unit: "{request}",
             description: "Number of package reads that reused an existing access session instead of claiming another access.");
 
-        _itemsUploaded = meter.CreateCounter<long>(
+        _itemsUploaded = _meter.CreateCounter<long>(
             "shareit.items.uploaded",
             unit: "{item}",
             description: "Number of content items uploaded, by kind.");
 
-        _bytesUploaded = meter.CreateCounter<long>(
+        _bytesUploaded = _meter.CreateCounter<long>(
             "shareit.bytes.uploaded",
             unit: "By",
             description: "Number of content bytes uploaded.");
 
-        _authorizedBytes = meter.CreateCounter<long>(
+        _authorizedBytes = _meter.CreateCounter<long>(
             "shareit.bytes.authorized",
             unit: "By",
             description: "Logical content size whose download was authorized by an access session. The full content size is recorded even if the response is interrupted.");
 
-        _unlockFailures = meter.CreateCounter<long>(
+        _unlockFailures = _meter.CreateCounter<long>(
             "shareit.unlock.failures",
             unit: "{attempt}",
             description: "Number of failed package unlock attempts.");
 
-        _rateLimited = meter.CreateCounter<long>(
+        _rateLimited = _meter.CreateCounter<long>(
             "shareit.rate.limited",
             unit: "{request}",
             description: "Number of requests rejected by the package-read, download or upload rate limiter.");
 
-        _packages = meter.CreateObservableGauge(
+        _packages = _meter.CreateObservableGauge(
             "shareit.packages",
             ObservePackages,
             unit: "{package}",
             description: "Current number of packages, by state.");
 
-        _items = meter.CreateObservableGauge(
+        _items = _meter.CreateObservableGauge(
             "shareit.items",
             () => Volatile.Read(ref _snapshot).TotalItems,
             unit: "{item}",
             description: "Current number of stored content items.");
 
-        _storageBytes = meter.CreateObservableGauge(
+        _storageBytes = _meter.CreateObservableGauge(
             "shareit.storage.bytes",
             () => Volatile.Read(ref _snapshot).TotalBytes,
             unit: "By",
             description: "Current logical size of all stored content, in bytes.");
 
-        _pendingBlobDeletions = meter.CreateObservableGauge(
+        _pendingBlobDeletions = _meter.CreateObservableGauge(
             "shareit.blob_deletion.queue_depth",
             () => Volatile.Read(ref _snapshot).PendingBlobDeletions,
             unit: "{job}",
             description: "Number of queued blob deletions waiting for the cleanup service.");
 
-        _cleanupPending = meter.CreateObservableGauge(
+        _cleanupPending = _meter.CreateObservableGauge(
             "shareit.cleanup.pending",
             () => Volatile.Read(ref _snapshot).CleanupPending,
             unit: "{package}",
             description: "Number of packages currently eligible for cleanup.");
 
-        _cleanupLastSuccess = meter.CreateObservableGauge(
+        _cleanupLastSuccess = _meter.CreateObservableGauge(
             "shareit.cleanup.last_success_timestamp_seconds",
             () => Interlocked.Read(ref _cleanupLastSuccessUnixSeconds),
             unit: "s",
             description: "Unix timestamp of the last successful cleanup run, or 0 if none has completed.");
 
-        _dependencyUp = meter.CreateObservableGauge(
+        _dependencyUp = _meter.CreateObservableGauge(
             "shareit.dependency.up",
             ObserveDependencyHealth,
             unit: "1",
             description: "Whether an application dependency is reachable: 1 for up, 0 for down.");
 
-        _buildInfo = meter.CreateObservableGauge(
+        _buildInfo = _meter.CreateObservableGauge(
             "shareit.build.info",
             ObserveBuildInfo,
             unit: "1",
@@ -268,4 +269,15 @@ public sealed class ShareItMetrics
     }
 
     private sealed record BuildInfoState(string Version, string Environment);
+
+    /// <summary>
+    /// Stops recording the instruments. The meter factory normally disposes
+    /// created meters with itself; keeping the reference here also prevents
+    /// premature collection.
+    /// </summary>
+    public void Dispose()
+    {
+        _meter.Dispose();
+        GC.SuppressFinalize(this);
+    }
 }

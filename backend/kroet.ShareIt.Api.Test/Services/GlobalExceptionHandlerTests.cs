@@ -11,8 +11,6 @@ namespace kroet.ShareIt.Api.Test.Services;
 [TestClass]
 public sealed class GlobalExceptionHandlerTests
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     [TestMethod]
     public async Task TryHandleAsync_Writes500ProblemDetailsAndHandlesException()
     {

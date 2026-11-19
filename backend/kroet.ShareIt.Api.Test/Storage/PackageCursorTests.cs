@@ -1,6 +1,7 @@
 using System.Buffers.Text;
 using System.Text;
 using kroet.ShareIt.Api.Storage;
+using System.Globalization;
 
 namespace kroet.ShareIt.Api.Test.Storage;
 
@@ -10,7 +11,7 @@ public class PackageCursorTests
     [TestMethod]
     public void EncodeThenTryDecode_RoundTripsCreatedAtAndId()
     {
-        var createdAt = DateTimeOffset.Parse("2026-03-05T12:34:56.789+00:00");
+        var createdAt = DateTimeOffset.Parse("2026-03-05T12:34:56.789+00:00", CultureInfo.InvariantCulture);
         var id = Guid.NewGuid();
 
         var cursor = PackageCursor.Encode(createdAt, id);

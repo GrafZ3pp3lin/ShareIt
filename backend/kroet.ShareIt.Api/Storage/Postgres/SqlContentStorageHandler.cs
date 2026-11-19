@@ -137,7 +137,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             var contentDtoList = await connection.QueryAsync<ContentDbDto>(
                 getContentSql,
                 new { PackageId = packageId });
-            package.Contents = contentDtoList.Select(MapToContent).ToList();
+            package.Contents = [.. contentDtoList.Select(MapToContent)];
         }
 
         return package;
@@ -263,7 +263,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         var claim = await connection.QuerySingleOrDefaultAsync<AccessCountDbDto>(
             new CommandDefinition(
                 incrementSql,
-                new { PackageId = session.PackageId, AccessedAt = session.CreatedAt },
+                new { session.PackageId, AccessedAt = session.CreatedAt },
                 transaction,
                 cancellationToken: cancellationToken));
 
@@ -591,7 +591,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <summary>
     /// DTO for mapping package data from database.
     /// </summary>
-    private class PackageDbDto
+    private sealed class PackageDbDto
     {
         public Guid Id { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
@@ -606,7 +606,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <summary>
     /// DTO for mapping package list rows with their aggregate counts.
     /// </summary>
-    private class PackageSummaryDbDto
+    private sealed class PackageSummaryDbDto
     {
         public Guid Id { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
@@ -621,7 +621,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <summary>
     /// DTO for mapping access count results.
     /// </summary>
-    private class AccessCountDbDto
+    private sealed class AccessCountDbDto
     {
         public int CurrentAccessCount { get; init; }
         public int? MaxAccessCount { get; init; }
@@ -630,7 +630,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <summary>
     /// DTO for mapping access session rows.
     /// </summary>
-    private class AccessSessionDbDto
+    private sealed class AccessSessionDbDto
     {
         public Guid Id { get; init; }
         public Guid PackageId { get; init; }
@@ -644,7 +644,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <summary>
     /// DTO for mapping application metrics aggregate rows.
     /// </summary>
-    private class MetricsSnapshotDbDto
+    private sealed class MetricsSnapshotDbDto
     {
         public int TotalPackages { get; init; }
         public int ActivePackages { get; init; }
@@ -660,7 +660,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     /// <summary>
     /// DTO for mapping content data from database.
     /// </summary>
-    private class ContentDbDto
+    private sealed class ContentDbDto
     {
         public Guid Id { get; init; }
         public Guid PackageId { get; init; }

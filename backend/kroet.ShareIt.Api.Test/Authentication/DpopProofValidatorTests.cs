@@ -67,7 +67,7 @@ public sealed class DpopProofValidatorTests
         string alg = "ES256",
         string typ = "dpop+jwt")
     {
-        var encode = (object value) => Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(value));
+        static string encode(object value) => Base64UrlEncoder.Encode(JsonSerializer.SerializeToUtf8Bytes(value));
         // Real DPoP proofs embed the public key as a JWK object (not a string).
         var header = new Dictionary<string, object>
         {
@@ -102,7 +102,7 @@ public sealed class DpopProofValidatorTests
 
     private static string CnfClaim(string jkt) => $$"""{"jkt":"{{jkt}}"}""";
 
-    private Task<DpopValidationResult> ValidateAsync(
+    private static Task<DpopValidationResult> ValidateAsync(
         DpopProofValidator validator,
         string? proof,
         string? cnfJson,
@@ -288,7 +288,7 @@ public sealed class DpopProofValidatorTests
         var results = await Task.WhenAll(
             Enumerable.Range(0, 8).Select(_ => ValidateAsync(validator, proof, CnfClaim(jkt))));
 
-        Assert.AreEqual(1, results.Count(r => r.Succeeded));
+        Assert.ContainsSingle(r => r.Succeeded, results);
         Assert.IsTrue(results.All(r => r.Succeeded || r.ErrorCode == "invalid_dpop_proof"));
     }
 
@@ -315,7 +315,8 @@ public sealed class DpopProofValidatorTests
         var (_, jwk) = CreateKey();
         var jkt = JwkThumbprint(jwk);
         var octJwk = $$"""{"kty":"oct","k":"{{Base64UrlEncoder.Encode("symmetric-secret")}}"}""";
-        var proof = BuildProof(ECDsa.Create(), octJwk, BuildPayload(), alg: "HS256");
+        using var proofKey = ECDsa.Create();
+        var proof = BuildProof(proofKey, octJwk, BuildPayload(), alg: "HS256");
 
         var result = await ValidateAsync(CreateValidator(), proof, CnfClaim(jkt));
 
