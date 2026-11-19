@@ -34,8 +34,8 @@
   a download 401 or package-gone response. See `frontend/AGENTS.md`.
 - Optional client-side encryption uses one passphrase per package, a salt derived from the package id,
   the `SIE3` frame container (4 MiB frames, deterministic per-item sealing) and per-item framed `meta`;
-  the API only ever sees opaque bytes and the `X-Unlock-Proof` verifier. See `frontend/AGENTS.md` and
-  `docs/crypto-v2.md`.
+  the API only ever sees opaque bytes and the `X-Unlock-Proof` verifier. See `frontend/AGENTS.md`,
+  `docs/crypto.md` and `docs/upload-download.md`.
 
 ### Backend (.NET)
 - NuGet versions for backend projects are centralized in `backend/Directory.Packages.props` (Central Package Management). Project files list packages without a `Version`; add or bump versions only there. Check for updates with `dotnet list kroet.ShareIt.slnx package --outdated` from `backend/`.
