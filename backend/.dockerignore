@@ -1,25 +1,25 @@
-﻿**/.dockerignore
-**/.env
+# Build output
+**/bin
+**/obj
+
+# VCS and IDE
 **/.git
-**/.gitignore
-**/.project
-**/.settings
-**/.toolstarget
 **/.vs
 **/.vscode
 **/.idea
-**/*.*proj.user
-**/*.dbmdl
-**/*.jfm
-**/azds.yaml
-**/bin
-**/charts
-**/docker-compose*
+**/*.user
+kroet.ShareIt.sln.DotSettings.user
+
+# Not needed by the image build: only kroet.ShareIt.Api is published.
+**/kroet.ShareIt.Api.Test
+**/kroet.ShareIt.Api.IntegrationTest
+**/kroet.ShareIt.AuthTwin
+**/kroet.ShareIt.AuthTwin.Test
+kroet.ShareIt.slnx
+
+# Docker and tooling
+**/.dockerignore
 **/Dockerfile*
+**/docker-compose*
 **/node_modules
-**/npm-debug.log
-**/obj
-**/secrets.dev.yaml
-**/values.dev.yaml
-LICENSE
-README.md
+**/*.md

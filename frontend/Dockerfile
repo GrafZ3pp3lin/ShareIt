@@ -1,20 +1,33 @@
-FROM node:25-alpine AS build
+# syntax=docker/dockerfile:1
+
+# Build stage: Node 26 on Debian (glibc). Deliberately NOT Alpine: the
+# @solidjs/compiler build-time dependency ships no musl binary, so an Alpine
+# builder would fail to load the compiler.
+FROM node:26-slim AS build
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+# Node 25+ no longer bundles corepack, so install pnpm directly.
+# Keep in sync with the "packageManager" field in package.json.
+RUN npm install --global pnpm@12.21.0
+
+# pnpm-workspace.yaml carries install-time settings (allowBuilds,
+# minimumReleaseAge, ...) that --frozen-lockfile verifies, so it must be present.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN npm run build
+RUN pnpm build
 
-FROM nginx:alpine AS final
-WORKDIR /usr/share/nginx/html
+# Runtime: unprivileged nginx — non-root (UID 101), port 8080, minimal Alpine.
+FROM nginxinc/nginx-unprivileged:alpine-slim AS final
 
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY docker/40-env.sh /docker-entrypoint.d/40-env.sh
-COPY docker/env.template.js /usr/share/nginx/html/env.template.js
-COPY --from=build /app/dist/ /usr/share/nginx/html/
-
+# The entrypoint only runs /docker-entrypoint.d/*.sh files with the exec bit set.
+COPY --chown=101:101 docker/40-env.sh /docker-entrypoint.d/40-env.sh
 RUN chmod +x /docker-entrypoint.d/40-env.sh
+COPY docker/env.template.js /usr/share/nginx/html/env.template.js
+# dist/env.js (copied from public/ by Vite) is overwritten at container start
+# by 40-env.sh, so it must be writable by the non-root nginx user (101).
+COPY --from=build --chown=101:101 /app/dist/ /usr/share/nginx/html/
 
-EXPOSE 80
+EXPOSE 8080

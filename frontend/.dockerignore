@@ -1,8 +1,24 @@
+# Dependencies and build output
 node_modules
 dist
+
+# VCS
 .git
 .gitignore
+
+# Tooling and docs
+.agents
 .vscode
-npm-debug.log
-.env
-.env.local
+.idea
+docs
+README.md
+AGENTS.md
+Dockerfile
+docker-compose*
+
+# Local artifacts and secrets
+.env*
+*.log
+npm-debug.log*
+pnpm-debug.log*
+coverage
