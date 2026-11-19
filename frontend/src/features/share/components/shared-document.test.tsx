@@ -1,11 +1,16 @@
 import { render, screen } from '@solidjs/testing-library';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContentPackageResponse } from '../../../client/model/index.ts';
 import { I18nProvider } from '../../../i18n/i18n.tsx';
-import { toBase64Url } from '../../../shared/crypto/base64url.ts';
 import { utf8 } from '../../../shared/crypto/bytes.ts';
 import { SharedDocument } from './shared-document.tsx';
 import type { ShareItem } from '../use-share.ts';
+
+const api = vi.hoisted(() => ({
+  downloadContent: vi.fn()
+}));
+
+vi.mock('../../../shared/api/content.ts', () => api);
 
 const PACKAGE_ID = '0192f3ab-7cde-7def-8abc-0123456789ab';
 
@@ -13,7 +18,6 @@ const textItem: ShareItem = {
   Id: '0192f3ab-7cde-7def-8abc-0123456789ac',
   Kind: 'text',
   Size: 5,
-  Payload: toBase64Url(utf8('hello')),
   index: 0,
   decodedMeta: { name: null, mime: 'text/plain' },
   displayName: 'content.txt',
@@ -24,7 +28,6 @@ const fileItem: ShareItem = {
   Id: '0192f3ab-7cde-7def-8abc-0123456789ad',
   Kind: 'file',
   Size: 1024,
-  Payload: null,
   index: 1,
   decodedMeta: { name: 'report.pdf', mime: 'application/pdf' },
   displayName: 'report.pdf',
@@ -38,6 +41,8 @@ const packageDetails = (overrides: Partial<ContentPackageResponse> = {}): Conten
   MaxAccessCount: 1,
   CurrentAccessCount: 0,
   RemainingAccesses: null,
+  ExpiresAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+  IsProtected: false,
   ...overrides
 });
 
@@ -58,14 +63,20 @@ const renderDocument = (items: ShareItem[], overrides: Partial<ContentPackageRes
   ));
 
 describe('<SharedDocument />', () => {
+  beforeEach(() => {
+    api.downloadContent.mockReset();
+    api.downloadContent.mockResolvedValue({ data: new Blob([utf8('hello')]), status: 200 });
+  });
+
   it('renders text, file rows and the summary for an unprotected package', async () => {
     renderDocument([textItem, fileItem]);
 
     expect(await screen.findByText('hello')).toBeInTheDocument();
     expect(screen.getByText('report.pdf')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'download' })).toBeInTheDocument();
-    expect(screen.getByText('1 text · 1 file · 1.0 KB · unlimited accesses')).toBeInTheDocument();
+    expect(screen.getByText('1 text · 1 file · 1.0 KB · expires in 6 days · unlimited accesses')).toBeInTheDocument();
     expect(screen.getByText(/This access is valid until \d{1,2}:\d{2}/)).toBeInTheDocument();
+    expect(api.downloadContent).toHaveBeenCalledWith(PACKAGE_ID, textItem.Id, 'session-1');
   });
 
   it('uses the singular access label and a relative expiry', () => {

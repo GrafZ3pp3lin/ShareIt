@@ -1,11 +1,9 @@
 using System.Buffers;
-using System.Buffers.Text;
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Claims;
-using System.Text;
-using kroet.Permission.AspNetCore;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Models;
@@ -17,7 +15,6 @@ using kroet.ShareIt.Api.User;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
@@ -37,12 +34,6 @@ public static class ContentEndpoints
     private sealed class LogCategory { }
 
     /// <summary>
-    /// Extra bytes allowed for the final multipart boundary and headers when a
-    /// duplicate upload is drained before its idempotent response.
-    /// </summary>
-    private const long DrainTrailerAllowanceBytes = 64 * 1024;
-
-    /// <summary>
     /// Maps all content management endpoints to the route group.
     /// </summary>
     public static RouteGroupBuilder MapContentEndpoints(this RouteGroupBuilder group)
@@ -52,7 +43,6 @@ public static class ContentEndpoints
         // Upload limits endpoint (placed before the parameterized routes)
         packageGroup
             .MapGet("/limits", GetUploadLimits)
-            .RequirePermission("Read.Limits")
             .Produces<UploadLimitsResponse>()
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
@@ -60,40 +50,46 @@ public static class ContentEndpoints
             .WithTags("Content", "Package");
 
         // Package creation: metadata only. Content is added one item per
-        // request through /upload, which is the single content write path.
+        // request through PUT /package/{id}/content/{contentId}, which is the
+        // single content write path.
         packageGroup
             .MapPost("", CreatePackageAsync)
+            .RequireRateLimiting(RateLimitPolicies.Upload)
             .Accepts<CreatePackageRequest>("application/json")
-            .RequirePermission("Create.Package")
             .Produces<ContentPackageResponse>(StatusCodes.Status201Created)
             .Produces<ContentPackageResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status410Gone)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
             .WithName("CreatePackage")
             .WithTags("Content", "Package");
 
+        // One raw binary PUT per item. The payload is streamed from
+        // Request.Body through the blob store's bounded probe/part buffer and
+        // is never buffered on disk or in memory. The binary request body is
+        // described in OpenAPI through the document transformer in Program.cs.
         packageGroup
-            .MapPost("/{packageId:guid}/upload", UploadContentToPackageAsync)
-            .Accepts<UploadContentRequest>("multipart/form-data")
-            .RequirePermission("Upload.File")
-            .DisableAntiforgery()
+            .MapPut("/{packageId:guid}/content/{contentId:guid}", UploadContentToPackageAsync)
+            .RequireRateLimiting(RateLimitPolicies.Upload)
             .Produces<ContentPackageResponse>()
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status410Gone)
             .Produces<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)
             .Produces<ProblemDetails>(StatusCodes.Status415UnsupportedMediaType)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
-            .WithName("UploadFileToPackage")
+            .WithName("UploadContent")
             .WithTags("Content", "Package");
 
         packageGroup
             .MapGet("/{packageId:guid}", GetPackageAsync)
-            .RequirePermission("Read.Package")
             .RequireRateLimiting(RateLimitPolicies.PackageRead)
             .Produces<ContentPackageDetailsResponse>()
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
@@ -105,10 +101,10 @@ public static class ContentEndpoints
             .WithName("GetPackage")
             .WithTags("Content", "Package");
 
-        // Content download endpoint (required for items above the inline limit)
+        // Content download endpoint: every item's bytes are fetched here with
+        // the package's access session. Nothing is inlined in GET /package.
         packageGroup
             .MapGet("/{packageId:guid}/content/{contentId:guid}/download", DownloadContentAsync)
-            .RequirePermission("Download.File")
             .RequireRateLimiting(RateLimitPolicies.Download)
             // The handler writes the stream manually and returns EmptyHttpResult,
             // but this result type keeps the OpenAPI body schema binary.
@@ -169,16 +165,6 @@ public static class ContentEndpoints
                 $"UnlockVerifier must be base64url of exactly {UnlockProof.VerifierLength} bytes.");
         }
 
-        if (request.IsPrivate.HasValue && request.IsPrivate.Value && userIdentity.IsGuest)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Authentication required",
-                Detail = "Only authenticated users can create private packages",
-                Status = StatusCodes.Status401Unauthorized
-            });
-        }
-
         var settings = uploadOptions.Value;
         var lifetimeProblem = ValidateLifetime(userIdentity, settings, request.TimeToLiveHours);
         if (lifetimeProblem is not null)
@@ -207,6 +193,16 @@ public static class ContentEndpoints
                 });
             }
 
+            if (existing.IsExpired(timeProvider.GetUtcNow()))
+            {
+                return TypedResults.Problem(new ProblemDetails
+                {
+                    Title = "Package expired",
+                    Detail = "This package has expired and is no longer available",
+                    Status = StatusCodes.Status410Gone
+                });
+            }
+
             var existingWithContent = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
             activity?.SetTag("shareit.package.result", "existing");
             return TypedResults.Ok(ContentPackageResponse.FromPackage(existingWithContent ?? existing));
@@ -218,18 +214,14 @@ public static class ContentEndpoints
             Id = packageId,
             CreatedAt = now,
             UserId = userIdentity.Id,
-            IsPrivate = request.IsPrivate,
             MaxAccessCount = request.MaxAccessCount,
-            ExpiresAt = request.TimeToLiveHours.HasValue
-                ? now.AddHours(request.TimeToLiveHours.Value)
-                : null,
+            ExpiresAt = now.AddHours(request.TimeToLiveHours),
             UnlockVerifier = request.UnlockVerifier
         };
 
         await contentStorageHandler.StorePackageAsync(package, cancellationToken);
         metrics.PackageCreated();
         activity?.SetTag("shareit.package.result", "created");
-        activity?.SetTag("shareit.package.private", request.IsPrivate ?? false);
 
         var packageUrl = linkGenerator.GetUriByName(httpContext, "GetPackage", new { packageId = package.Id })!;
 
@@ -237,30 +229,33 @@ public static class ContentEndpoints
     }
 
     /// <summary>
-    /// Uploads one item — text bytes or file bytes — to an existing package.
-    /// The bytes and the opaque metadata are stored verbatim; the server never
-    /// parses the metadata.
+    /// Uploads one item — text bytes or file bytes — to an existing package
+    /// as a raw binary PUT body. The bytes and the opaque metadata are stored
+    /// verbatim; the server never parses the metadata.
     /// </summary>
     /// <remarks>
-    /// The body is a <c>multipart/form-data</c> request whose parts are ordered:
-    /// <c>Id</c>, <c>Kind</c>, <c>Meta</c>, <c>Size</c>, then <c>File</c> last.
-    /// Metadata parts are validated before the payload is read, and duplicate
-    /// metadata parts are rejected before storage. The endpoint buffers only
-    /// the small metadata parts; the payload is streamed through the blob
-    /// store's bounded probe/part buffer and is never buffered on disk.
+    /// The request carries the metadata in the <c>X-Content-Kind</c> and
+    /// <c>X-Content-Meta</c> headers and the payload as a standard
+    /// <c>application/octet-stream</c> body with a <c>Content-Length</c>.
+    /// Metadata and length are validated before the payload is read; the body
+    /// then streams through the blob store's bounded probe/part buffer.
     /// </remarks>
     private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult, EmptyHttpResult>>
         UploadContentToPackageAsync(
-        [FromRoute] Guid packageId,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
-        [FromServices] IContentStorageHandler contentStorageHandler,
-        [FromServices] IStorageHandler storageHandler,
-        [FromServices] TimeProvider timeProvider,
-        [FromServices] IOptions<UploadSettings> uploadOptions,
-        [FromServices] ShareItMetrics metrics,
-        ClaimsPrincipal claimsPrincipal,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
+            [FromRoute] Guid packageId,
+            [FromRoute] Guid contentId,
+            [FromHeader(Name = "X-Content-Kind"), Required] string? kind,
+            [FromHeader(Name = "X-Content-Meta"), Required] string? meta,
+            [FromHeader(Name = "Content-Length"), Required] string? declaredLength,
+            [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
+            [FromServices] IContentStorageHandler contentStorageHandler,
+            [FromServices] IStorageHandler storageHandler,
+            [FromServices] TimeProvider timeProvider,
+            [FromServices] IOptions<UploadSettings> uploadOptions,
+            [FromServices] ShareItMetrics metrics,
+            ClaimsPrincipal claimsPrincipal,
+            HttpContext httpContext,
+            CancellationToken cancellationToken)
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.upload");
 
@@ -275,6 +270,72 @@ public static class ContentEndpoints
         }
 
         activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
+
+        if (contentId == Guid.Empty)
+        {
+            return BadRequestProblem("Content id required", "The client must supply a non-empty content id.");
+        }
+
+        if (!MediaTypeHeaderValue.TryParse(httpContext.Request.ContentType, out var requestContentType)
+            || !string.Equals(
+                requestContentType.MediaType.Value,
+                "application/octet-stream",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Invalid content type",
+                Detail = "The upload must be sent as application/octet-stream.",
+                Status = StatusCodes.Status415UnsupportedMediaType
+            });
+        }
+
+        // All metadata checks run before a single payload byte is read.
+        if (!TryParseKind(kind, out var contentType))
+        {
+            return BadRequestProblem("Invalid kind", "Kind must be either 'text' or 'file'.");
+        }
+
+        if (meta is null || !Base64UrlText.TryDecode(meta, out var metaBytes))
+        {
+            return BadRequestProblem("Invalid meta", "Meta must be base64url text.");
+        }
+
+        if (metaBytes.Length > UnlockProof.MaxMetaBytes)
+        {
+            return BadRequestProblem(
+                "Meta too large",
+                $"Meta must decode to at most {UnlockProof.MaxMetaBytes} bytes.");
+        }
+
+        var settings = uploadOptions.Value;
+        var fileLimitBytes = FileLimitBytes(userIdentity, settings);
+
+        // Content-Length is the declared size: the idempotency fingerprint and
+        // the mismatch check both come from it.
+        long? itemSize = null;
+        if (declaredLength is not null
+            && long.TryParse(declaredLength, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedLength))
+        {
+            itemSize = parsedLength;
+        }
+
+        if (itemSize is null)
+        {
+            return BadRequestProblem(
+                "Content length required",
+                "The upload must declare its exact size in the Content-Length header.");
+        }
+
+        if (itemSize <= 0)
+        {
+            return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
+        }
+
+        if (itemSize > fileLimitBytes)
+        {
+            return FileTooLargeProblem(contentId, fileLimitBytes);
+        }
 
         var package = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
         if (package is null)
@@ -297,318 +358,133 @@ public static class ContentEndpoints
             });
         }
 
-        if (!TryGetMultipartBoundary(httpContext.Request, out var boundary))
+        var now = timeProvider.GetUtcNow();
+        if (package.IsExpired(now))
         {
-            return BadRequestProblem(
-                "Invalid content type",
-                "The upload must be sent as multipart/form-data with a boundary.");
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Package expired",
+                Detail = "This package has expired and is no longer available",
+                Status = StatusCodes.Status410Gone
+            });
         }
 
-        var settings = uploadOptions.Value;
-        var fileLimitBytes = FileLimitBytes(userIdentity, settings);
+        activity?.SetTag("shareit.content.kind", KindOf(contentType));
+        activity?.SetTag("shareit.content.size_bytes", itemSize);
 
-        // Metadata errors are answered before the payload is read. Some clients
-        // may surface that early response as a network error, but draining up
-        // to Kestrel's request-body limit for every malformed request would be
-        // worse. Only a matching idempotent retry drains, because that one has
-        // already succeeded and must not look like a failed upload.
-        var reader = new MultipartReader(boundary, httpContext.Request.Body);
-        Guid? contentId = null;
-        string? kind = null;
-        string? meta = null;
-        long? declaredSize = null;
-        var seenParts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        while (true)
+        // Idempotent retry: a repeated upload with the same item id must not
+        // create a duplicate row or fail on the primary key. Reusing the id
+        // for different content is a conflict, not a silent success.
+        var existing = await contentStorageHandler.GetContentAsync(contentId, cancellationToken);
+        if (existing is not null)
         {
-            MultipartSection? section;
-
-            try
+            // Decide conflicts before reading the payload. Only an
+            // idempotent success drains the re-sent body so the client can
+            // receive the response instead of a connection reset.
+            if (existing.PackageId != packageId)
             {
-                section = await reader.ReadNextSectionAsync(cancellationToken);
-            }
-            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
-            {
-                return TypedResults.Empty;
-            }
-            catch (InvalidDataException)
-            {
-                // Malformed multipart framing must be a client error, not a 500.
-                return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
-            }
-            catch (IOException)
-            {
-                // The body ended before its final boundary.
-                return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
-            }
-
-            if (section is null)
-            {
-                break;
-            }
-
-            if (!TryGetPartName(section, out var partName))
-            {
-                return BadRequestProblem("Invalid upload", "Each part must be form-data with a name.");
-            }
-
-            if (!seenParts.Add(partName))
-            {
-                return BadRequestProblem("Invalid upload", $"Duplicate part '{partName}'.");
-            }
-
-            // Metadata must arrive first: the checks below run before a single
-            // payload byte is read, and a duplicate retry never stores bytes.
-            if (!string.Equals(partName, "File", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!TryGetPartTextLimit(partName, out var partLimit))
+                return TypedResults.Problem(new ProblemDetails
                 {
-                    return BadRequestProblem("Invalid upload", $"Unknown part '{partName}'.");
-                }
+                    Title = "Content id already in use",
+                    Detail = "Content with this id already exists in another package.",
+                    Status = StatusCodes.Status409Conflict
+                });
+            }
 
-                string? value;
-                try
+            if (existing.ContentType != contentType
+                || existing.Size != itemSize
+                || !string.Equals(existing.Meta, meta, StringComparison.Ordinal))
+            {
+                return TypedResults.Problem(new ProblemDetails
                 {
-                    value = await ReadPartTextAsync(section.Body, partLimit, cancellationToken);
-                }
-                catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
-                {
-                    return TypedResults.Empty;
-                }
-                catch (InvalidDataException)
-                {
-                    return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
-                }
-                catch (IOException)
-                {
-                    return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
-                }
-
-                if (value is null)
-                {
-                    return BadRequestProblem("Invalid upload", $"The {partName} part is too long.");
-                }
-
-                switch (partName.ToLowerInvariant())
-                {
-                    case "id":
-                        if (!Guid.TryParse(value, out var parsedId) || parsedId == Guid.Empty)
-                        {
-                            return BadRequestProblem("Content id required", "The client must supply a non-empty content id.");
-                        }
-
-                        contentId = parsedId;
-                        break;
-                    case "kind":
-                        kind = value;
-                        break;
-                    case "meta":
-                        meta = value;
-                        break;
-                    case "size":
-                        if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedSize)
-                            || parsedSize < 0)
-                        {
-                            return BadRequestProblem("Invalid size", "Size must be a non-negative number of bytes.");
-                        }
-
-                        declaredSize = parsedSize;
-                        break;
-                }
-
-                continue;
+                    Title = "Content id reused with different content",
+                    Detail = "This content id was already used for an item with different kind, size or metadata.",
+                    Status = StatusCodes.Status409Conflict
+                });
             }
 
-            if (contentId is not { } itemId || itemId == Guid.Empty)
-            {
-                return BadRequestProblem("Content id required", "The client must supply a non-empty content id.");
-            }
+            await DrainRequestBodyAsync(httpContext.Request, itemSize.Value, cancellationToken);
 
-            if (!TryParseKind(kind, out var contentType))
-            {
-                return BadRequestProblem("Invalid kind", "Kind must be either 'text' or 'file'.");
-            }
-
-            if (meta is null || !Base64UrlText.TryDecode(meta, out var metaBytes))
-            {
-                return BadRequestProblem("Invalid meta", "Meta must be base64url text.");
-            }
-
-            if (metaBytes.Length > UnlockProof.MaxMetaBytes)
-            {
-                return BadRequestProblem(
-                    "Meta too large",
-                    $"Meta must decode to at most {UnlockProof.MaxMetaBytes} bytes.");
-            }
-
-            if (declaredSize is not { } itemSize)
-            {
-                return BadRequestProblem("Invalid size", "Size must be a non-negative number of bytes.");
-            }
-
-            if (itemSize == 0)
-            {
-                return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
-            }
-
-            if (itemSize > fileLimitBytes)
-            {
-                return FileTooLargeProblem(itemId, fileLimitBytes);
-            }
-
-            activity?.SetTag("shareit.content.kind", KindOf(contentType));
-            activity?.SetTag("shareit.content.size_bytes", itemSize);
-
-            // Idempotent retry: a repeated upload with the same item id must not
-            // create a duplicate row or fail on the primary key. Reusing the id
-            // for different content is a conflict, not a silent success.
-            var existing = await contentStorageHandler.GetContentAsync(itemId, cancellationToken);
-            if (existing is not null)
-            {
-                // Decide conflicts before reading the payload. Only an
-                // idempotent success drains the re-sent body so the client can
-                // receive the response instead of a connection reset.
-                if (existing.PackageId != packageId)
-                {
-                    return TypedResults.Problem(new ProblemDetails
-                    {
-                        Title = "Content id already in use",
-                        Detail = "Content with this id already exists in another package.",
-                        Status = StatusCodes.Status409Conflict
-                    });
-                }
-
-                if (existing.ContentType != contentType
-                    || existing.Size != itemSize
-                    || !string.Equals(existing.Meta, meta, StringComparison.Ordinal))
-                {
-                    return TypedResults.Problem(new ProblemDetails
-                    {
-                        Title = "Content id reused with different content",
-                        Detail = "This content id was already used for an item with different kind, size or metadata.",
-                        Status = StatusCodes.Status409Conflict
-                    });
-                }
-
-                await DrainRequestBodyAsync(
-                    httpContext.Request,
-                    itemSize + DrainTrailerAllowanceBytes,
-                    cancellationToken);
-
-                var existingPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
-                activity?.SetTag("shareit.package.result", "existing");
-                return TypedResults.Ok(ContentPackageResponse.FromPackage(existingPackage ?? package));
-            }
-
-            var now = timeProvider.GetUtcNow();
-            var content = new Api.Models.Content
-            {
-                Id = itemId,
-                PackageId = packageId,
-                ContentType = contentType,
-                CreatedAt = now,
-                Size = itemSize,
-                UserId = userIdentity.Id,
-                Meta = meta
-            };
-
-            await using var payload = new DeclaredLengthStream(section.Body, fileLimitBytes, itemSize);
-
-            try
-            {
-                await storageHandler.StoreContentAsync(content, payload, cancellationToken);
-            }
-            catch (ContentTooLargeException)
-            {
-                // The client sent more bytes than its limit allows, whatever it
-                // declared. Storage compensation already removed any partial blob.
-                return FileTooLargeProblem(itemId, fileLimitBytes);
-            }
-            catch (ContentLengthMismatchException)
-            {
-                // The stream stopped forwarding at the first extra byte. Drain
-                // the rest only to preserve the 413 answer when the client also
-                // exceeded the absolute identity limit.
-                bool exceededLimit;
-                try
-                {
-                    exceededLimit = await payload.DrainToLimitAsync(cancellationToken);
-                }
-                catch (RequestBodyTruncatedException)
-                {
-                    return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
-                }
-                catch (InvalidDataException)
-                {
-                    return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
-                }
-                catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
-                {
-                    return TypedResults.Empty;
-                }
-
-                return exceededLimit
-                    ? FileTooLargeProblem(itemId, fileLimitBytes)
-                    : BadRequestProblem(
-                        "Content size mismatch",
-                        "The uploaded content length does not match the declared size.");
-            }
-            catch (RequestBodyTruncatedException)
-            {
-                return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
-            }
-            catch (InvalidDataException)
-            {
-                return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
-            }
-            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
-            {
-                return TypedResults.Empty;
-            }
-
-            // File is contractually the last part. A well-formed trailing
-            // section means the client violated the contract; remove the
-            // just-stored item so the 400 is not misleading.
-            try
-            {
-                var trailing = await reader.ReadNextSectionAsync(cancellationToken);
-                if (trailing is not null)
-                {
-                    await DeleteRejectedUploadAsync(storageHandler, itemId);
-                    return BadRequestProblem("Invalid upload", "The File part must be the last part.");
-                }
-            }
-            catch (InvalidDataException)
-            {
-                await DeleteRejectedUploadAsync(storageHandler, itemId);
-                return BadRequestProblem("Invalid upload", "The multipart body is invalid.");
-            }
-            catch (IOException)
-            {
-                await DeleteRejectedUploadAsync(storageHandler, itemId);
-                return BadRequestProblem("Invalid upload", "The multipart body ended unexpectedly.");
-            }
-            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
-            {
-                return TypedResults.Empty;
-            }
-
-            metrics.ItemUploaded(contentType, itemSize);
-            activity?.SetTag("shareit.package.result", "uploaded");
-
-            var updatedPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
-
-            return TypedResults.Ok(ContentPackageResponse.FromPackage(updatedPackage ?? package));
+            var existingPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+            activity?.SetTag("shareit.package.result", "existing");
+            return TypedResults.Ok(ContentPackageResponse.FromPackage(existingPackage ?? package));
         }
 
-        return BadRequestProblem("Empty content", "The uploaded content must not be empty.");
+        // The limit counts items, not bytes, and is checked after the
+        // idempotency match so a retry never trips over it.
+        var withContent = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+        if (withContent is not null && withContent.Contents is { } contents && contents.Count >= settings.MaxItemsPerPackage)
+        {
+            return TypedResults.Problem(new ProblemDetails
+            {
+                Title = "Too many items",
+                Detail = $"This package can contain at most {settings.MaxItemsPerPackage} items.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var content = new Api.Models.Content
+        {
+            Id = contentId,
+            PackageId = packageId,
+            ContentType = contentType,
+            CreatedAt = now,
+            Size = itemSize.Value,
+            UserId = userIdentity.Id,
+            Meta = meta
+        };
+
+        await using var payload = new DeclaredLengthStream(httpContext.Request.Body, fileLimitBytes, itemSize.Value);
+
+        try
+        {
+            await storageHandler.StoreContentAsync(content, payload, cancellationToken);
+        }
+        catch (ContentTooLargeException)
+        {
+            // The client sent more bytes than its limit allows, whatever it
+            // declared. Storage compensation already removed any partial blob.
+            return FileTooLargeProblem(contentId, fileLimitBytes);
+        }
+        catch (ContentLengthMismatchException)
+        {
+            // The stream stopped forwarding at the first extra byte. Drain
+            // the rest only to preserve the 413 answer when the client also
+            // exceeded the absolute identity limit.
+            bool exceededLimit;
+            try
+            {
+                exceededLimit = await payload.DrainToLimitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+            {
+                return TypedResults.Empty;
+            }
+
+            return exceededLimit
+                ? FileTooLargeProblem(contentId, fileLimitBytes)
+                : BadRequestProblem(
+                    "Content size mismatch",
+                    "The uploaded content length does not match the declared size.");
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            return TypedResults.Empty;
+        }
+
+        metrics.ItemUploaded(contentType, itemSize.Value);
+        activity?.SetTag("shareit.package.result", "uploaded");
+
+        var updatedPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+
+        return TypedResults.Ok(ContentPackageResponse.FromPackage(updatedPackage ?? package));
     }
 
     /// <summary>
-    /// Gets a package with all its content items and returns its access session.
-    /// Items above the inline payload limit are downloaded through that session.
-    /// A protected package requires a valid unlock proof before anything is read
-    /// or an access is claimed.
+    /// Gets a package with all its content metadata and returns its access
+    /// session. Item bytes are always fetched through that session; the open
+    /// performs zero blob reads. A protected package requires a valid unlock
+    /// proof before anything is read or an access is claimed.
     /// </summary>
     private static async Task<Results<Ok<ContentPackageDetailsResponse>, ProblemHttpResult>> GetPackageAsync(
         [FromRoute] Guid packageId,
@@ -616,9 +492,7 @@ public static class ContentEndpoints
         [FromHeader(Name = "X-Unlock-Proof")] string? unlockProof,
         [FromHeader(Name = "X-Access-Session")] string? accessSession,
         [FromServices] IContentStorageHandler storageHandler,
-        [FromServices] IBlobStorageHandler blobStorageHandler,
         [FromServices] IAccessSessionService accessSessionService,
-        [FromServices] IOptions<DownloadSettings> downloadOptions,
         [FromServices] TimeProvider timeProvider,
         [FromServices] ShareItMetrics metrics,
         ClaimsPrincipal claimsPrincipal,
@@ -642,7 +516,7 @@ public static class ContentEndpoints
 
         // Shell first: no items, no names, no session, no blob reads.
         var package = await storageHandler.GetPackageShellAsync(packageId, cancellationToken);
-        if (package is null || package.IsPrivate.HasValue && package.IsPrivate.Value && (userIdentity.IsGuest || package.UserId != userIdentity.Id))
+        if (package is null)
         {
             return TypedResults.Problem(new ProblemDetails
             {
@@ -710,65 +584,31 @@ public static class ContentEndpoints
             activity?.SetTag("shareit.access.session_reused", existingSession is not null);
         }
 
-        // An exhausted package with no valid session cannot succeed below, and
-        // answering 410 here avoids reading and buffering inline S3 payloads
-        // (or turning a missing object into a 500) for a request that is
-        // already known to fail.
+        // An exhausted package with no valid session cannot succeed below;
+        // answer 410 here before claiming.
         if (existingSession is null && withContent.IsAccessLimitReached)
         {
             return AccessLimitReachedProblem();
         }
 
-        var inlineLimitBytes = downloadOptions.Value.InlinePayloadLimitBytes;
-        var inlineBudgetBytes = downloadOptions.Value.InlinePayloadBudgetBytes;
-        var inlineSpentBytes = 0L;
-
-        // C# 15 collection expression argument: pre-size the list because the
-        // number of items is already known.
-        List<ContentItemInPackage> items = [with(capacity: withContent.Contents.Count)];
-        var inlineItemCount = 0;
-        var deferredItemCount = 0;
         var orderedContents = withContent.Contents
             .OrderBy(content => content.CreatedAt)
             .ThenBy(content => content.Id.ToString("N"), StringComparer.Ordinal);
 
+        // C# 15 collection expression argument: pre-size the list because the
+        // number of items is already known.
+        List<ContentItemInPackage> items = [with(capacity: withContent.Contents.Count)];
         foreach (var content in orderedContents)
         {
-            var inline = content.Size <= inlineLimitBytes
-                         && inlineSpentBytes + content.Size <= inlineBudgetBytes;
-
-            if (inline)
+            // Nothing is minted or read here: the package's access session
+            // authorizes a lazy download when the recipient opens the item.
+            items.Add(new ContentItemInPackage
             {
-                await using var dataStream = await blobStorageHandler.DownloadAsync(content.Url, cancellationToken);
-                using var buffer = new MemoryStream();
-                await dataStream.CopyToAsync(buffer, cancellationToken);
-                inlineSpentBytes += content.Size;
-                inlineItemCount++;
-
-                items.Add(new ContentItemInPackage
-                {
-                    Id = content.Id,
-                    Kind = KindOf(content.ContentType),
-                    Size = content.Size,
-                    Meta = content.Meta,
-                    // Encode directly from the buffer instead of copying it
-                    // into another array first.
-                    Payload = Base64Url.EncodeToString(buffer.GetBuffer().AsSpan(0, (int)buffer.Length))
-                });
-            }
-            else
-            {
-                // Nothing is minted here: the package's access session already
-                // authorizes a lazy download when the recipient clicks the item.
-                deferredItemCount++;
-                items.Add(new ContentItemInPackage
-                {
-                    Id = content.Id,
-                    Kind = KindOf(content.ContentType),
-                    Size = content.Size,
-                    Meta = content.Meta
-                });
-            }
+                Id = content.Id,
+                Kind = KindOf(content.ContentType),
+                Size = content.Size,
+                Meta = content.Meta
+            });
         }
 
         // Claim last: all response preparation above can still fail without
@@ -814,9 +654,6 @@ public static class ContentEndpoints
             }
         };
 
-        activity?.SetTag("shareit.package.inline_items", inlineItemCount);
-        activity?.SetTag("shareit.package.deferred_items", deferredItemCount);
-        activity?.SetTag("shareit.package.inline_bytes", inlineSpentBytes);
         activity?.SetTag("shareit.package.access_claimed", accessClaimed);
         activity?.SetTag("shareit.package.result", "opened");
 
@@ -887,6 +724,7 @@ public static class ContentEndpoints
             {
                 return TypedResults.Problem(new ProblemDetails
                 {
+                    Type = ProblemTypes.PackageGone,
                     Title = "Package not found",
                     Detail = $"Package with ID {packageId} was not found",
                     Status = StatusCodes.Status404NotFound
@@ -897,6 +735,7 @@ public static class ContentEndpoints
             {
                 return TypedResults.Problem(new ProblemDetails
                 {
+                    Type = ProblemTypes.PackageGone,
                     Title = "Package expired",
                     Detail = "This package has expired and is no longer available",
                     Status = StatusCodes.Status410Gone
@@ -927,6 +766,7 @@ public static class ContentEndpoints
         {
             return TypedResults.Problem(new ProblemDetails
             {
+                Type = ProblemTypes.PackageGone,
                 Title = "Package expired",
                 Detail = "This package has expired and is no longer available",
                 Status = StatusCodes.Status410Gone
@@ -941,7 +781,7 @@ public static class ContentEndpoints
         Stream stream;
         try
         {
-            stream = await blobStorageHandler.DownloadAsync(content.Url, cancellationToken);
+            stream = await blobStorageHandler.DownloadAsync(content.Url ?? string.Empty, cancellationToken);
         }
         catch (KeyNotFoundException)
         {
@@ -1018,7 +858,8 @@ public static class ContentEndpoints
             AnonymousMaxLifetimeHours = settings.Anonymous.MaxLifetimeHours,
             AuthenticatedMaxLifetimeHours = settings.Authenticated.MaxLifetimeHours,
             AnonymousMaxAccessCount = settings.Anonymous.MaxAccessCount,
-            AuthenticatedMaxAccessCount = settings.Authenticated.MaxAccessCount
+            AuthenticatedMaxAccessCount = settings.Authenticated.MaxAccessCount,
+            MaxItemsPerPackage = settings.MaxItemsPerPackage
         });
     }
 
@@ -1041,70 +882,6 @@ public static class ContentEndpoints
         }
 
         return string.Equals(kind, "file", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// Reads the boundary of a <c>multipart/form-data</c> request. Without a
-    /// boundary, <see cref="MultipartReader"/> would scan the body with a
-    /// delimiter the client never sent.
-    /// </summary>
-    private static bool TryGetMultipartBoundary(HttpRequest request, [NotNullWhen(true)] out string? boundary)
-    {
-        boundary = null;
-
-        if (!MediaTypeHeaderValue.TryParse(request.ContentType, out var contentType)
-            || !string.Equals(contentType.MediaType.Value, "multipart/form-data", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        // RFC 2046 allows a quoted boundary parameter. MediaTypeHeaderValue
-        // preserves those quotes, but MultipartReader expects the raw value.
-        var boundarySegment = HeaderUtilities.RemoveQuotes(contentType.Boundary);
-        if (!boundarySegment.HasValue || boundarySegment.Length is 0 or > 70)
-        {
-            return false;
-        }
-
-        boundary = boundarySegment.Value;
-        return true;
-    }
-
-    /// <summary>
-    /// Extracts the form-data part name. Other dispositions (attachments, a
-    /// missing name) are rejected before their content is read.
-    /// </summary>
-    private static bool TryGetPartName(MultipartSection section, [NotNullWhen(true)] out string? partName)
-    {
-        partName = null;
-
-        if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var disposition)
-            || !disposition.DispositionType.Equals("form-data", StringComparison.OrdinalIgnoreCase)
-            || !disposition.Name.HasValue)
-        {
-            return false;
-        }
-
-        partName = disposition.Name.Value;
-        return !string.IsNullOrEmpty(partName);
-    }
-
-    /// <summary>
-    /// Per-part read limit for the small text parts. The meta limit leaves
-    /// room for base64url expansion of the maximum decoded size.
-    /// </summary>
-    private static bool TryGetPartTextLimit(string partName, out int limitBytes)
-    {
-        limitBytes = partName.ToLowerInvariant() switch
-        {
-            "id" => 64,
-            "kind" => 16,
-            "meta" => (UnlockProof.MaxMetaBytes * 4 / 3) + 8,
-            "size" => 20,
-            _ => 0
-        };
-
-        return limitBytes > 0;
     }
 
     /// <summary>
@@ -1154,50 +931,6 @@ public static class ContentEndpoints
         }
     }
 
-    /// <summary>
-    /// Removes an item that was stored before a trailing multipart section was
-    /// discovered. Best effort only: the 400 is still the correct response, and
-    /// any leftover object is handled by the normal cleanup queue.
-    /// </summary>
-    private static async Task DeleteRejectedUploadAsync(IStorageHandler storageHandler, Guid contentId)
-    {
-        try
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await storageHandler.DeleteContentAsync(contentId, timeout.Token);
-        }
-        catch
-        {
-            // Best effort; the request must still report the contract error.
-        }
-    }
-
-    /// <summary>
-    /// Reads a small text part, returning null when it is longer than the
-    /// limit so a hostile client cannot make the endpoint buffer metadata.
-    /// </summary>
-    private static async Task<string?> ReadPartTextAsync(
-        Stream body,
-        int limitBytes,
-        CancellationToken cancellationToken)
-    {
-        var buffer = new byte[limitBytes + 1];
-        var total = 0;
-
-        while (total < buffer.Length)
-        {
-            var read = await body.ReadAsync(buffer.AsMemory(total), cancellationToken);
-            if (read == 0)
-            {
-                break;
-            }
-
-            total += read;
-        }
-
-        return total > limitBytes ? null : Encoding.UTF8.GetString(buffer, 0, total).Trim();
-    }
-
     private static string KindOf(ContentType contentType)
         => contentType == ContentType.Text ? "text" : "file";
 
@@ -1211,37 +944,25 @@ public static class ContentEndpoints
     }
 
     /// <summary>
-    /// Enforces the per-identity package lifetime limits: anonymous users are
-    /// capped at a short lifetime (and must set one at all), authenticated
-    /// users may go up to the configured maximum or omit it (no expiration).
+    /// Enforces the per-identity package lifetime limits. Every package must
+    /// set a lifetime: abandoned uploads always expire and are swept by
+    /// cleanup, without any draft/ready state machine.
     /// </summary>
-    private static ProblemHttpResult? ValidateLifetime(UserIdentity userIdentity, UploadSettings settings, int? timeToLiveHours)
+    private static ProblemHttpResult? ValidateLifetime(UserIdentity userIdentity, UploadSettings settings, int timeToLiveHours)
     {
-        if (timeToLiveHours is { } hours)
-        {
-            if (hours <= 0)
-            {
-                return BadRequestProblem(
-                    "Invalid lifetime",
-                    "TimeToLiveHours must be a positive number of hours.");
-            }
-
-            var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
-            if (hours > identityLimits.MaxLifetimeHours)
-            {
-                return BadRequestProblem(
-                    "Lifetime too long",
-                    $"Packages for this identity may live for at most {identityLimits.MaxLifetimeHours} hours.");
-            }
-
-            return null;
-        }
-
-        if (userIdentity.IsGuest)
+        if (timeToLiveHours <= 0)
         {
             return BadRequestProblem(
-                "Lifetime required",
-                $"Anonymous packages must set TimeToLiveHours of at most {settings.Anonymous.MaxLifetimeHours} hours.");
+                "Invalid lifetime",
+                "TimeToLiveHours must be a positive number of hours.");
+        }
+
+        var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
+        if (timeToLiveHours > identityLimits.MaxLifetimeHours)
+        {
+            return BadRequestProblem(
+                "Lifetime too long",
+                $"Packages for this identity may live for at most {identityLimits.MaxLifetimeHours} hours.");
         }
 
         return null;

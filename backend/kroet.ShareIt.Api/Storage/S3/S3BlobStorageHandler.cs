@@ -191,18 +191,12 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<bool> DeleteAsync(string blobId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(string blobId, CancellationToken cancellationToken = default)
     {
         try
         {
-            // Check if object exists first
-            var exists = await ExistsAsync(blobId, cancellationToken);
-
-            if (!exists)
-            {
-                return false;
-            }
-
+            // S3 deletes are idempotent: deleting a missing object succeeds,
+            // so no HEAD probe is needed before the DELETE.
             var deleteRequest = new DeleteObjectRequest
             {
                 BucketName = _bucketName,
@@ -210,37 +204,10 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
             };
 
             await _s3Client.DeleteObjectAsync(deleteRequest, cancellationToken);
-
-            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to delete object {ObjectKey}", blobId);
-            throw;
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> ExistsAsync(string blobId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var request = new GetObjectMetadataRequest
-            {
-                BucketName = _bucketName,
-                Key = blobId
-            };
-
-            await _s3Client.GetObjectMetadataAsync(request, cancellationToken);
-            return true;
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to check existence of object {ObjectKey}", blobId);
             throw;
         }
     }
@@ -462,7 +429,7 @@ public class S3BlobStorageHandler : IBlobStorageHandler, IDisposable
     }
 
     private static bool IsExpectedUploadFailure(Exception exception, CancellationToken cancellationToken)
-        => exception is ContentTooLargeException or ContentLengthMismatchException or RequestBodyTruncatedException
+        => exception is ContentTooLargeException or ContentLengthMismatchException
             || exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
 
     /// <summary>

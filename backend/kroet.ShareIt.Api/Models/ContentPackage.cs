@@ -1,4 +1,4 @@
-﻿namespace kroet.ShareIt.Api.Models;
+namespace kroet.ShareIt.Api.Models;
 
 /// <summary>
 /// Represents a package of content items (files and/or text) that can be shared together.
@@ -26,16 +26,11 @@ public record ContentPackage
     /// Optional identifier of the user who created the package.
     /// </summary>
     public Guid? UserId { get; init; }
-    
-    /// <summary>
-    /// Whether the package is private (owner-only access).
-    /// </summary>
-    public bool? IsPrivate { get; init; }
 
     /// <summary>
     /// List of contents in this package.
     /// </summary>
-    public List<ExternalContent>? Contents { get; set; }
+    public List<Content>? Contents { get; set; }
 
     /// <summary>
     /// Maximum number of times this package can be accessed.
@@ -55,10 +50,10 @@ public record ContentPackage
     public DateTimeOffset? LastAccessAt { get; init; }
 
     /// <summary>
-    /// Optional expiration timestamp for the package.
-    /// Null means no expiration.
+    /// Expiration timestamp. Every package expires: an abandoned upload is
+    /// swept by the cleanup service without any draft/ready state machine.
     /// </summary>
-    public DateTimeOffset? ExpiresAt { get; init; }
+    public required DateTimeOffset ExpiresAt { get; init; }
 
     /// <summary>
     /// Gets the remaining number of accesses available.
@@ -76,6 +71,5 @@ public record ContentPackage
     /// <summary>
     /// Whether the package has expired.
     /// </summary>
-    public bool IsExpired(DateTimeOffset currentTime) => ExpiresAt.HasValue && currentTime >= ExpiresAt.Value;
+    public bool IsExpired(DateTimeOffset currentTime) => currentTime >= ExpiresAt;
 }
-

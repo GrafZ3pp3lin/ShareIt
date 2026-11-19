@@ -23,7 +23,7 @@ public class StorageHandlerTests
     }
 
     [TestMethod]
-    public async Task StoreContentAsync_UploadsBlobAndStoresExternalContent()
+    public async Task StoreContentAsync_UploadsBlobAndStoresContentWithUrl()
     {
         var subject = CreateSubject();
         var content = CreateContent();
@@ -36,7 +36,7 @@ public class StorageHandlerTests
         await subject.StoreContentAsync(content, stream);
 
         await _contentStorageHandler.Received(1).StoreContentAsync(
-            Arg.Is<ExternalContent>(stored =>
+            Arg.Is<ContentModel>(stored =>
                 stored.Id == content.Id &&
                 stored.PackageId == content.PackageId &&
                 stored.ContentType == content.ContentType &&
@@ -57,7 +57,7 @@ public class StorageHandlerTests
             .UploadAsync(stream, "application/octet-stream", content.Id.ToString(), Arg.Any<CancellationToken>())
             .Returns("blob://content");
         _contentStorageHandler
-            .StoreContentAsync(Arg.Any<ExternalContent>(), Arg.Any<CancellationToken>())
+            .StoreContentAsync(Arg.Any<ContentModel>(), Arg.Any<CancellationToken>())
             .Returns(_ => throw new InvalidOperationException("storage failed"));
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => subject.StoreContentAsync(content, stream));
@@ -76,11 +76,11 @@ public class StorageHandlerTests
             .UploadAsync(stream, "application/octet-stream", content.Id.ToString(), Arg.Any<CancellationToken>())
             .Returns("blob://content");
         _contentStorageHandler
-            .StoreContentAsync(Arg.Any<ExternalContent>(), Arg.Any<CancellationToken>())
+            .StoreContentAsync(Arg.Any<ContentModel>(), Arg.Any<CancellationToken>())
             .Returns(_ => throw new InvalidOperationException("metadata failed"));
         _blobStorageHandler
             .DeleteAsync("blob://content", Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<bool>(new InvalidOperationException("cleanup failed")));
+            .Returns(Task.FromException(new InvalidOperationException("cleanup failed")));
 
         var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => subject.StoreContentAsync(content, stream));
@@ -103,14 +103,14 @@ public class StorageHandlerTests
             .UploadAsync(stream, "application/octet-stream", content.Id.ToString(), Arg.Any<CancellationToken>())
             .Returns("blob://content");
         _contentStorageHandler
-            .StoreContentAsync(Arg.Any<ExternalContent>(), Arg.Any<CancellationToken>())
+            .StoreContentAsync(Arg.Any<ContentModel>(), Arg.Any<CancellationToken>())
             .Returns(_ => throw new OperationCanceledException(requestCancellation.Token));
         _blobStorageHandler
             .DeleteAsync("blob://content", Arg.Any<CancellationToken>())
             .Returns(call =>
             {
                 cleanupToken = call.Arg<CancellationToken>();
-                return true;
+                return Task.CompletedTask;
             });
 
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(
@@ -118,34 +118,6 @@ public class StorageHandlerTests
 
         Assert.IsFalse(cleanupToken.IsCancellationRequested);
         await _blobStorageHandler.Received(1).DeleteAsync("blob://content", cleanupToken);
-    }
-
-    [TestMethod]
-    public async Task DeleteContentAsync_ReturnsFalseWhenContentDoesNotExist()
-    {
-        var subject = CreateSubject();
-        var contentId = Guid.NewGuid();
-
-        var deleted = await subject.DeleteContentAsync(contentId);
-
-        Assert.IsFalse(deleted);
-        await _blobStorageHandler.DidNotReceiveWithAnyArgs().DeleteAsync(default!, default);
-        await _contentStorageHandler.DidNotReceiveWithAnyArgs().GetPendingBlobDeletionsAsync(default, default);
-    }
-
-    [TestMethod]
-    public async Task DeleteContentAsync_DeletesMetadataWithoutDrainingQueue()
-    {
-        var subject = CreateSubject();
-        var contentId = Guid.NewGuid();
-        _contentStorageHandler.DeleteContentAsync(contentId, Arg.Any<CancellationToken>()).Returns(true);
-
-        var deleted = await subject.DeleteContentAsync(contentId);
-
-        Assert.IsTrue(deleted);
-        await _contentStorageHandler.Received(1).DeleteContentAsync(contentId, Arg.Any<CancellationToken>());
-        await _contentStorageHandler.DidNotReceiveWithAnyArgs().GetPendingBlobDeletionsAsync(default, default);
-        await _blobStorageHandler.DidNotReceiveWithAnyArgs().DeleteAsync(default!, default);
     }
 
     [TestMethod]
@@ -191,7 +163,7 @@ public class StorageHandlerTests
             .Returns(["blob://unavailable"]);
         _blobStorageHandler
             .DeleteAsync("blob://unavailable", Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<bool>(new InvalidOperationException("S3 unavailable")));
+            .Returns(Task.FromException(new InvalidOperationException("S3 unavailable")));
 
         var completed = await subject.ProcessPendingBlobDeletionsAsync();
 
@@ -206,37 +178,11 @@ public class StorageHandlerTests
         _contentStorageHandler
             .GetPendingBlobDeletionsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(["blob://already-missing"]);
-        _blobStorageHandler.DeleteAsync("blob://already-missing", Arg.Any<CancellationToken>()).Returns(false);
 
         var completed = await subject.ProcessPendingBlobDeletionsAsync();
 
         Assert.AreEqual(1, completed);
         await _contentStorageHandler.Received(1).CompleteBlobDeletionAsync("blob://already-missing", Arg.Any<CancellationToken>());
-    }
-
-    [TestMethod]
-    public async Task RetrieveContentAsync_ThrowsWhenContentDoesNotExist()
-    {
-        var subject = CreateSubject();
-        var contentId = Guid.NewGuid();
-
-        await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => subject.RetrieveContentAsync(contentId));
-    }
-
-    [TestMethod]
-    public async Task RetrieveContentAsync_ReturnsDownloadedStream()
-    {
-        var subject = CreateSubject();
-        var contentId = Guid.NewGuid();
-        var externalContent = new ExternalContent(CreateContent(contentId), "blob://content");
-        var expectedStream = new MemoryStream([1, 2, 3]);
-
-        _contentStorageHandler.GetContentAsync(contentId, Arg.Any<CancellationToken>()).Returns(externalContent);
-        _blobStorageHandler.DownloadAsync("blob://content", Arg.Any<CancellationToken>()).Returns(Task.FromResult<Stream>(expectedStream));
-
-        var result = await subject.RetrieveContentAsync(contentId);
-
-        Assert.AreSame(expectedStream, result);
     }
 
     private static ContentModel CreateContent(Guid? contentId = null)

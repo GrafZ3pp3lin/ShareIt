@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { toBase64Url } from './base64url.ts';
 import { idBytes, normalizeId } from './ids.ts';
-import { deriveKeyBits, itemAad, metaAad, metaKey, itemKey, packageSalt, unlockProof } from './keys.ts';
+import { deriveKeyBits, frameAad, metaKey, itemKey, packageSalt, unlockProof } from './keys.ts';
 
 const PACKAGE_ID = '0192f3a0-1111-7000-8000-000000000000';
 const OTHER_PACKAGE_ID = '0192f3a0-2222-7000-8000-000000000000';
@@ -71,16 +71,22 @@ describe('unlockProof', () => {
 });
 
 describe('AAD helpers', () => {
-  it('bind the normalized package and item with distinct role prefixes', () => {
+  it('bind the normalized package, item, role, chunk index and final flag', () => {
     const decoder = new TextDecoder();
 
-    expect(decoder.decode(itemAad(PACKAGE_ID, ITEM_ID))).toBe(`shareit/item:1:${PACKAGE_ID}:${ITEM_ID}`);
-    expect(decoder.decode(metaAad(PACKAGE_ID, ITEM_ID))).toBe(`shareit/meta:1:${PACKAGE_ID}:${ITEM_ID}`);
-    expect(metaAad(PACKAGE_ID, ITEM_ID)).not.toEqual(itemAad(PACKAGE_ID, ITEM_ID));
+    expect(decoder.decode(frameAad(PACKAGE_ID, ITEM_ID, 'item', 2, true))).toBe(
+      `shareit/frame:1:${PACKAGE_ID}:${ITEM_ID}:item:2:1`
+    );
+    expect(decoder.decode(frameAad(PACKAGE_ID, ITEM_ID, 'meta', 0, false))).toBe(
+      `shareit/frame:1:${PACKAGE_ID}:${ITEM_ID}:meta:0:0`
+    );
+    expect(frameAad(PACKAGE_ID, ITEM_ID, 'meta', 0, true)).not.toEqual(frameAad(PACKAGE_ID, ITEM_ID, 'item', 0, true));
   });
 
   it('normalize both ids, so formatting cannot change the AAD', () => {
-    expect(itemAad(PACKAGE_ID.toUpperCase(), ITEM_ID.replace(/-/g, ''))).toEqual(itemAad(PACKAGE_ID, ITEM_ID));
+    expect(frameAad(PACKAGE_ID.toUpperCase(), ITEM_ID.replace(/-/g, ''), 'item', 0, true)).toEqual(
+      frameAad(PACKAGE_ID, ITEM_ID, 'item', 0, true)
+    );
   });
 });
 

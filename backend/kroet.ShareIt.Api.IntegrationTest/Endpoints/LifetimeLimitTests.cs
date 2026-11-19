@@ -7,8 +7,8 @@ namespace kroet.ShareIt.Api.IntegrationTest.Endpoints;
 /// Endpoint-level tests for the per-identity package lifetime limits.
 ///
 /// Limits are tightened so both identities can be exercised quickly:
-/// guests may live for at most 6 hours (and must set a lifetime at all),
-/// authenticated users for at most 24 hours (or omit it entirely).
+/// guests may live for at most 6 hours, authenticated users for at most 24.
+/// Every package must set a lifetime: there is no "no expiration" option.
 /// </summary>
 [TestClass]
 public sealed class LifetimeLimitTests : ShareItApiTestBase
@@ -58,7 +58,7 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Lifetime required", problem.Title);
+        Assert.AreEqual("Invalid lifetime", problem.Title);
     }
 
     [TestMethod]
@@ -91,11 +91,13 @@ public sealed class LifetimeLimitTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task CreatePackage_AuthenticatedWithoutLifetime_IsAccepted()
+    public async Task CreatePackage_AuthenticatedWithoutLifetime_Returns400()
     {
-        // Omitting the lifetime (no expiration) remains allowed for authenticated users.
+        // Every package must set a lifetime so abandoned uploads always expire.
         var response = await SendCreatePackageAsync(userId: Guid.NewGuid(), timeToLiveHours: null);
 
-        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ReadProblemAsync(response);
+        Assert.AreEqual("Invalid lifetime", problem.Title);
     }
 }

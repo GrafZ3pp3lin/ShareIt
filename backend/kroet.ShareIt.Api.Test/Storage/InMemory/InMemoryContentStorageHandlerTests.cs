@@ -20,8 +20,7 @@ public class InMemoryContentStorageHandlerTests
 
         await _handler.StorePackageAsync(package);
         await _handler.StoreContentAsync(firstContent);
-        await _handler.StoreContentsAsync([secondContent]);
-        await _handler.StoreContentsAsync([]);
+        await _handler.StoreContentAsync(secondContent);
 
         var withContent = await _handler.GetPackageAsync(package.Id, includeContent: true);
         var withoutContent = await _handler.GetPackageAsync(package.Id, includeContent: false);
@@ -35,35 +34,7 @@ public class InMemoryContentStorageHandlerTests
     }
 
     [TestMethod]
-    public async Task GetPackagesAsync_ReturnsRequestedPackagesWithAndWithoutContent()
-    {
-        var firstPackage = CreatePackage();
-        var secondPackage = CreatePackage();
-        var firstContent = CreateContent(firstPackage.Id);
-        var secondContent = CreateContent(secondPackage.Id);
-
-        await _handler.StorePackageAsync(firstPackage);
-        await _handler.StorePackageAsync(secondPackage);
-        await _handler.StoreContentsAsync([firstContent, secondContent]);
-
-        var withContent = await _handler.GetPackagesAsync(
-            [firstPackage.Id, secondPackage.Id],
-            includeContent: true);
-        var withoutContent = await _handler.GetPackagesAsync(
-            [firstPackage.Id, secondPackage.Id],
-            includeContent: false);
-        var empty = await _handler.GetPackagesAsync([]);
-
-        Assert.HasCount(2, withContent);
-        Assert.HasCount(1, withContent.Single(package => package.Id == firstPackage.Id).Contents!);
-        Assert.HasCount(1, withContent.Single(package => package.Id == secondPackage.Id).Contents!);
-        Assert.HasCount(2, withoutContent);
-        Assert.IsTrue(withoutContent.All(package => package.Contents is null));
-        Assert.IsEmpty(empty);
-    }
-
-    [TestMethod]
-    public async Task GetContentAndGetContents_ReturnMatchingItems()
+    public async Task GetContentAsync_ReturnsMatchingItems()
     {
         var firstContent = CreateContent(Guid.NewGuid());
         var secondContent = CreateContent(Guid.NewGuid());
@@ -73,13 +44,9 @@ public class InMemoryContentStorageHandlerTests
 
         var found = await _handler.GetContentAsync(firstContent.Id);
         var missing = await _handler.GetContentAsync(Guid.NewGuid());
-        var contents = await _handler.GetContentsAsync([firstContent.Id, secondContent.Id]);
-        var empty = await _handler.GetContentsAsync([]);
 
         Assert.AreSame(firstContent, found);
         Assert.IsNull(missing);
-        Assert.HasCount(2, contents);
-        Assert.IsEmpty(empty);
     }
 
     [TestMethod]
@@ -117,7 +84,7 @@ public class InMemoryContentStorageHandlerTests
     }
 
     [TestMethod]
-    public async Task DeleteAndExistsMethods_HandleExistingAndMissingItems()
+    public async Task DeleteMethods_HandleExistingAndMissingItems()
     {
         var firstPackage = CreatePackage();
         var secondPackage = CreatePackage();
@@ -126,17 +93,8 @@ public class InMemoryContentStorageHandlerTests
 
         await _handler.StorePackageAsync(firstPackage);
         await _handler.StorePackageAsync(secondPackage);
-        await _handler.StoreContentsAsync([firstContent, secondContent]);
-
-        Assert.IsTrue(await _handler.ExistsPackageAsync(firstPackage.Id));
-        Assert.IsFalse(await _handler.ExistsPackageAsync(Guid.NewGuid()));
-        Assert.IsTrue(await _handler.ExistsContentAsync(firstContent.Id));
-        Assert.IsFalse(await _handler.ExistsContentAsync(Guid.NewGuid()));
-
-        Assert.IsTrue(await _handler.DeleteContentAsync(firstContent.Id));
-        Assert.IsFalse(await _handler.DeleteContentAsync(firstContent.Id));
-        Assert.AreEqual(1, await _handler.DeleteContentsAsync([secondContent.Id]));
-        Assert.AreEqual(0, await _handler.DeleteContentsAsync([]));
+        await _handler.StoreContentAsync(firstContent);
+        await _handler.StoreContentAsync(secondContent);
 
         Assert.IsTrue(await _handler.DeletePackageAsync(firstPackage.Id));
         Assert.IsFalse(await _handler.DeletePackageAsync(firstPackage.Id));
@@ -155,8 +113,8 @@ public class InMemoryContentStorageHandlerTests
 
         Assert.IsTrue(await _handler.DeletePackageAsync(package.Id));
 
-        Assert.IsFalse(await _handler.ExistsPackageAsync(package.Id));
-        Assert.IsFalse(await _handler.ExistsContentAsync(content.Id));
+        Assert.IsNull(await _handler.GetContentAsync(content.Id));
+        Assert.IsNull(await _handler.GetPackageShellAsync(package.Id));
     }
 
     [TestMethod]
@@ -172,16 +130,18 @@ public class InMemoryContentStorageHandlerTests
         await _handler.StorePackageAsync(keptPackage);
         await _handler.StorePackageAsync(deletedPackage);
         await _handler.StorePackageAsync(alsoDeletedPackage);
-        await _handler.StoreContentsAsync([keptContent, deletedContent, alsoDeletedContent]);
+        await _handler.StoreContentAsync(keptContent);
+        await _handler.StoreContentAsync(deletedContent);
+        await _handler.StoreContentAsync(alsoDeletedContent);
 
         var removed = await _handler.DeletePackagesAsync(
             [deletedPackage.Id, alsoDeletedPackage.Id, Guid.NewGuid()]);
 
         Assert.AreEqual(2, removed);
-        Assert.IsTrue(await _handler.ExistsContentAsync(keptContent.Id));
-        Assert.IsTrue(await _handler.ExistsPackageAsync(keptPackage.Id));
-        Assert.IsFalse(await _handler.ExistsContentAsync(deletedContent.Id));
-        Assert.IsFalse(await _handler.ExistsContentAsync(alsoDeletedContent.Id));
+        Assert.IsNotNull(await _handler.GetContentAsync(keptContent.Id));
+        Assert.IsNotNull(await _handler.GetPackageShellAsync(keptPackage.Id));
+        Assert.IsNull(await _handler.GetContentAsync(deletedContent.Id));
+        Assert.IsNull(await _handler.GetContentAsync(alsoDeletedContent.Id));
 
         var kept = await _handler.GetPackageAsync(keptPackage.Id);
         Assert.IsNotNull(kept);
@@ -201,8 +161,8 @@ public class InMemoryContentStorageHandlerTests
         var removed = await _handler.DeletePackagesAsync([Guid.NewGuid()]);
 
         Assert.AreEqual(0, removed);
-        Assert.IsTrue(await _handler.ExistsPackageAsync(package.Id));
-        Assert.IsTrue(await _handler.ExistsContentAsync(content.Id));
+        Assert.IsNotNull(await _handler.GetPackageShellAsync(package.Id));
+        Assert.IsNotNull(await _handler.GetContentAsync(content.Id));
     }
 
     [TestMethod]
@@ -288,15 +248,12 @@ public class InMemoryContentStorageHandlerTests
     {
         var firstPackage = CreatePackage();
         var secondPackage = CreatePackage();
-        var sharedUrl = "blob://shared";
+        const string sharedUrl = "blob://shared";
 
         await _handler.StorePackageAsync(firstPackage);
         await _handler.StorePackageAsync(secondPackage);
-        await _handler.StoreContentsAsync(
-        [
-            new ExternalContent(CreateContent(firstPackage.Id), sharedUrl),
-            new ExternalContent(CreateContent(secondPackage.Id), sharedUrl)
-        ]);
+        await _handler.StoreContentAsync(CreateContent(firstPackage.Id) with { Url = sharedUrl });
+        await _handler.StoreContentAsync(CreateContent(secondPackage.Id) with { Url = sharedUrl });
 
         Assert.AreEqual(2, await _handler.DeletePackagesAsync([firstPackage.Id, secondPackage.Id]));
 
@@ -383,24 +340,23 @@ public class InMemoryContentStorageHandlerTests
             UnlockVerifier = unlockVerifier,
             MaxAccessCount = maxAccessCount,
             CurrentAccessCount = currentAccessCount,
-            ExpiresAt = expiresAt
+            ExpiresAt = expiresAt ?? DateTimeOffset.Parse("2099-01-01T00:00:00+00:00")
         };
     }
 
-    private static ExternalContent CreateContent(Guid packageId)
+    private static ContentModel CreateContent(Guid packageId)
     {
-        return new ExternalContent(
-            new ContentModel
-            {
-                Id = Guid.NewGuid(),
-                PackageId = packageId,
-                ContentType = ContentType.File,
-                CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
-                Size = 3,
-                UserId = Guid.NewGuid(),
-                Meta = "bWV0YQ"
-            },
-            $"blob://{Guid.NewGuid()}");
+        return new ContentModel
+        {
+            Id = Guid.NewGuid(),
+            PackageId = packageId,
+            ContentType = ContentType.File,
+            CreatedAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00"),
+            Size = 3,
+            UserId = Guid.NewGuid(),
+            Meta = "bWV0YQ",
+            Url = $"blob://{Guid.NewGuid()}"
+        };
     }
 
     /// <summary>

@@ -40,7 +40,7 @@ export function LinkRow(props: LinkRowProps) {
   };
 
   const expiryLabel = () => {
-    const span = props.item.ExpiresAt ? relativeSpan(props.item.ExpiresAt) : null;
+    const span = relativeSpan(props.item.ExpiresAt);
     if (!span) {
       return null;
     }

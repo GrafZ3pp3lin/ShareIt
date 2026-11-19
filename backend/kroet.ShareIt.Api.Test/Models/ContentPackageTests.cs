@@ -32,6 +32,17 @@ public class ContentPackageTests
         Assert.IsTrue(expired);
     }
 
+    [TestMethod]
+    public void IsExpired_ReturnsFalseBeforeExpiry()
+    {
+        var expiresAt = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00");
+        var package = CreatePackage(expiresAt: expiresAt);
+
+        var expired = package.IsExpired(expiresAt.AddMinutes(-1));
+
+        Assert.IsFalse(expired);
+    }
+
     private static ContentPackage CreatePackage(
         int? maxAccessCount = null,
         int currentAccessCount = 0,
@@ -43,7 +54,7 @@ public class ContentPackageTests
             CreatedAt = DateTimeOffset.Parse("2026-03-05T10:00:00+00:00"),
             MaxAccessCount = maxAccessCount,
             CurrentAccessCount = currentAccessCount,
-            ExpiresAt = expiresAt
+            ExpiresAt = expiresAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00")
         };
     }
 }

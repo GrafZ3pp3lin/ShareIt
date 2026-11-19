@@ -1,7 +1,5 @@
 using System.Buffers.Text;
-using System.Globalization;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Text;
@@ -29,8 +27,8 @@ public abstract class ShareItApiTestBase
     protected static readonly byte[] SmallItemBytes = "hello world"u8.ToArray();
 
     /// <summary>
-    /// Larger than the default 16 KB inline payload limit, so this item is
-    /// always served through the package access session.
+    /// A multi-megabyte item, exercised through the access-session download
+    /// path (nothing is ever inlined).
     /// </summary>
     protected static readonly byte[] LargeItemBytes = new byte[20 * 1024];
 
@@ -100,21 +98,20 @@ public abstract class ShareItApiTestBase
     }
 
     /// <summary>
-    /// JSON body for POST /package.
+    /// JSON body for POST /package. Every package carries a lifetime; there is
+    /// no "no expiration" option anymore.
     /// </summary>
     protected static CreatePackageRequest PackageRequest(
         Guid? packageId = null,
         int? maxAccessCount = 1,
-        bool? isPrivate = null,
-        int? timeToLiveHours = 1,
+        int timeToLiveHours = 1,
         string? unlockVerifier = null)
         => new()
         {
             Id = packageId ?? Guid.NewGuid(),
             UnlockVerifier = unlockVerifier,
             MaxAccessCount = maxAccessCount,
-            TimeToLiveHours = timeToLiveHours,
-            IsPrivate = isPrivate
+            TimeToLiveHours = timeToLiveHours
         };
 
     /// <summary>
@@ -123,13 +120,12 @@ public abstract class ShareItApiTestBase
     protected Task<HttpResponseMessage> SendCreatePackageAsync(
         Guid? packageId = null,
         int? maxAccessCount = 1,
-        bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
         => SendCreatePackageAsync(
-            PackageRequest(packageId, maxAccessCount, isPrivate, timeToLiveHours, unlockVerifier),
+            PackageRequest(packageId, maxAccessCount, timeToLiveHours ?? 0, unlockVerifier),
             guestId,
             userId);
 
@@ -153,14 +149,13 @@ public abstract class ShareItApiTestBase
     protected async Task<Guid> CreatePackageAsync(
         Guid? packageId = null,
         int? maxAccessCount = 1,
-        bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
     {
         var response = await SendCreatePackageAsync(
-            packageId, maxAccessCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
+            packageId, maxAccessCount, guestId, userId, timeToLiveHours, unlockVerifier);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
@@ -178,14 +173,13 @@ public abstract class ShareItApiTestBase
         Guid? packageId = null,
         Guid? contentId = null,
         int? maxAccessCount = 1,
-        bool? isPrivate = null,
         Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
     {
         var createdPackageId = await CreatePackageAsync(
-            packageId, maxAccessCount, isPrivate, guestId, userId, timeToLiveHours, unlockVerifier);
+            packageId, maxAccessCount, guestId, userId, timeToLiveHours, unlockVerifier);
 
         var createdContentId = contentId ?? Guid.NewGuid();
         var response = await SendUploadItemAsync(
@@ -197,12 +191,14 @@ public abstract class ShareItApiTestBase
     }
 
     /// <summary>
-    /// Sends a multipart POST of one item to an existing package. The parts are
-    /// ordered as the endpoint requires: metadata first, then the payload.
+    /// Sends a raw binary PUT of one item to an existing package: the payload
+    /// is the body, the metadata travels in the <c>X-Content-Kind</c> and
+    /// <c>X-Content-Meta</c> headers and <c>Content-Length</c> is the declared
+    /// size.
     /// </summary>
     /// <param name="declaredSize">
-    /// Value of the <c>Size</c> part. Defaults to the actual payload length;
-    /// pass a different value to exercise size validation.
+    /// Value of the <c>Content-Length</c> header. Defaults to the actual
+    /// payload length; pass a different value to exercise size validation.
     /// </param>
     protected async Task<HttpResponseMessage> SendUploadItemAsync(
         Guid packageId,
@@ -215,63 +211,52 @@ public abstract class ShareItApiTestBase
         string fileName = "item.bin",
         long? declaredSize = null)
     {
-        using var form = new MultipartFormDataContent
+        var content = new ByteArrayContent(bytes)
         {
-            { new StringContent((contentId ?? Guid.NewGuid()).ToString()), "Id" },
-            { new StringContent(kind), "Kind" },
-            { new StringContent(meta), "Meta" },
+            Headers =
             {
-                new StringContent((declaredSize ?? bytes.Length).ToString(CultureInfo.InvariantCulture)),
-                "Size"
+                ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream")
             }
         };
+        if (declaredSize.HasValue)
+        {
+            content.Headers.ContentLength = declaredSize;
+        }
 
-        var fileContent = new ByteArrayContent(bytes);
-        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        form.Add(fileContent, "File", fileName);
-
-        return await SendRawUploadAsync(packageId, form, guestId, userId);
+        return await SendRawUploadAsync(
+            packageId, contentId ?? Guid.NewGuid(), kind, meta, content, guestId, userId);
     }
 
     /// <summary>
-    /// Sends an arbitrary multipart body to the upload endpoint so tests can
-    /// exercise part order, missing parts and extra parts.
+    /// Sends an arbitrary body to the upload endpoint with explicit metadata
+    /// headers, so tests can exercise missing/wrong content types and sizes.
     /// </summary>
     protected async Task<HttpResponseMessage> SendRawUploadAsync(
         Guid packageId,
+        Guid contentId,
+        string? kind,
+        string? meta,
         HttpContent content,
         Guid? guestId = null,
         Guid? userId = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/content/package/{packageId}/upload")
+        var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/v1/content/package/{packageId}/content/{contentId}")
         {
             Content = content
         };
+        if (kind is not null)
+        {
+            request.Headers.Add("X-Content-Kind", kind);
+        }
+        if (meta is not null)
+        {
+            request.Headers.Add("X-Content-Meta", meta);
+        }
         AddIdentity(request, guestId, userId);
 
-        var response = await Client.SendAsync(request);
-        // The endpoint may stop reading after the metadata parts, in which case
-        // the request content must not be reused or disposed twice.
-        return response;
-    }
-
-    /// <summary>
-    /// Sends a multipart POST with no content part to exercise validation.
-    /// </summary>
-    protected async Task<HttpResponseMessage> SendUploadWithoutFileAsync(
-        Guid packageId,
-        Guid? guestId = null,
-        Guid? userId = null)
-    {
-        using var form = new MultipartFormDataContent
-        {
-            { new StringContent(Guid.NewGuid().ToString()), "Id" },
-            { new StringContent("file"), "Kind" },
-            { new StringContent("bWV0YQ"), "Meta" },
-            { new StringContent("1"), "Size" }
-        };
-
-        return await SendRawUploadAsync(packageId, form, guestId, userId);
+        return await Client.SendAsync(request);
     }
 
     protected Task<HttpResponseMessage> GetPackageAsync(
@@ -450,8 +435,9 @@ public abstract class ShareItApiTestBase
             ? titleElement.GetString() ?? string.Empty
             : string.Empty;
         var detail = root.TryGetProperty("detail", out var detailElement) ? detailElement.GetString() : null;
+        var type = root.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
 
-        return new ProblemBody(status, title, detail);
+        return new ProblemBody(status, title, detail, type);
     }
 
     /// <summary>
@@ -466,7 +452,5 @@ public abstract class ShareItApiTestBase
     protected static string Verifier(byte fill = 1)
         => Base64Url.EncodeToString(Enumerable.Repeat(fill, 32).ToArray());
 
-    protected static byte[] DecodePayload(string payload) => Base64Url.DecodeFromChars(payload);
-
-    protected sealed record ProblemBody(int Status, string Title, string? Detail);
+    protected sealed record ProblemBody(int Status, string Title, string? Detail, string? Type);
 }

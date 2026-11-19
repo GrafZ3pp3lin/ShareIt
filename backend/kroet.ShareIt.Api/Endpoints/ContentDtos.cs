@@ -5,7 +5,7 @@ namespace kroet.ShareIt.Api.Content.Dtos;
 
 /// <summary>
 /// Request to create a new content package. Content items are uploaded
-/// separately through <c>POST /package/{id}/upload</c>.
+/// separately through <c>PUT /package/{id}/content/{contentId}</c>.
 /// </summary>
 public class CreatePackageRequest
 {
@@ -29,58 +29,12 @@ public class CreatePackageRequest
     public int? MaxAccessCount { get; set; }
 
     /// <summary>
-    /// Time to live in hours. Package will expire after this duration.
-    /// Null means no expiration.
-    /// </summary>
-    public int? TimeToLiveHours { get; set; }
-
-    /// <summary>
-    /// Whether the package is private (owner-only access).
-    /// </summary>
-    public bool? IsPrivate { get; set; }
-}
-
-/// <summary>
-/// Multipart request adding a single item (text or file bytes) to a package.
-/// This type only describes the wire format for OpenAPI; the endpoint reads the
-/// parts directly from <c>HttpContext.Request.Body</c> so the payload is never
-/// buffered. Parts must be sent in order: <c>Id</c>, <c>Kind</c>, <c>Meta</c>,
-/// <c>Size</c>, then <c>File</c> last.
-/// </summary>
-public class UploadContentRequest
-{
-    /// <summary>
-    /// Client-generated item ID. Stable across retries; a repeated upload with
-    /// the same id and the same kind, size and meta is idempotent for the
-    /// package owner. Reusing the id for different content is a conflict.
-    /// </summary>
-    public Guid? Id { get; set; }
-
-    /// <summary>
-    /// Item kind: <c>text</c> or <c>file</c>.
-    /// </summary>
-    public string? Kind { get; set; }
-
-    /// <summary>
-    /// Base64url per-item metadata blob (<c>{name, mime}</c>), sealed
-    /// client-side when the package is protected. Never parsed by the server.
-    /// </summary>
-    public string? Meta { get; set; }
-
-    /// <summary>
-    /// Exact number of bytes in the <c>File</c> part. Used for the upload
-    /// limit check and the idempotency fingerprint; the server verifies it
-    /// against the bytes it actually read.
+    /// Time to live in hours (1..MaxLifetimeHours). The package expires after
+    /// this duration, so abandoned uploads are always swept by cleanup.
     /// </summary>
     [Required]
-    [Range(0, long.MaxValue)]
-    public required long Size { get; set; }
-
-    /// <summary>
-    /// Content bytes: sealed or plaintext, for both text and file items. Must
-    /// be the last part of the request.
-    /// </summary>
-    public IFormFile? File { get; set; }
+    [Range(1, int.MaxValue)]
+    public required int TimeToLiveHours { get; set; }
 }
 
 /// <summary>
@@ -117,6 +71,11 @@ public class UploadLimitsResponse
     /// Maximum number of times an authenticated package may be accessed.
     /// </summary>
     public required int AuthenticatedMaxAccessCount { get; init; }
+
+    /// <summary>
+    /// Maximum number of items a package may contain. Applies to every caller.
+    /// </summary>
+    public required int MaxItemsPerPackage { get; init; }
 }
 
 /// <summary>
@@ -155,9 +114,14 @@ public class ContentPackageResponse
     public int? RemainingAccesses { get; init; }
 
     /// <summary>
-    /// Optional expiration timestamp.
+    /// Expiration timestamp. Every package has one.
     /// </summary>
-    public DateTimeOffset? ExpiresAt { get; init; }
+    public required DateTimeOffset ExpiresAt { get; init; }
+
+    /// <summary>
+    /// Whether the package requires an unlock proof (has a password).
+    /// </summary>
+    public required bool IsProtected { get; init; }
 
     public static ContentPackageResponse FromPackage(ContentPackage package)
     {
@@ -170,6 +134,7 @@ public class ContentPackageResponse
             CurrentAccessCount = package.CurrentAccessCount,
             RemainingAccesses = package.RemainingAccesses,
             ExpiresAt = package.ExpiresAt,
+            IsProtected = package.UnlockVerifier is not null,
         };
     }
 }
@@ -191,7 +156,7 @@ public class ContentPackageDetailsResponse
 
     /// <summary>
     /// Short-lived grant for re-fetching this package and downloading its
-    /// non-inline items. Send it in the <c>X-Access-Session</c> header.
+    /// items. Send it in the <c>X-Access-Session</c> header.
     /// </summary>
     public required AccessSessionResponse AccessSession { get; init; }
 }
@@ -234,16 +199,9 @@ public class ContentItemInPackage
     public required long Size { get; init; }
 
     /// <summary>
-    /// Base64url per-item metadata blob. Always inline and outside the payload
-    /// budget — it is tiny and needed to render names.
+    /// Base64url per-item metadata blob. Tiny and needed to render names.
     /// </summary>
     public string? Meta { get; init; }
-
-    /// <summary>
-    /// Base64url content bytes for items small enough to inline. Items without
-    /// a payload are downloaded through the package's access session.
-    /// </summary>
-    public string? Payload { get; init; }
 }
 
 /// <summary>
@@ -279,9 +237,9 @@ public class ContentPackageListItem
     public required DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>
-    /// Optional expiration timestamp.
+    /// Expiration timestamp. Every package has one.
     /// </summary>
-    public DateTimeOffset? ExpiresAt { get; init; }
+    public required DateTimeOffset ExpiresAt { get; init; }
 
     /// <summary>
     /// Number of items in the package.

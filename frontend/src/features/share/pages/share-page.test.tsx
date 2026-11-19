@@ -5,14 +5,15 @@ import type { ContentPackageDetailsResponse } from '../../../client/model/index.
 import { I18nProvider } from '../../../i18n/i18n.tsx';
 import { toBase64Url } from '../../../shared/crypto/base64url.ts';
 import { utf8 } from '../../../shared/crypto/bytes.ts';
-import { deriveKeyBits, itemAad, itemKey, packageSalt } from '../../../shared/crypto/keys.ts';
+import { seal } from '../../../shared/crypto/framed.ts';
+import { deriveKeyBits, frameAad, itemKey, packageSalt } from '../../../shared/crypto/keys.ts';
 import { buildMeta, encodeMeta } from '../../../shared/crypto/meta.ts';
-import { seal } from '../../../shared/crypto/sealed.ts';
 import { SharePage } from './share-page.tsx';
 
 const api = vi.hoisted(() => ({
   getPackageDetails: vi.fn(),
-  downloadContent: vi.fn()
+  downloadContent: vi.fn(),
+  downloadContentResponse: vi.fn()
 }));
 
 vi.mock('../../../shared/api/content.ts', () => api);
@@ -35,7 +36,8 @@ const packageDetails = (): ContentPackageDetailsResponse => ({
     MaxAccessCount: 1,
     CurrentAccessCount: 1,
     RemainingAccesses: 0,
-    ExpiresAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString()
+    ExpiresAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
+    IsProtected: false
   },
   AccessSession: {
     Token: 'session-1',
@@ -46,15 +48,13 @@ const packageDetails = (): ContentPackageDetailsResponse => ({
       Id: TEXT_ID,
       Kind: 'text',
       Size: 5,
-      Meta: toBase64Url(buildMeta({ name: null, mime: 'text/plain' })),
-      Payload: toBase64Url(utf8('hello'))
+      Meta: toBase64Url(buildMeta({ name: null, mime: 'text/plain' }))
     },
     {
       Id: FILE_ID,
       Kind: 'file',
       Size: 12,
-      Meta: toBase64Url(buildMeta({ name: 'photo.jpg', mime: 'image/jpeg' })),
-      Payload: toBase64Url(utf8('file-bytes'))
+      Meta: toBase64Url(buildMeta({ name: 'photo.jpg', mime: 'image/jpeg' }))
     }
   ]
 });
@@ -63,28 +63,49 @@ const protectedPackageDetails = async (passphrase: string): Promise<ContentPacka
   const key = await deriveKeyBits(passphrase, await packageSalt(PACKAGE_ID));
   const textMeta = await encodeMeta({ name: null, mime: 'text/plain' }, key, PACKAGE_ID, TEXT_ID);
   const fileMeta = await encodeMeta({ name: 'secret.pdf', mime: 'application/pdf' }, key, PACKAGE_ID, FILE_ID);
-  const textBytes = await seal(await itemKey(key, TEXT_ID), utf8('sealed hello'), itemAad(PACKAGE_ID, TEXT_ID));
-  const fileBytes = await seal(await itemKey(key, FILE_ID), utf8('file-bytes'), itemAad(PACKAGE_ID, FILE_ID));
+  const textBytes = await seal(
+    await itemKey(key, TEXT_ID),
+    utf8('sealed hello'),
+    frameAad(PACKAGE_ID, TEXT_ID, 'item', 0, true)
+  );
+  const fileBytes = await seal(
+    await itemKey(key, FILE_ID),
+    utf8('file-bytes'),
+    frameAad(PACKAGE_ID, FILE_ID, 'item', 0, true)
+  );
 
   return {
     ...packageDetails(),
+    Package: {
+      ...packageDetails().Package,
+      IsProtected: true
+    },
     Items: [
       {
         Id: TEXT_ID,
         Kind: 'text',
         Size: textBytes.length,
-        Meta: toBase64Url(textMeta),
-        Payload: toBase64Url(textBytes)
+        Meta: toBase64Url(textMeta)
       },
       {
         Id: FILE_ID,
         Kind: 'file',
         Size: fileBytes.length,
-        Meta: toBase64Url(fileMeta),
-        Payload: toBase64Url(fileBytes)
+        Meta: toBase64Url(fileMeta)
       }
     ]
   };
+};
+
+const mockDownloads = (bytes: Record<string, Uint8Array<ArrayBuffer>>) => {
+  api.downloadContent.mockImplementation(async (_packageId: string, contentId: string) => ({
+    data: new Blob([bytes[contentId] ?? utf8('missing')]),
+    status: 200
+  }));
+  api.downloadContentResponse.mockImplementation(async (_packageId: string, contentId: string) => ({
+    response: new Response(bytes[contentId] ?? utf8('missing')),
+    status: 200
+  }));
 };
 
 const renderPage = () =>
@@ -107,7 +128,9 @@ describe('<SharePage />', () => {
     window.sessionStorage.clear();
     api.getPackageDetails.mockReset();
     api.downloadContent.mockReset();
+    api.downloadContentResponse.mockReset();
     api.getPackageDetails.mockResolvedValue({ status: 200, data: packageDetails() });
+    mockDownloads({ [TEXT_ID]: utf8('hello'), [FILE_ID]: utf8('file-bytes') });
   });
 
   afterEach(() => {
@@ -137,11 +160,19 @@ describe('<SharePage />', () => {
     await screen.findByText('hello');
     expect(screen.getByText('photo.jpg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'download' })).toBeInTheDocument();
+    expect(api.downloadContent).toHaveBeenCalledWith(PACKAGE_ID, TEXT_ID, 'session-1');
   });
 
   it('opens sealed metadata and content with the package key', async () => {
     const passphrase = 'correct horse battery';
-    api.getPackageDetails.mockResolvedValueOnce({ status: 200, data: await protectedPackageDetails(passphrase) });
+    const details = await protectedPackageDetails(passphrase);
+    api.getPackageDetails.mockResolvedValueOnce({ status: 200, data: details });
+    mockDownloads({
+      [TEXT_ID]: await (async () => {
+        const key = await deriveKeyBits(passphrase, await packageSalt(PACKAGE_ID));
+        return seal(await itemKey(key, TEXT_ID), utf8('sealed hello'), frameAad(PACKAGE_ID, TEXT_ID, 'item', 0, true));
+      })()
+    });
 
     renderPage();
     await submitPassphrase(passphrase);
@@ -219,15 +250,7 @@ describe('<SharePage />', () => {
   });
 
   it('leaves the document for the gone screen when a lazy download returns 410', async () => {
-    const details = packageDetails();
-    api.getPackageDetails.mockResolvedValueOnce({
-      status: 200,
-      data: {
-        ...details,
-        Items: details.Items.map((item) => (item.Id === FILE_ID ? { ...item, Payload: null } : item))
-      }
-    });
-    api.downloadContent.mockResolvedValueOnce({
+    api.downloadContentResponse.mockResolvedValueOnce({
       status: 410,
       error: { title: 'Package expired', detail: 'This package has expired' }
     });

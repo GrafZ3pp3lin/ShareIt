@@ -32,13 +32,10 @@ public sealed class GlobalExceptionHandlingTests : ShareItApiTestBase
             => inner.CheckHealthAsync(cancellationToken);
 
         public Task<Stream> DownloadAsync(string blobId, CancellationToken cancellationToken = default)
-            => throw new FileNotFoundException($"Blob with ID {blobId} not found.");
+            => throw new InvalidOperationException($"Simulated failure reading blob {blobId}.");
 
-        public Task<bool> DeleteAsync(string blobId, CancellationToken cancellationToken = default)
+        public Task DeleteAsync(string blobId, CancellationToken cancellationToken = default)
             => inner.DeleteAsync(blobId, cancellationToken);
-
-        public Task<bool> ExistsAsync(string blobId, CancellationToken cancellationToken = default)
-            => inner.ExistsAsync(blobId, cancellationToken);
     }
 
     protected override Action<IServiceCollection> ConfigureTestServices => services =>
@@ -50,17 +47,21 @@ public sealed class GlobalExceptionHandlingTests : ShareItApiTestBase
     };
 
     [TestMethod]
-    public async Task GetPackage_WithFailingBlobRead_ReturnsProblemDetails500()
+    public async Task DownloadContent_WithFailingBlobRead_ReturnsProblemDetails500()
     {
         var guestId = Guid.NewGuid();
 
-        // Create a package with a text item, then read it back; reading the
-        // text blob is what fails (an inlined payload must not leak the exception).
         var packageId = await CreatePackageAsync(guestId: guestId);
         var upload = await SendUploadItemAsync(packageId, "text", "some text"u8.ToArray(), guestId: guestId);
         Assert.AreEqual(HttpStatusCode.OK, upload.StatusCode);
 
-        var response = await GetPackageAsync(packageId, guestId);
+        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var item = details.Items.Single();
+
+        var response = await SendDownloadAsync(
+            DownloadUrl(packageId, item.Id),
+            details.AccessSession.Token,
+            guestId);
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.AreEqual(HttpStatusCode.InternalServerError, response.StatusCode, body);

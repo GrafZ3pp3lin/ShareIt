@@ -8,10 +8,13 @@ import type {
   ContentPackageDetailsResponse,
   ContentPackageListResponse,
   ContentPackageResponse,
+  CreatePackageHeaders,
   CreatePackageRequest,
+  DownloadContentHeaders,
+  GetPackageHeaders,
   ListPackagesParams,
   ProblemDetails,
-  UploadContentRequest,
+  UploadContentHeaders,
   UploadLimitsResponse
 } from './model';
 
@@ -79,6 +82,16 @@ export type createPackageResponse409 = {
   status: 409;
 };
 
+export type createPackageResponse410 = {
+  data: ProblemDetails;
+  status: 410;
+};
+
+export type createPackageResponse429 = {
+  data: ProblemDetails;
+  status: 429;
+};
+
 export type createPackageResponse500 = {
   data: ProblemDetails;
   status: 500;
@@ -91,6 +104,8 @@ export type createPackageResponseError = (
   | createPackageResponse400
   | createPackageResponse401
   | createPackageResponse409
+  | createPackageResponse410
+  | createPackageResponse429
   | createPackageResponse500
 ) & {
   headers: Headers;
@@ -104,6 +119,7 @@ export const getCreatePackageUrl = () => {
 
 export const createPackage = async (
   createPackageRequest: CreatePackageRequest,
+  headers?: CreatePackageHeaders,
   options?: Parameters<typeof customFetch>[1]
 ): Promise<createPackageResponse> => {
   const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
@@ -123,102 +139,116 @@ export const createPackage = async (
   return customFetch<createPackageResponse>(getCreatePackageUrl(), {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    headers: { 'Content-Type': 'application/json', ...headers, ...getHeaders(options?.headers) },
     body: JSON.stringify(createPackageRequest)
   });
 };
 
-export type uploadFileToPackageResponse200 = {
+export type uploadContentResponse200 = {
   data: ContentPackageResponse;
   status: 200;
 };
 
-export type uploadFileToPackageResponse400 = {
+export type uploadContentResponse400 = {
   data: ProblemDetails;
   status: 400;
 };
 
-export type uploadFileToPackageResponse401 = {
+export type uploadContentResponse401 = {
   data: ProblemDetails;
   status: 401;
 };
 
-export type uploadFileToPackageResponse403 = {
+export type uploadContentResponse403 = {
   data: ProblemDetails;
   status: 403;
 };
 
-export type uploadFileToPackageResponse404 = {
+export type uploadContentResponse404 = {
   data: ProblemDetails;
   status: 404;
 };
 
-export type uploadFileToPackageResponse409 = {
+export type uploadContentResponse409 = {
   data: ProblemDetails;
   status: 409;
 };
 
-export type uploadFileToPackageResponse413 = {
+export type uploadContentResponse410 = {
+  data: ProblemDetails;
+  status: 410;
+};
+
+export type uploadContentResponse413 = {
   data: ProblemDetails;
   status: 413;
 };
 
-export type uploadFileToPackageResponse415 = {
+export type uploadContentResponse415 = {
   data: ProblemDetails;
   status: 415;
 };
 
-export type uploadFileToPackageResponse500 = {
+export type uploadContentResponse429 = {
+  data: ProblemDetails;
+  status: 429;
+};
+
+export type uploadContentResponse500 = {
   data: ProblemDetails;
   status: 500;
 };
 
-export type uploadFileToPackageResponseSuccess = uploadFileToPackageResponse200 & {
+export type uploadContentResponseSuccess = uploadContentResponse200 & {
   headers: Headers;
 };
-export type uploadFileToPackageResponseError = (
-  | uploadFileToPackageResponse400
-  | uploadFileToPackageResponse401
-  | uploadFileToPackageResponse403
-  | uploadFileToPackageResponse404
-  | uploadFileToPackageResponse409
-  | uploadFileToPackageResponse413
-  | uploadFileToPackageResponse415
-  | uploadFileToPackageResponse500
+export type uploadContentResponseError = (
+  | uploadContentResponse400
+  | uploadContentResponse401
+  | uploadContentResponse403
+  | uploadContentResponse404
+  | uploadContentResponse409
+  | uploadContentResponse410
+  | uploadContentResponse413
+  | uploadContentResponse415
+  | uploadContentResponse429
+  | uploadContentResponse500
 ) & {
   headers: Headers;
 };
 
-export type uploadFileToPackageResponse = uploadFileToPackageResponseSuccess | uploadFileToPackageResponseError;
+export type uploadContentResponse = uploadContentResponseSuccess | uploadContentResponseError;
 
-export const getUploadFileToPackageUrl = (packageId: string) => {
-  return `/api/v1/content/package/${packageId}/upload`;
+export const getUploadContentUrl = (packageId: string, contentId: string) => {
+  return `/api/v1/content/package/${packageId}/content/${contentId}`;
 };
 
-export const uploadFileToPackage = async (
+export const uploadContent = async (
   packageId: string,
-  uploadContentRequest: UploadContentRequest,
+  contentId: string,
+  uploadContentBody: Blob,
+  headers: UploadContentHeaders,
   options?: Parameters<typeof customFetch>[1]
-): Promise<uploadFileToPackageResponse> => {
-  const formData = new FormData();
-  if (uploadContentRequest.Id !== undefined && uploadContentRequest.Id !== null) {
-    formData.append(`Id`, uploadContentRequest.Id);
-  }
-  if (uploadContentRequest.Kind !== undefined && uploadContentRequest.Kind !== null) {
-    formData.append(`Kind`, uploadContentRequest.Kind);
-  }
-  if (uploadContentRequest.Meta !== undefined && uploadContentRequest.Meta !== null) {
-    formData.append(`Meta`, uploadContentRequest.Meta);
-  }
-  formData.append(`Size`, uploadContentRequest.Size.toString());
-  if (uploadContentRequest.File !== undefined && uploadContentRequest.File !== null) {
-    formData.append(`File`, uploadContentRequest.File);
-  }
-
-  return customFetch<uploadFileToPackageResponse>(getUploadFileToPackageUrl(packageId), {
+): Promise<uploadContentResponse> => {
+  const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string])
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<uploadContentResponse>(getUploadContentUrl(packageId, contentId), {
     ...options,
-    method: 'POST',
-    body: formData
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream', ...headers, ...getHeaders(options?.headers) },
+    body: uploadContentBody
   });
 };
 
@@ -279,11 +309,27 @@ export const getGetPackageUrl = (packageId: string) => {
 
 export const getPackage = async (
   packageId: string,
+  headers?: GetPackageHeaders,
   options?: Parameters<typeof customFetch>[1]
 ): Promise<getPackageResponse> => {
+  const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string])
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<getPackageResponse>(getGetPackageUrl(packageId), {
     ...options,
-    method: 'GET'
+    method: 'GET',
+    headers: { ...headers, ...getHeaders(options?.headers) }
   });
 };
 
@@ -345,11 +391,27 @@ export const getDownloadContentUrl = (packageId: string, contentId: string) => {
 export const downloadContent = async (
   packageId: string,
   contentId: string,
+  headers?: DownloadContentHeaders,
   options?: Parameters<typeof customFetch>[1]
 ): Promise<downloadContentResponse> => {
+  const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string])
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<downloadContentResponse>(getDownloadContentUrl(packageId, contentId), {
     ...options,
-    method: 'GET'
+    method: 'GET',
+    headers: { ...headers, ...getHeaders(options?.headers) }
   });
 };
 

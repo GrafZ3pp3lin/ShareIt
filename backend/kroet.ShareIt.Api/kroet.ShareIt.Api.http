@@ -1,6 +1,51 @@
 @kroet.ShareIt.Api_HostAddress = http://localhost:5155
 
-GET {{kroet.ShareIt.Api_HostAddress}}/weatherforecast/
+# Upload size limits for the current identity
+GET {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package/limits
 Accept: application/json
 
 ###
+
+# Create a package. Id is client-supplied; TimeToLiveHours is required.
+POST {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package
+Content-Type: application/json
+X-Guest-ID: {{$guid}}
+
+{
+  "Id": "{{$guid}}",
+  "UnlockVerifier": null,
+  "MaxAccessCount": 1,
+  "TimeToLiveHours": 6
+}
+
+###
+
+# Upload one item as a raw binary PUT. X-Content-Kind is "text" or "file";
+# X-Content-Meta is the base64url per-item metadata blob.
+PUT {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package/<packageId>/content/<contentId>
+Content-Type: application/octet-stream
+X-Content-Kind: text
+X-Content-Meta: eyJuYW1lIjpudWxsLCJtaW1lIjoidGV4dC9wbGFpbiJ9
+X-Guest-ID: {{$guid}}
+
+hello world
+
+###
+
+# Open a package. The proof header is required for protected packages; the
+# session header reuses an existing access instead of claiming another.
+GET {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package/<packageId>
+X-Guest-ID: {{$guid}}
+
+###
+
+# Download an item with the package's access session.
+GET {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package/<packageId>/content/<contentId>/download
+X-Access-Session: <sessionToken>
+X-Guest-ID: {{$guid}}
+
+###
+
+# The owner's links list (authenticated only).
+GET {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/packages
+Accept: application/json

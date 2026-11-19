@@ -1,5 +1,6 @@
 using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage;
+using ContentModel = kroet.ShareIt.Api.Models.Content;
 
 namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 
@@ -14,11 +15,8 @@ internal sealed class DelegatingContentStorageHandler(
     public Task StorePackageAsync(ContentPackage package, CancellationToken cancellationToken = default)
         => inner.StorePackageAsync(package, cancellationToken);
 
-    public Task StoreContentAsync(ExternalContent content, CancellationToken cancellationToken = default)
+    public Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default)
         => inner.StoreContentAsync(content, cancellationToken);
-
-    public Task StoreContentsAsync(IEnumerable<ExternalContent> contents, CancellationToken cancellationToken = default)
-        => inner.StoreContentsAsync(contents, cancellationToken);
 
     public Task<ContentPackage?> GetPackageAsync(
         Guid packageId,
@@ -36,19 +34,8 @@ internal sealed class DelegatingContentStorageHandler(
         CancellationToken cancellationToken = default)
         => inner.ListPackagesAsync(userId, cursor, take, cancellationToken);
 
-    public Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(
-        IEnumerable<Guid> packageIds,
-        bool includeContent = true,
-        CancellationToken cancellationToken = default)
-        => inner.GetPackagesAsync(packageIds, includeContent, cancellationToken);
-
-    public Task<ExternalContent?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
+    public Task<ContentModel?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
         => inner.GetContentAsync(contentId, cancellationToken);
-
-    public Task<IReadOnlyList<ExternalContent>> GetContentsAsync(
-        IEnumerable<Guid> contentIds,
-        CancellationToken cancellationToken = default)
-        => inner.GetContentsAsync(contentIds, cancellationToken);
 
     public Task<AccessSessionClaimResult> CreateAccessSessionAsync(
         AccessSession session,
@@ -72,18 +59,6 @@ internal sealed class DelegatingContentStorageHandler(
         => deletePackage is null
             ? inner.DeletePackageAsync(packageId, cancellationToken)
             : deletePackage(packageId, cancellationToken);
-
-    public Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
-        => inner.DeleteContentsAsync(contentIds, cancellationToken);
-
-    public Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-        => inner.DeleteContentAsync(contentId, cancellationToken);
-
-    public Task<bool> ExistsPackageAsync(Guid packageId, CancellationToken cancellationToken = default)
-        => inner.ExistsPackageAsync(packageId, cancellationToken);
-
-    public Task<bool> ExistsContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-        => inner.ExistsContentAsync(contentId, cancellationToken);
 
     public Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
         => inner.GetPackagesToDeleteAsync(cancellationToken);

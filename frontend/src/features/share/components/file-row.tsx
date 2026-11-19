@@ -1,7 +1,8 @@
 import { Show, createSignal } from 'solid-js';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import { getErrorMessage } from '../../../shared/api/error-message.ts';
-import type { PackageKey } from '../../../shared/crypto/keys.ts';
+import { frameDecryptStream } from '../../../shared/crypto/framed.ts';
+import { frameAad, itemKey, type PackageKey } from '../../../shared/crypto/keys.ts';
 import { formatBytes } from '../../../shared/format-bytes.ts';
 import { fetchShareItem, readShareItem } from '../read-item.ts';
 import { saveBlob, saveResponseStream } from '../save-file.ts';
@@ -19,7 +20,10 @@ type FileRowProps = {
 /**
  * One file row. The content is fetched lazily on click through the package's
  * access session, so reading the page does not spend every item's download.
- * Errors stay with the row and can be retried without re-unlocking the package.
+ * Encrypted and unencrypted items share one path: the response body streams
+ * through the frame decryptor (when protected) into a writable destination,
+ * or into a Blob where no destination exists. Errors stay with the row and
+ * can be retried without re-unlocking the package.
  */
 export function FileRow(props: FileRowProps) {
   const { t } = useI18n();
@@ -35,35 +39,51 @@ export function FileRow(props: FileRowProps) {
 
     try {
       const token = props.accessSessionToken;
-
-      // An unencrypted item that is not inlined can be written straight to
-      // disk. Encrypted bytes have to be buffered until the envelope is opened.
-      if (!props.packageKey && props.item.Payload == null && token) {
-        const streamed = await saveResponseStream(props.item.displayName, () =>
-          fetchShareItem(props.packageId, props.item, token, props.onAccessExpired, props.onPackageGone)
-        );
-
-        if (streamed !== 'unsupported') {
-          if (current === request) {
-            setState('idle');
-          }
-          return;
-        }
-      }
-
-      const bytes = await readShareItem(
-        props.packageId,
-        props.item,
-        props.packageKey,
-        props.accessSessionToken,
-        props.onAccessExpired,
-        props.onPackageGone
-      );
-      if (current !== request) {
+      if (!token) {
+        props.onAccessExpired?.(undefined);
+        setError(t('share.downloadFailedBody'));
+        setState('error');
         return;
       }
-      saveBlob(bytes, props.item.displayName, props.item.mime);
-      setState('idle');
+
+      // Protected packages decrypt frame by frame while streaming; the
+      // buffered Blob fallback collects the same plaintext chunks. The key is
+      // derived lazily when the first frame arrives so showSaveFilePicker can
+      // open synchronously during the click handler.
+      const packageKey = props.packageKey;
+      const decrypt = packageKey
+        ? frameDecryptStream(
+            () => itemKey(packageKey, props.item.Id),
+            (chunkIndex, isFinal) => frameAad(props.packageId, props.item.Id, 'item', chunkIndex, isFinal)
+          )
+        : undefined;
+
+      const saved = await saveResponseStream(
+        props.item.displayName,
+        props.item.mime,
+        () => fetchShareItem(props.packageId, props.item, token, props.onAccessExpired, props.onPackageGone),
+        decrypt
+      );
+
+      if (saved === 'unsupported') {
+        // The response had no readable body: buffer and save the bytes.
+        const bytes = await readShareItem(
+          props.packageId,
+          props.item,
+          props.packageKey,
+          token,
+          props.onAccessExpired,
+          props.onPackageGone
+        );
+        if (current !== request) {
+          return;
+        }
+        saveBlob(bytes, props.item.displayName, props.item.mime);
+      }
+
+      if (current === request) {
+        setState('idle');
+      }
     } catch (err) {
       if (current !== request) {
         return;

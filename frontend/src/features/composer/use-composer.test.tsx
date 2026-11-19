@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../../i18n/i18n.tsx';
 import { fromBase64Url } from '../../shared/crypto/base64url.ts';
-import { isSealed } from '../../shared/crypto/sealed.ts';
+import { isFramed } from '../../shared/crypto/framed.ts';
 import { createComposer } from './use-composer.ts';
 
 const api = vi.hoisted(() => ({
@@ -47,13 +47,14 @@ const renderComposer = () => {
 
 const makeFile = (name = 'photo.jpg') => new File(['file-bytes'], name, { type: 'image/jpeg' });
 
-const uploadLimits = (anonymousFileLimitBytes: number) => ({
+const uploadLimits = (anonymousFileLimitBytes: number, maxItemsPerPackage = 100) => ({
   AnonymousFileLimitBytes: anonymousFileLimitBytes,
   AuthenticatedFileLimitBytes: 10 * 1024 * 1024,
   AnonymousMaxLifetimeHours: 6,
   AuthenticatedMaxLifetimeHours: 720,
   AnonymousMaxAccessCount: 1,
-  AuthenticatedMaxAccessCount: 10
+  AuthenticatedMaxAccessCount: 10,
+  MaxItemsPerPackage: maxItemsPerPackage
 });
 
 const addedItem = (callIndex: number) => api.uploadItem.mock.calls[callIndex][1];
@@ -93,7 +94,7 @@ describe('createComposer', () => {
     expect(addedItem(1).Kind).toBe('file');
     expect(decodedMeta(addedItem(0).Meta)).toEqual({ name: null, mime: 'text/plain' });
     expect(decodedMeta(addedItem(1).Meta)).toEqual({ name: 'photo.jpg', mime: 'image/jpeg' });
-    expect(isSealed(fromBase64Url(addedItem(0).Meta))).toBe(false);
+    expect(isFramed(fromBase64Url(addedItem(0).Meta))).toBe(false);
 
     expect(request.UnlockVerifier).toBeNull();
     expect(composer.result()?.link).toBe(`${window.location.origin}/s/${request.Id}`);
@@ -115,10 +116,10 @@ describe('createComposer', () => {
     expect(fromBase64Url(request.UnlockVerifier)).toHaveLength(32);
 
     const item = addedItem(0);
-    expect(isSealed(fromBase64Url(item.Meta))).toBe(true);
+    expect(isFramed(fromBase64Url(item.Meta))).toBe(true);
 
     const fileBytes = new Uint8Array(await item.File.arrayBuffer());
-    expect(isSealed(fileBytes)).toBe(true);
+    expect(isFramed(fileBytes)).toBe(true);
 
     expect(composer.result()?.passphrase).toBe(passphrase);
     expect(composer.result()?.linkWithPassphrase).toBe(
@@ -152,7 +153,24 @@ describe('createComposer', () => {
     expect(retriedItem[1].Id).toBe(firstItemId);
   });
 
-  it('reuses the sealed metadata when retrying an encrypted upload', async () => {
+  it('keeps a retryable partial when the upload call rejects', async () => {
+    api.uploadItem.mockRejectedValueOnce(new Error('DPoP proof failed'));
+
+    const composer = renderComposer();
+    composer.setText('hello');
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.error()).toContain('DPoP proof failed'));
+    expect(composer.partial()).not.toBeNull();
+    expect(composer.stage()).toBe('form');
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+    expect(api.createPackage).toHaveBeenCalledTimes(1);
+  });
+
+  it('derives identical metadata on retry because sealing is deterministic', async () => {
     api.uploadItem.mockResolvedValueOnce({ error: { title: 'lost response' } });
 
     const composer = renderComposer();
@@ -163,12 +181,13 @@ describe('createComposer', () => {
     composer.handleSubmit();
     await vi.waitFor(() => expect(composer.error()).toContain('lost response'));
     const firstMeta = addedItem(0).Meta;
-    expect(isSealed(fromBase64Url(firstMeta))).toBe(true);
+    expect(isFramed(fromBase64Url(firstMeta))).toBe(true);
 
     composer.handleSubmit();
     await vi.waitFor(() => expect(composer.stage()).toBe('result'));
 
-    // A fresh IV would make the server treat the retry as a conflicting item.
+    // Deterministic framing and IVs make the retry byte-for-byte identical,
+    // so the server sees the same idempotency fingerprint.
     expect(addedItem(1).Meta).toBe(firstMeta);
   });
 
@@ -292,6 +311,41 @@ describe('createComposer', () => {
     expect(composer.error()).toContain('2 MB');
   });
 
+  it('skips files beyond the item limit and reports them', async () => {
+    api.getUploadLimits.mockResolvedValue({ data: uploadLimits(1024 * 1024, 2) });
+    const composer = renderComposer();
+    await vi.waitFor(() => expect(composer.limitLabel()).toBe('limit 1 MB/file'));
+
+    composer.setText('hello');
+    flush();
+    composer.addFiles([makeFile('a.jpg'), makeFile('b.jpg'), makeFile('c.jpg')]);
+    flush();
+
+    // The text block occupies one item slot, so only one file fits.
+    expect(composer.files().map((file) => file.name)).toEqual(['a.jpg']);
+    expect(composer.error()).toContain('b.jpg');
+    expect(composer.error()).toContain('2');
+  });
+
+  it('rejects a submit that exceeds the item limit once limits arrive', async () => {
+    api.getUploadLimits.mockResolvedValue({ data: uploadLimits(1024 * 1024, 2) });
+    const composer = renderComposer();
+
+    // Added before the limits request resolves, so the add-time check cannot
+    // run yet. Submit must re-check instead of uploading the files.
+    composer.addFiles([makeFile('a.jpg'), makeFile('b.jpg'), makeFile('c.jpg')]);
+    flush();
+    await vi.waitFor(() => expect(composer.limitLabel()).toBe('limit 1 MB/file'));
+    expect(composer.files()).toHaveLength(3);
+
+    composer.handleSubmit();
+
+    await vi.waitFor(() => expect(composer.error()).toContain('2'));
+    expect(composer.error()).toContain('3');
+    expect(api.createPackage).not.toHaveBeenCalled();
+    expect(api.uploadItem).not.toHaveBeenCalled();
+  });
+
   it('hands the original file to the upload without copying it when unencrypted', async () => {
     const composer = renderComposer();
     const file = makeFile();
@@ -321,6 +375,15 @@ describe('createComposer', () => {
     expect(composer.error()).toContain('1 MB');
     expect(api.createPackage).not.toHaveBeenCalled();
     expect(api.uploadItem).not.toHaveBeenCalled();
+  });
+
+  it('skips zero-byte files with a clear message', () => {
+    const composer = renderComposer();
+    composer.addFiles([new File([], 'empty.txt', { type: 'text/plain' }), makeFile('ok.jpg')]);
+    flush();
+
+    expect(composer.files().map((file) => file.name)).toEqual(['ok.jpg']);
+    expect(composer.error()).toContain('empty.txt');
   });
 
   it('deduplicates the same file selected repeatedly', () => {
@@ -376,26 +439,6 @@ describe('createComposer', () => {
     expect(composer.partial()).not.toBeNull();
     expect(composer.submitting()).toBe(false);
     expect(composer.stage()).toBe('form');
-  });
-
-  it('shows the link anyway after a failed upload', async () => {
-    api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
-    const composer = renderComposer();
-    composer.setText('hello');
-    composer.setPasswordMode('generate');
-    flush();
-    const passphrase = composer.generatedPassphrase();
-
-    composer.handleSubmit();
-    await vi.waitFor(() => expect(composer.error()).toContain('storage unreachable'));
-
-    composer.showLinkAnyway();
-    flush();
-
-    expect(composer.stage()).toBe('result');
-    expect(composer.result()?.incomplete).toBe(true);
-    expect(composer.result()?.passphrase).toBe(passphrase);
-    expect(composer.result()?.linkWithPassphrase).toContain('#s=');
   });
 
   it('resets all form state after a successful upload', async () => {

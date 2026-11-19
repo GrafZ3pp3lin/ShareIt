@@ -40,23 +40,15 @@ public class InMemoryBlobStorageHandler : IBlobStorageHandler
         return Task.FromResult<Stream>(new MemoryStream(blob.Data));
     }
 
-    public Task<bool> DeleteAsync(string blobId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(string blobId, CancellationToken cancellationToken = default)
     {
         if (!Guid.TryParse(blobId, out var id))
         {
-            return Task.FromResult(false);
+            // A missing or malformed object already satisfies the deletion goal.
+            return Task.CompletedTask;
         }
 
-        return Task.FromResult(_blobs.Remove(id));
-    }
-
-    public Task<bool> ExistsAsync(string blobId, CancellationToken cancellationToken = default)
-    {
-        if (!Guid.TryParse(blobId, out var id))
-        {
-            return Task.FromResult(false);
-        }
-
-        return Task.FromResult(_blobs.ContainsKey(id));
+        _blobs.Remove(id);
+        return Task.CompletedTask;
     }
 }

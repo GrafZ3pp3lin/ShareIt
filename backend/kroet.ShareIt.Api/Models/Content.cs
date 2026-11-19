@@ -77,4 +77,10 @@ public record Content
     /// server never parses or interprets it.
     /// </summary>
     public string? Meta { get; init; }
+
+    /// <summary>
+    /// Object key of the stored bytes in the blob store. Set once the blob
+    /// upload has succeeded, before the metadata row is written.
+    /// </summary>
+    public string? Url { get; init; }
 }

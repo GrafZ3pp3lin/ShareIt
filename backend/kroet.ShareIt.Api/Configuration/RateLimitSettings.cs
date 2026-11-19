@@ -34,6 +34,20 @@ public sealed class RateLimitSettings : ISettings
     /// </summary>
     public int DownloadWindowMinutes { get; set; } = 1;
 
+    /// <summary>
+    /// Upload requests allowed per remote IP window. Uploads are one item per
+    /// request, so this bounds bulk-upload abuse without throttling normal
+    /// use.
+    /// Default: 120.
+    /// </summary>
+    public int UploadPermitLimit { get; set; } = 120;
+
+    /// <summary>
+    /// Length of the upload rate-limit window in minutes.
+    /// Default: 1.
+    /// </summary>
+    public int UploadWindowMinutes { get; set; } = 1;
+
     public static string SectionName => "RateLimitSettings";
 }
 
@@ -51,6 +65,11 @@ public static class RateLimitPolicies
     /// Limits downloads, partitioned on remote IP.
     /// </summary>
     public const string Download = "download";
+
+    /// <summary>
+    /// Limits uploads, partitioned on remote IP.
+    /// </summary>
+    public const string Upload = "upload";
 }
 
 public sealed class RateLimitSettingsValidator : AbstractValidator<RateLimitSettings>
@@ -64,5 +83,9 @@ public sealed class RateLimitSettingsValidator : AbstractValidator<RateLimitSett
         RuleFor(x => x.DownloadPermitLimit).GreaterThan(0);
 
         RuleFor(x => x.DownloadWindowMinutes).GreaterThan(0);
+
+        RuleFor(x => x.UploadPermitLimit).GreaterThan(0);
+
+        RuleFor(x => x.UploadWindowMinutes).GreaterThan(0);
     }
 }

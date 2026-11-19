@@ -39,13 +39,16 @@ export const dict = {
     submitting: 'Creating link…',
     cancel: 'Cancel',
     retry: 'retry upload',
-    showLinkAnyway: 'show link anyway',
     progress: {
+      label: 'Upload progress',
       encrypting: 'Encrypting {{ current }}/{{ total }}: {{ fileName }}',
       uploading: 'Uploading {{ current }}/{{ total }}: {{ percent }}%'
     },
     errors: {
-      fileTooLarge: 'Skipped: {{ names }} exceed the {{ limit }} per-file limit.'
+      emptyFile: 'Skipped: {{ names }} — empty files cannot be uploaded.',
+      fileTooLarge: 'Skipped: {{ names }} exceed the {{ limit }} per-file limit.',
+      tooManyItems: 'This package can hold at most {{ limit }} items; {{ count }} are selected.',
+      tooManyItemsSkipped: 'Skipped: {{ names }} — this package can hold at most {{ limit }} items.'
     },
     how: {
       title: 'how it works',
@@ -112,7 +115,6 @@ export const dict = {
       'Anyone holding this single link has everything. For maximum security, send the link and the passphrase through different channels — link by mail, passphrase by chat, for example.',
     noPasswordNote:
       "Anyone with the link can open it — including you, and that counts as an access. Don't test it on yourself.",
-    incomplete: 'Some items did not finish uploading — the link may be missing them.',
     another: 'Upload another'
   },
   errors: {

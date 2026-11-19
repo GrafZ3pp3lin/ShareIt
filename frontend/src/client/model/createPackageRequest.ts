@@ -16,10 +16,9 @@ export interface CreatePackageRequest {
    */
   MaxAccessCount?: number | string | null;
   /**
-   * @nullable
+   * @minimum 1
+   * @maximum 2147483647
    * @pattern ^-?(?:0|[1-9]\d*)$
    */
-  TimeToLiveHours?: number | string | null;
-  /** @nullable */
-  IsPrivate?: boolean | null;
+  TimeToLiveHours: number | string;
 }

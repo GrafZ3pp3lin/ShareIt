@@ -64,10 +64,6 @@ export function ResultPanel(props: ResultPanelProps) {
         <div class="caution">{t('result.noPasswordNote')}</div>
       </Show>
 
-      <Show when={props.result.incomplete}>
-        <div class="caution">{t('result.incomplete')}</div>
-      </Show>
-
       <button type="button" class="btn btn-secondary w-fit" onClick={props.onReset}>
         {t('result.another')}
       </button>

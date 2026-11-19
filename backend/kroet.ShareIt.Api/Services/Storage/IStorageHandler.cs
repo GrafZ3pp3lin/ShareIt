@@ -1,27 +1,20 @@
 ﻿namespace kroet.ShareIt.Api.Services.Storage;
 
 /// <summary>
-/// High-level storage handler that manages content storage with automatic routing
-/// to the content store (embedded) or Blob Storage based on size.
+/// High-level storage handler that coordinates content metadata and blob
+/// storage. The request path never waits for S3 deletion; the cleanup service
+/// drains the durable queue.
 /// </summary>
 public interface IStorageHandler
 {
     /// <summary>
-    /// Stores content with its associated data stream.
+    /// Stores content with its associated data stream. Blob upload and
+    /// metadata insert are compensated on failure so no partial item remains.
     /// </summary>
     /// <param name="content">The content metadata to store.</param>
     /// <param name="dataStream">The data stream to store</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task StoreContentAsync(Api.Models.Content content, Stream dataStream, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Deletes content metadata and durably queues its blob for deletion. The
-    /// durable queue is drained later by the cleanup service.
-    /// </summary>
-    /// <param name="contentId">The unique content identifier.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True if deleted, false if not found.</returns>
-    Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes package metadata and durably queues its blobs for deletion. The
@@ -41,13 +34,4 @@ public interface IStorageHandler
     /// </summary>
     /// <returns>The number of queue entries completed.</returns>
     Task<int> ProcessPendingBlobDeletionsAsync(CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Retrieves the content data stream.
-    /// </summary>
-    /// <param name="contentId">The unique content identifier.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Stream containing the content data.</returns>
-    /// <exception cref="KeyNotFoundException">Thrown when content is not found.</exception>
-    Task<Stream> RetrieveContentAsync(Guid contentId, CancellationToken cancellationToken = default);
 }

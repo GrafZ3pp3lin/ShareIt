@@ -1,6 +1,6 @@
 import { utf8 } from './bytes.ts';
-import { metaAad, metaKey, type PackageKey } from './keys.ts';
-import { isSealed, open, seal } from './sealed.ts';
+import { isFramed, openFrames, seal } from './framed.ts';
+import { frameAad, metaKey, type PackageKey } from './keys.ts';
 
 /**
  * The per-item metadata carried in `contents.meta`: the name (null for text)
@@ -50,7 +50,9 @@ export const encodeMeta = async (
     return plain;
   }
 
-  return seal(await metaKey(key, itemId), plain, metaAad(packageId, itemId));
+  // Metadata is always a single final frame. Sealing is deterministic, so a
+  // retry produces the identical blob and stays idempotent.
+  return seal(await metaKey(key, itemId), plain, frameAad(packageId, itemId, 'meta', 0, true));
 };
 
 export const decodeMeta = async (
@@ -59,14 +61,22 @@ export const decodeMeta = async (
   packageId: string,
   itemId: string
 ): Promise<ItemMeta | null> => {
-  if (!isSealed(bytes)) {
+  if (!key) {
+    if (isFramed(bytes)) {
+      throw new Error('A package key is required to open sealed metadata');
+    }
+
     return parseMeta(bytes);
   }
 
-  if (!key) {
-    throw new Error('A package key is required to open sealed metadata');
+  // A key is only retained for protected packages, so plaintext metadata is
+  // an integrity error rather than a valid unprotected payload.
+  if (!isFramed(bytes)) {
+    throw new Error('Metadata is not framed');
   }
 
-  const plain = await open(await metaKey(key, itemId), bytes, metaAad(packageId, itemId));
+  const plain = await openFrames(await metaKey(key, itemId), bytes, (chunkIndex, isFinal) =>
+    frameAad(packageId, itemId, 'meta', chunkIndex, isFinal)
+  );
   return parseMeta(plain);
 };

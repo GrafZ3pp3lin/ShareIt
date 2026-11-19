@@ -38,7 +38,8 @@ describe('getUploadLimits', () => {
         AnonymousMaxLifetimeHours: 6,
         AuthenticatedMaxLifetimeHours: 720,
         AnonymousMaxAccessCount: 1,
-        AuthenticatedMaxAccessCount: 10
+        AuthenticatedMaxAccessCount: 10,
+        MaxItemsPerPackage: 100
       })
     );
 
@@ -50,7 +51,8 @@ describe('getUploadLimits', () => {
       AnonymousMaxLifetimeHours: 6,
       AuthenticatedMaxLifetimeHours: 720,
       AnonymousMaxAccessCount: 1,
-      AuthenticatedMaxAccessCount: 10
+      AuthenticatedMaxAccessCount: 10,
+      MaxItemsPerPackage: 100
     });
     expect(result.error).toBeUndefined();
   });
@@ -100,7 +102,7 @@ describe('createPackage', () => {
     const body = { title: 'Conflict', detail: 'package already exists' };
     stubFetch(async () => jsonResponse(409, body));
 
-    const result = await createPackage({ Id: 'pkg-1' });
+    const result = await createPackage({ Id: 'pkg-1', TimeToLiveHours: 24 });
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
@@ -262,7 +264,7 @@ describe('listPackages', () => {
   const listItem = {
     Id: 'pkg-1',
     CreatedAt: '2026-11-04T12:00:00Z',
-    ExpiresAt: null,
+    ExpiresAt: '2026-11-05T12:00:00Z',
     ItemCount: '2',
     TotalSize: '4096',
     MaxAccessCount: '3',
@@ -282,7 +284,7 @@ describe('listPackages', () => {
         {
           Id: 'pkg-1',
           CreatedAt: '2026-11-04T12:00:00Z',
-          ExpiresAt: undefined,
+          ExpiresAt: '2026-11-05T12:00:00Z',
           ItemCount: 2,
           TotalSize: 4096,
           MaxAccessCount: 3,
@@ -353,8 +355,7 @@ const uploadRequest = (fileName = 'notes.txt') => ({
   Id: 'item-1',
   Kind: 'file' as const,
   Meta: 'bWV0YQ',
-  File: makeFile(fileName),
-  FileName: fileName
+  File: makeFile(fileName)
 });
 
 describe('uploadItem', () => {
@@ -372,7 +373,7 @@ describe('uploadItem', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('posts the item fields, declared size and bytes to the package upload endpoint', async () => {
+  it('puts the raw bytes with metadata headers to the per-item upload endpoint', async () => {
     const result = await uploadItem('pkg-1', uploadRequest());
 
     expect(result.data?.Id).toBe('fake-package');
@@ -380,15 +381,14 @@ describe('uploadItem', () => {
     expect(result.canceled).toBeUndefined();
 
     const xhr = FakeXhr.sent[0];
-    expect(xhr.url.endsWith('/api/v1/content/package/pkg-1/upload')).toBe(true);
-    expect(xhr.form?.get('Id')).toBe('item-1');
-    expect(xhr.form?.get('Kind')).toBe('file');
-    expect(xhr.form?.get('Meta')).toBe('bWV0YQ');
-    expect(xhr.form?.get('Size')).toBe('5');
-    const entry = xhr.form?.get('File');
-    expect(entry).toBeInstanceOf(File);
-    if (entry instanceof File) {
-      expect(entry.name).toBe('notes.txt');
+    expect(xhr.method).toBe('PUT');
+    expect(xhr.url.endsWith('/api/v1/content/package/pkg-1/content/item-1')).toBe(true);
+    expect(xhr.requestHeaders['X-Content-Kind']).toBe('file');
+    expect(xhr.requestHeaders['X-Content-Meta']).toBe('bWV0YQ');
+    expect(xhr.requestHeaders['Content-Type']).toBe('application/octet-stream');
+    expect(xhr.body).toBeInstanceOf(File);
+    if (xhr.body instanceof File) {
+      expect(xhr.body.name).toBe('notes.txt');
     }
   });
 

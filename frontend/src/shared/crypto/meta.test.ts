@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { utf8 } from './bytes.ts';
-import { deriveKeyBits, itemAad, itemKey, metaAad, metaKey, packageSalt } from './keys.ts';
+import { deriveKeyBits, frameAad, itemKey, metaKey, packageSalt } from './keys.ts';
 import { buildMeta, decodeMeta, encodeMeta, parseMeta } from './meta.ts';
-import { seal } from './sealed.ts';
+import { seal } from './framed.ts';
 
 const PACKAGE_ID = '0192f3a0-1111-7000-8000-000000000000';
 const ITEM_ID = '0192f3a0-3333-7000-8000-000000000000';
@@ -47,6 +47,24 @@ describe('meta', () => {
     expect(await decodeMeta(encoded, key, PACKAGE_ID, ITEM_ID)).toEqual(meta);
   });
 
+  it('produces identical metadata on every sealing (deterministic)', async () => {
+    const key = await derivePackageKey();
+    const meta = { name: 'secret.pdf', mime: 'application/pdf' };
+
+    const first = await encodeMeta(meta, key, PACKAGE_ID, ITEM_ID);
+    const second = await encodeMeta(meta, key, PACKAGE_ID, ITEM_ID);
+
+    expect(second).toEqual(first);
+  });
+
+  it('rejects plaintext metadata when a package key is present', async () => {
+    const key = await derivePackageKey();
+
+    await expect(decodeMeta(buildMeta({ name: 'x', mime: 'text/plain' }), key, PACKAGE_ID, ITEM_ID)).rejects.toThrow(
+      'Metadata is not framed'
+    );
+  });
+
   it('rejects sealed metadata without a key', async () => {
     const key = await derivePackageKey();
     const encoded = await encodeMeta({ name: 'x', mime: 'text/plain' }, key, PACKAGE_ID, ITEM_ID);
@@ -59,7 +77,7 @@ describe('meta', () => {
     const sealedMeta = await seal(
       await itemKey(key, ITEM_ID),
       buildMeta({ name: 'x', mime: 'text/plain' }),
-      itemAad(PACKAGE_ID, ITEM_ID)
+      frameAad(PACKAGE_ID, ITEM_ID, 'item', 0, true)
     );
 
     await expect(decodeMeta(sealedMeta, key, PACKAGE_ID, ITEM_ID)).rejects.toThrow();
@@ -70,7 +88,7 @@ describe('meta', () => {
     const sealedMeta = await seal(
       await metaKey(key, ITEM_ID),
       buildMeta({ name: 'x', mime: 'text/plain' }),
-      metaAad(PACKAGE_ID, ITEM_ID)
+      frameAad(PACKAGE_ID, ITEM_ID, 'meta', 0, true)
     );
 
     await expect(decodeMeta(sealedMeta, key, '0192f3a0-2222-7000-8000-000000000000', ITEM_ID)).rejects.toThrow();

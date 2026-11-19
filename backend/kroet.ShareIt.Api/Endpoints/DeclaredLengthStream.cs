@@ -15,18 +15,11 @@ internal sealed class ContentLengthMismatchException()
     : Exception("The uploaded content length does not match the declared size.");
 
 /// <summary>
-/// Raised when the multipart request body ends before the final boundary.
-/// Callers can treat it as a client error without also catching storage I/O
-/// failures.
-/// </summary>
-internal sealed class RequestBodyTruncatedException(Exception innerException)
-    : Exception("The request body ended unexpectedly.", innerException);
-
-/// <summary>
-/// Read-only view over the file part of a multipart upload that counts the
-/// bytes actually read, rejects anything above the per-identity limit before it
+/// Read-only view over the raw upload request body that counts the bytes
+/// actually read, rejects anything above the per-identity limit before it
 /// reaches storage, and verifies at end-of-stream that the client sent exactly
-/// the size it declared. Reading never buffers more than the caller's buffer.
+/// the size declared in <c>Content-Length</c>. Reading never buffers more than
+/// the caller's buffer.
 /// </summary>
 internal sealed class DeclaredLengthStream(Stream inner, long limitBytes, long declaredBytes) : Stream
 {
@@ -56,16 +49,7 @@ internal sealed class DeclaredLengthStream(Stream inner, long limitBytes, long d
             return 0;
         }
 
-        int read;
-        try
-        {
-            read = inner.Read(buffer);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException)
-        {
-            throw new RequestBodyTruncatedException(ex);
-        }
-
+        var read = inner.Read(buffer);
         Track(read);
         return read;
     }
@@ -80,16 +64,7 @@ internal sealed class DeclaredLengthStream(Stream inner, long limitBytes, long d
             return 0;
         }
 
-        int read;
-        try
-        {
-            read = await inner.ReadAsync(buffer, cancellationToken);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException)
-        {
-            throw new RequestBodyTruncatedException(ex);
-        }
-
+        var read = await inner.ReadAsync(buffer, cancellationToken);
         Track(read);
         return read;
     }
@@ -136,16 +111,7 @@ internal sealed class DeclaredLengthStream(Stream inner, long limitBytes, long d
         {
             while (_bytesRead <= limitBytes)
             {
-                int read;
-                try
-                {
-                    read = await inner.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
-                }
-                catch (Exception ex) when (ex is IOException or InvalidDataException)
-                {
-                    throw new RequestBodyTruncatedException(ex);
-                }
-
+                var read = await inner.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                 if (read == 0)
                 {
                     return false;

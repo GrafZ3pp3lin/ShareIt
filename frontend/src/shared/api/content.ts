@@ -35,6 +35,7 @@ export type UploadLimits = {
   AuthenticatedMaxLifetimeHours: number;
   AnonymousMaxAccessCount: number;
   AuthenticatedMaxAccessCount: number;
+  MaxItemsPerPackage: number;
 };
 
 const isUploadLimits = (value: unknown): value is UploadLimits =>
@@ -45,7 +46,8 @@ const isUploadLimits = (value: unknown): value is UploadLimits =>
   'AnonymousMaxLifetimeHours' in value &&
   'AuthenticatedMaxLifetimeHours' in value &&
   'AnonymousMaxAccessCount' in value &&
-  'AuthenticatedMaxAccessCount' in value;
+  'AuthenticatedMaxAccessCount' in value &&
+  'MaxItemsPerPackage' in value;
 
 const isContentPackageResponse = (value: unknown): value is ContentPackageResponse =>
   typeof value === 'object' && value !== null && 'Id' in value;
@@ -89,7 +91,7 @@ const isContentPackageListResponse = (value: unknown): value is ContentPackageLi
 export type PackageSummary = {
   Id: string;
   CreatedAt: string;
-  ExpiresAt?: string;
+  ExpiresAt: string;
   ItemCount: number;
   TotalSize: number;
   MaxAccessCount: number | null;
@@ -107,7 +109,7 @@ export type PackageListPage = {
 const toPackageSummary = (item: ContentPackageListItem): PackageSummary => ({
   Id: item.Id,
   CreatedAt: item.CreatedAt,
-  ExpiresAt: item.ExpiresAt ?? undefined,
+  ExpiresAt: item.ExpiresAt,
   ItemCount: Number(item.ItemCount),
   TotalSize: Number(item.TotalSize),
   MaxAccessCount: item.MaxAccessCount == null ? null : Number(item.MaxAccessCount),
@@ -122,10 +124,9 @@ export type UploadProgressCallback = (sentBytes: number, totalBytes: number) => 
 export type UploadItem = {
   Id: string;
   Kind: 'text' | 'file';
-  /** base64url of the sealed-or-plaintext `{ name, mime }` blob. */
+  /** base64url of the framed-or-plaintext `{ name, mime }` blob. */
   Meta: string;
   File: Blob;
-  FileName: string;
 };
 
 export type UploadItemResult = ApiResult<ContentPackageResponse> & {
@@ -137,9 +138,10 @@ export type UploadItemResult = ApiResult<ContentPackageResponse> & {
  * reporting via XHR. Resolves with `canceled: true` when the signal was
  * aborted before completion.
  *
- * The body is streamed from the Blob by the browser; the client never reads
- * the bytes into memory. The parts are ordered as the endpoint requires:
- * metadata first, then the payload last.
+ * The body is a raw binary PUT: the payload is streamed from the Blob by the
+ * browser (the client never reads the bytes into memory), the metadata rides
+ * in the X-Content-Kind/X-Content-Meta headers and Content-Length is the
+ * declared size.
  */
 export async function uploadItem(
   packageId: string,
@@ -151,8 +153,8 @@ export async function uploadItem(
     return { canceled: true };
   }
 
-  const uploadUrl = absoluteApiUrl(`/api/v1/content/package/${packageId}/upload`);
-  const headers = await getAuthHeaders(uploadUrl, 'POST');
+  const uploadUrl = absoluteApiUrl(`/api/v1/content/package/${packageId}/content/${item.Id}`);
+  const headers = await getAuthHeaders(uploadUrl, 'PUT');
 
   // Token/DPoP generation is asynchronous; the signal may have been aborted
   // while we were waiting. An already-aborted signal will not fire again.
@@ -163,19 +165,15 @@ export async function uploadItem(
   const baseUrl = getRuntimeConfig().apiBaseUrl;
 
   return new Promise((resolve) => {
-    const form = new FormData();
-    form.append('Id', item.Id);
-    form.append('Kind', item.Kind);
-    form.append('Meta', item.Meta);
-    form.append('Size', String(item.File.size));
-    form.append('File', item.File, item.FileName);
-
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${baseUrl}/api/v1/content/package/${packageId}/upload`);
+    xhr.open('PUT', `${baseUrl}/api/v1/content/package/${packageId}/content/${item.Id}`);
     xhr.responseType = 'json';
     for (const [name, value] of Object.entries(headers)) {
       xhr.setRequestHeader(name, value);
     }
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-Content-Kind', item.Kind);
+    xhr.setRequestHeader('X-Content-Meta', item.Meta);
 
     if (onProgress) {
       xhr.upload.addEventListener('progress', (event) => {
@@ -217,7 +215,7 @@ export async function uploadItem(
       cleanup();
       resolve({ error: new Error('Network error during upload') });
     });
-    xhr.send(form);
+    xhr.send(item.File);
   });
 }
 
@@ -248,7 +246,7 @@ export async function getPackageDetails(
   unlockProof?: string,
   accessSession?: string
 ): Promise<ApiResult<ContentPackageDetailsResponse>> {
-  const headers: Record<string, string> = {};
+  const headers: { 'X-Unlock-Proof'?: string; 'X-Access-Session'?: string } = {};
   if (unlockProof) {
     headers['X-Unlock-Proof'] = unlockProof;
   }
@@ -256,7 +254,7 @@ export async function getPackageDetails(
     headers['X-Access-Session'] = accessSession;
   }
 
-  const result = await getPackageGenerated(packageId, Object.keys(headers).length > 0 ? { headers } : undefined);
+  const result = await getPackageGenerated(packageId, Object.keys(headers).length > 0 ? headers : undefined);
   if (isSuccess(result.status) && isContentPackageDetailsResponse(result.data)) {
     return { data: result.data, status: result.status };
   }
@@ -269,7 +267,7 @@ export async function downloadContent(
   accessSession: string
 ): Promise<ApiResult<Blob>> {
   const result = await downloadContentGenerated(packageId, contentId, {
-    headers: { 'X-Access-Session': accessSession }
+    'X-Access-Session': accessSession
   });
   if (!isSuccess(result.status)) {
     return { error: result.data, status: result.status };

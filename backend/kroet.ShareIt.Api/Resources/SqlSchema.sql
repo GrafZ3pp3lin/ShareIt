@@ -1,16 +1,17 @@
 -- PostgreSQL schema for content packages and contents
 
 -- Table for content packages. Nothing names a package: item names and MIME
--- types live in the client-sealed per-item `meta` column.
+-- types live in the client-sealed per-item `meta` column. Every package
+-- expires: abandoned uploads are swept by the cleanup service without any
+-- draft/ready state machine.
 CREATE TABLE IF NOT EXISTS content_packages (
     id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL,
     user_id UUID,
-    is_private BOOLEAN,
     max_access_count INT,
     current_access_count INT NOT NULL DEFAULT 0,
     last_access_at TIMESTAMPTZ,
-    expires_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ NOT NULL,
     unlock_verifier TEXT,
     CONSTRAINT chk_access_count CHECK (current_access_count >= 0),
     CONSTRAINT chk_max_access_count CHECK (max_access_count IS NULL OR max_access_count > 0)
@@ -18,7 +19,7 @@ CREATE TABLE IF NOT EXISTS content_packages (
 
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_packages_user_id ON content_packages(user_id);
-CREATE INDEX IF NOT EXISTS idx_packages_expires_at ON content_packages(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_packages_expires_at ON content_packages(expires_at);
 CREATE INDEX IF NOT EXISTS idx_packages_access_limit ON content_packages(current_access_count, max_access_count)
     WHERE max_access_count IS NOT NULL;
 

@@ -30,8 +30,9 @@
   used for re-fetches and downloads; it is stored in `sessionStorage`, never in a URL, and is cleared on
   a download 401 or package-gone response. See `frontend/AGENTS.md`.
 - Optional client-side encryption uses one passphrase per package, a salt derived from the package id,
-  `SIE2` sealed envelopes and per-item sealed `meta`; the API only ever sees opaque bytes and the
-  `X-Unlock-Proof` verifier. See `frontend/AGENTS.md` and `docs/crypto-v2.md`.
+  the `SIE3` frame container (4 MiB frames, deterministic per-item sealing) and per-item framed `meta`;
+  the API only ever sees opaque bytes and the `X-Unlock-Proof` verifier. See `frontend/AGENTS.md` and
+  `docs/crypto-v2.md`.
 
 ### Backend (.NET)
 - NuGet versions are centralized in `backend/Directory.Packages.props` (Central Package Management). Project files list packages without a `Version`; add or bump versions only there. Check for updates with `dotnet list kroet.ShareIt.slnx package --outdated` from `backend/`.

@@ -17,7 +17,6 @@ public class InMemoryBlobStorageHandlerTests
         var blobId = await _handler.UploadAsync(stream, "text/plain", "hello.txt");
 
         Assert.IsTrue(Guid.TryParse(blobId, out _));
-        Assert.IsTrue(await _handler.ExistsAsync(blobId));
 
         await using var downloaded = await _handler.DownloadAsync(blobId);
         using var buffer = new MemoryStream();
@@ -41,23 +40,17 @@ public class InMemoryBlobStorageHandlerTests
         await using var stream = new MemoryStream([1, 2, 3]);
         var blobId = await _handler.UploadAsync(stream, "application/octet-stream", "file.bin");
 
-        var deleted = await _handler.DeleteAsync(blobId);
+        await _handler.DeleteAsync(blobId);
 
-        Assert.IsTrue(deleted);
-        Assert.IsFalse(await _handler.ExistsAsync(blobId));
+        await Assert.ThrowsExactlyAsync<FileNotFoundException>(
+            () => _handler.DownloadAsync(blobId));
     }
 
     [TestMethod]
-    public async Task DeleteAsync_WhenBlobDoesNotExist_ReturnsFalse()
+    public async Task DeleteAsync_WhenBlobDoesNotExist_Succeeds()
     {
-        Assert.IsFalse(await _handler.DeleteAsync(Guid.NewGuid().ToString()));
-        Assert.IsFalse(await _handler.DeleteAsync("not-a-guid"));
-    }
-
-    [TestMethod]
-    public async Task ExistsAsync_WhenBlobDoesNotExist_ReturnsFalse()
-    {
-        Assert.IsFalse(await _handler.ExistsAsync(Guid.NewGuid().ToString()));
-        Assert.IsFalse(await _handler.ExistsAsync("not-a-guid"));
+        // Deletion is idempotent: a missing object already satisfies the goal.
+        await _handler.DeleteAsync(Guid.NewGuid().ToString());
+        await _handler.DeleteAsync("not-a-guid");
     }
 }

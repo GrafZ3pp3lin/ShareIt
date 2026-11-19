@@ -41,5 +41,22 @@ public static class UserExtensions
             userIdentity = null!;
             return false;
         }
+
+        /// <summary>
+        /// Resolves the authenticated user only, for endpoints that require
+        /// authorization. Guests have no identity here.
+        /// </summary>
+        public bool TryGetUserIdentity(out UserIdentity userIdentity)
+        {
+            var identity = claimsPrincipal.ToOptionalUserIdentity();
+            if (identity is null)
+            {
+                userIdentity = null!;
+                return false;
+            }
+
+            userIdentity = identity;
+            return true;
+        }
     }
 }

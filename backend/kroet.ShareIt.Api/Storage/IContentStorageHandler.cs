@@ -1,4 +1,5 @@
 ﻿using kroet.ShareIt.Api.Models;
+using ContentModel = kroet.ShareIt.Api.Models.Content;
 
 namespace kroet.ShareIt.Api.Storage;
 
@@ -19,14 +20,7 @@ public interface IContentStorageHandler
     /// </summary>
     /// <param name="content">The content metadata to store.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task StoreContentAsync(ExternalContent content, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Stores multiple contents.
-    /// </summary>
-    /// <param name="contents">The contents to store.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    Task StoreContentsAsync(IEnumerable<ExternalContent> contents, CancellationToken cancellationToken = default);
+    Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves a content package by ID.
@@ -56,31 +50,14 @@ public interface IContentStorageHandler
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The page and the cursor for the next page (null when done).</returns>
     Task<PackageListPage> ListPackagesAsync(Guid userId, string? cursor, int take, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Retrieves multiple content packages by their IDs.
-    /// </summary>
-    /// <param name="packageIds">The unique package identifiers.</param>
-    /// <param name="includeContent">Whether to include content data.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of packages.</returns>
-    Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(IEnumerable<Guid> packageIds, bool includeContent = true, CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// Retrieves content data by its ID.
     /// </summary>
     /// <param name="contentId">The unique content identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Content, or null if not found</returns>
-    Task<ExternalContent?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Retrieves multiple contents by their IDs.
-    /// </summary>
-    /// <param name="contentIds">The unique content identifiers.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of contents.</returns>
-    Task<IReadOnlyList<ExternalContent>> GetContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default);
+    Task<ContentModel?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Atomically claims one access and stores its session. The guarded update
@@ -131,48 +108,6 @@ public interface IContentStorageHandler
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if deleted, false if not found.</returns>
     Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Deletes multiple contents, queueing their blobs in the same transaction.
-    /// </summary>
-    /// <remarks>
-    /// Low-level metadata and queue primitive. Production callers must use
-    /// <see cref="Services.Storage.IStorageHandler"/> so queue draining is
-    /// owned by the cleanup service; direct calls leave entries queued.
-    /// </remarks>
-    /// <param name="contentIds">The unique content identifiers.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Number of contents deleted.</returns>
-    Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Deletes content and queues its blob in the same transaction.
-    /// </summary>
-    /// <remarks>
-    /// Low-level metadata and queue primitive. Production callers must use
-    /// <see cref="Services.Storage.IStorageHandler"/> so queue draining is
-    /// owned by the cleanup service; direct calls leave entries queued.
-    /// </remarks>
-    /// <param name="contentId">The unique content identifier.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True if deleted, false if not found.</returns>
-    Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Checks if package exists.
-    /// </summary>
-    /// <param name="packageId">The unique package identifier.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True if the package exists, false otherwise.</returns>
-    Task<bool> ExistsPackageAsync(Guid packageId, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Checks if content exists.
-    /// </summary>
-    /// <param name="contentId">The unique content identifier.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True if the content exists, false otherwise.</returns>
-    Task<bool> ExistsContentAsync(Guid contentId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets expired packages and exhausted packages whose download-retention

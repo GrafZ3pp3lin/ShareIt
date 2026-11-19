@@ -11,7 +11,7 @@ public interface IBlobStorageHandler
     /// </summary>
     /// <param name="stream">The data stream to upload.</param>
     /// <param name="contentType">MIME type of the content.</param>
-    /// <param name="fileName">Original file name (stored as object metadata, not part of the object key).</param>
+    /// <param name="fileName">Opaque content identifier stored as object metadata, never the user-facing file name.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Unique blob identifier (e.g., blob name, key, or path).</returns>
     Task<string> UploadAsync(Stream stream, string contentType, string fileName, CancellationToken cancellationToken = default);
@@ -29,20 +29,12 @@ public interface IBlobStorageHandler
     Task<Stream> DownloadAsync(string blobId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deletes a blob from storage.
+    /// Deletes a blob from storage. Deletion is idempotent: a missing object
+    /// counts as successfully deleted.
     /// </summary>
     /// <param name="blobId">The unique blob identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True if deleted, false if not found.</returns>
-    Task<bool> DeleteAsync(string blobId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Checks if a blob exists in storage.
-    /// </summary>
-    /// <param name="blobId">The unique blob identifier.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True if the blob exists, false otherwise.</returns>
-    Task<bool> ExistsAsync(string blobId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string blobId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Initializes backend resources required before serving requests. The
@@ -62,4 +54,3 @@ public interface IBlobStorageHandler
     Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(true);
 }
-

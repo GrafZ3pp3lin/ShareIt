@@ -1,6 +1,5 @@
 using System.Threading.RateLimiting;
 using Asp.Versioning;
-using kroet.Permissions;
 using kroet.ShareIt.Api;
 using kroet.ShareIt.Api.Authentication;
 using kroet.ShareIt.Api.Configuration;
@@ -107,6 +106,20 @@ try
                     AutoReplenishment = true
                 });
         });
+        options.AddPolicy(RateLimitPolicies.Upload, httpContext =>
+        {
+            var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                remoteIp,
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = rateLimitSettings.UploadPermitLimit,
+                    Window = TimeSpan.FromMinutes(rateLimitSettings.UploadWindowMinutes),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
         options.OnRejected = async (context, cancellationToken) =>
         {
             if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
@@ -133,7 +146,7 @@ try
         options.Limits.MaxRequestBodySize = maxRequestBodySizeBytes;
     });
 
-    // Uploads are read from Request.Body with MultipartReader, so no form
+    // Uploads are read from Request.Body as raw binary PUTs, so no form
     // buffering options apply: the per-identity file limit is enforced while
     // streaming, and Kestrel's body limit stays the outer bound.
 
@@ -270,7 +283,6 @@ try
     }
 
     builder.Services.AddAuthorization();
-    builder.Services.AddPermissionAuthorization();
 
     builder.Services.AddApiVersioning(options =>
     {
@@ -279,7 +291,36 @@ try
         options.ApiVersionReader = new QueryStringApiVersionReader();
     });
         
-    builder.Services.AddOpenApi();
+    builder.Services.AddOpenApi(options =>
+    {
+        // The raw binary upload body is read directly from Request.Body, so no
+        // parameter binding describes it. Document the request body here so
+        // the OpenAPI spec (and the generated client) carries it.
+        options.AddOperationTransformer((operation, context, cancellationToken) =>
+        {
+            if (operation is not null && string.Equals(operation.OperationId, "UploadContent", StringComparison.Ordinal))
+            {
+                operation.RequestBody = new Microsoft.OpenApi.OpenApiRequestBody
+                {
+                    Required = true,
+                    Content = new Dictionary<string, Microsoft.OpenApi.IOpenApiMediaType>
+                    {
+                        ["application/octet-stream"] = new Microsoft.OpenApi.OpenApiMediaType
+                        {
+                            Schema = new Microsoft.OpenApi.OpenApiSchema
+                            {
+                                Type = Microsoft.OpenApi.JsonSchemaType.String,
+                                Format = "binary"
+                            }
+                        }
+                    }
+                };
+            }
+
+            return Task.CompletedTask;
+        });
+
+    });
 
     var app = builder.Build();
 
@@ -340,9 +381,6 @@ try
 
     // Map content management endpoints (authenticated users only)
     v1ContentEndpoints.MapContentManagementEndpoints();
-
-    // Register permission grants
-    app.MapPermissions();
 
     await app.InitializePackageStorageAsync();
     await app.InitializeBlobStorageAsync();

@@ -85,14 +85,16 @@ export const unlockProof = async (key: PackageKey, packageId: string): Promise<s
 };
 
 /**
- * Binds a content blob to its package and item. Ids are normalized in one
- * place, shared with key derivation.
+ * Binds a frame to its package, item, role, chunk index and final flag. Ids
+ * are normalized in one place, shared with key derivation.
  */
-export const itemAad = (packageId: string, itemId: string): Uint8Array<ArrayBuffer> =>
-  utf8(`shareit/item:1:${normalizeId(packageId)}:${normalizeId(itemId)}`);
+export type FrameRole = 'item' | 'meta';
 
-/**
- * Binds a metadata blob to its package, item and role.
- */
-export const metaAad = (packageId: string, itemId: string): Uint8Array<ArrayBuffer> =>
-  utf8(`shareit/meta:1:${normalizeId(packageId)}:${normalizeId(itemId)}`);
+export const frameAad = (
+  packageId: string,
+  itemId: string,
+  role: FrameRole,
+  chunkIndex: number,
+  isFinal: boolean
+): Uint8Array<ArrayBuffer> =>
+  utf8(`shareit/frame:1:${normalizeId(packageId)}:${normalizeId(itemId)}:${role}:${chunkIndex}:${isFinal ? 1 : 0}`);

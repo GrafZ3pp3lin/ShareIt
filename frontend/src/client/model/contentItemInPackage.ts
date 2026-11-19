@@ -12,6 +12,4 @@ export interface ContentItemInPackage {
   Size: number | string;
   /** @nullable */
   Meta?: string | null;
-  /** @nullable */
-  Payload?: string | null;
 }

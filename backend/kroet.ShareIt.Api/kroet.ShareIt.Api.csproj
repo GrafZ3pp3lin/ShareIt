@@ -33,8 +33,4 @@
       <None Update="Resources\SqlSchema.sql" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
-    <ItemGroup>
-      <ProjectReference Include="..\kroet.Permission.AspNetCore\kroet.Permission.AspNetCore.csproj" />
-    </ItemGroup>
-
 </Project>

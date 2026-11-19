@@ -17,9 +17,9 @@ public sealed record ContentPackageSummary
     public required DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>
-    /// Optional expiration timestamp.
+    /// Expiration timestamp. Every package has one.
     /// </summary>
-    public DateTimeOffset? ExpiresAt { get; init; }
+    public required DateTimeOffset ExpiresAt { get; init; }
 
     /// <summary>
     /// Number of items in the package.
@@ -56,7 +56,7 @@ public sealed record ContentPackageSummary
     /// <summary>
     /// Whether the package has expired.
     /// </summary>
-    public bool IsExpired(DateTimeOffset currentTime) => ExpiresAt.HasValue && currentTime >= ExpiresAt.Value;
+    public bool IsExpired(DateTimeOffset currentTime) => currentTime >= ExpiresAt;
 }
 
 /// <summary>

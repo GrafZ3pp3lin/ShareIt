@@ -18,7 +18,7 @@ export const linkStatus = (item: PackageSummary, now = Date.now()): LinkStatus =
     return 'usedUp';
   }
 
-  const expiresAt = item.ExpiresAt ? Date.parse(item.ExpiresAt) : Number.NaN;
+  const expiresAt = Date.parse(item.ExpiresAt);
   if (!Number.isNaN(expiresAt) && expiresAt - now <= EXPIRING_WINDOW_MS) {
     return 'expiring';
   }

@@ -45,8 +45,7 @@ public class StorageHandler : IStorageHandler
                 content.Id.ToString(),
                 cancellationToken);
 
-            var externalContent = new ExternalContent(content, externalUrl);
-            await _contentStorageHandler.StoreContentAsync(externalContent, cancellationToken);
+            await _contentStorageHandler.StoreContentAsync(content with { Url = externalUrl }, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -78,16 +77,8 @@ public class StorageHandler : IStorageHandler
     }
 
     private static bool IsExpectedClientFailure(Exception exception, CancellationToken cancellationToken)
-        => exception is ContentTooLargeException or ContentLengthMismatchException or RequestBodyTruncatedException
+        => exception is ContentTooLargeException or ContentLengthMismatchException
             || exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
-
-    /// <inheritdoc />
-    public async Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-    {
-        var deleted = await _contentStorageHandler.DeleteContentAsync(contentId, cancellationToken);
-
-        return deleted;
-    }
 
     /// <inheritdoc />
     public async Task<bool> DeletePackageAsync(Guid packageId, CancellationToken cancellationToken = default)
@@ -113,8 +104,8 @@ public class StorageHandler : IStorageHandler
         {
             try
             {
-                // A missing object already satisfies the deletion goal. S3 and
-                // the in-memory handler both report that case as false.
+                // A missing object already satisfies the deletion goal, so
+                // deletion is idempotent and never needs an existence probe.
                 await _blobStorageHandler.DeleteAsync(blobId, cancellationToken);
                 await _contentStorageHandler.CompleteBlobDeletionAsync(blobId, cancellationToken);
                 completed++;
@@ -132,17 +123,5 @@ public class StorageHandler : IStorageHandler
         }
 
         return completed;
-    }
-
-    /// <inheritdoc />
-    public async Task<Stream> RetrieveContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-    {
-        var document = await _contentStorageHandler.GetContentAsync(contentId, cancellationToken);
-        if (document == null)
-        {
-            throw new KeyNotFoundException($"Content with ID {contentId} was not found");
-        }
-
-        return await _blobStorageHandler.DownloadAsync(document.Url, cancellationToken);
     }
 }

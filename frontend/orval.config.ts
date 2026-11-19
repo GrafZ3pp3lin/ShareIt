@@ -7,6 +7,7 @@ export default defineConfig({
       clean: true,
       client: 'fetch',
       mode: 'split',
+      headers: true,
       target: './src/client/api.ts',
       schemas: './src/client/model',
       mock: false,

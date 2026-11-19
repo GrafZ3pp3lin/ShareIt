@@ -22,6 +22,6 @@ export interface ContentPackageResponse {
    * @pattern ^-?(?:0|[1-9]\d*)$
    */
   RemainingAccesses?: number | string | null;
-  /** @nullable */
-  ExpiresAt?: string | null;
+  ExpiresAt: string;
+  IsProtected: boolean;
 }

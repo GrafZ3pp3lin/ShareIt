@@ -1,4 +1,5 @@
 ﻿using Dapper;
+using ContentModel = kroet.ShareIt.Api.Models.Content;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using Microsoft.Extensions.Options;
@@ -38,11 +39,11 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         const string insertPackageSql = """
                                         INSERT INTO content_packages (
-                                            id, created_at, user_id, is_private,
+                                            id, created_at, user_id,
                                             max_access_count, current_access_count, last_access_at,
                                             expires_at, unlock_verifier
                                         ) VALUES (
-                                            @Id, @CreatedAt, @UserId, @IsPrivate,
+                                            @Id, @CreatedAt, @UserId,
                                             @MaxAccessCount, 0, @LastAccessAt,
                                             @ExpiresAt, @UnlockVerifier
                                         );
@@ -58,7 +59,6 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                 package.Id,
                 package.CreatedAt,
                 package.UserId,
-                package.IsPrivate,
                 package.MaxAccessCount,
                 package.LastAccessAt,
                 package.ExpiresAt,
@@ -67,7 +67,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     }
 
     /// <inheritdoc />
-    public async Task StoreContentAsync(ExternalContent content, CancellationToken cancellationToken = default)
+    public async Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default)
     {
         const string insertSql = """
                                  INSERT INTO contents (
@@ -98,48 +98,11 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     }
 
     /// <inheritdoc />
-    public async Task StoreContentsAsync(IEnumerable<ExternalContent> contents, CancellationToken cancellationToken = default)
-    {
-        var contentList = contents.ToList();
-        if (contentList.Count == 0)
-        {
-            return;
-        }
-
-        const string insertSql = """
-                                 INSERT INTO contents (
-                                     id, package_id, content_type, created_at, size, user_id,
-                                     meta, url
-                                 ) VALUES (
-                                     @Id, @PackageId, @ContentType, @CreatedAt, @Size, @UserId,
-                                     @Meta, @Url
-                                 );
-                                 """;
-
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        var parameters = contentList.Select(content => new
-        {
-            content.Id,
-            content.PackageId,
-            ContentType = content.ContentType.ToString(),
-            content.CreatedAt,
-            content.Size,
-            content.UserId,
-            content.Meta,
-            content.Url
-        });
-
-        await connection.ExecuteAsync(insertSql, parameters);
-    }
-
-    /// <inheritdoc />
     public async Task<ContentPackage?> GetPackageAsync(Guid packageId, bool includeContent = true, CancellationToken cancellationToken = default)
     {
         const string getPackageSql = """
                                      SELECT
-                                         id, created_at, user_id, is_private,
+                                         id, created_at, user_id,
                                          max_access_count, current_access_count, last_access_at, expires_at,
                                          unlock_verifier
                                      FROM content_packages
@@ -174,7 +137,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             var contentDtoList = await connection.QueryAsync<ContentDbDto>(
                 getContentSql,
                 new { PackageId = packageId });
-            package.Contents = contentDtoList.Select(MapToExternalContent).ToList();
+            package.Contents = contentDtoList.Select(MapToContent).ToList();
         }
 
         return package;
@@ -245,67 +208,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(IEnumerable<Guid> packageIds, bool includeContent = true, CancellationToken cancellationToken = default)
-    {
-        var packageIdList = packageIds.ToList();
-        if (packageIdList.Count == 0)
-        {
-            return [];
-        }
-
-        const string getPackagesSql = """
-                                      SELECT
-                                          id, created_at, user_id, is_private,
-                                          max_access_count, current_access_count, last_access_at, expires_at,
-                                          unlock_verifier
-                                      FROM content_packages
-                                      WHERE id = ANY(@PackageIds)
-                                      """;
-
-        const string getContentSql = """
-                                        SELECT
-                                            id, package_id, content_type, created_at, size, user_id,
-                                            meta, url
-                                        FROM contents
-                                        WHERE package_id = ANY(@PackageIds)
-                                        ORDER BY package_id, created_at, id
-                                        """;
-
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        // Get all packages
-        var packageDtoList = await connection.QueryAsync<PackageDbDto>(
-            getPackagesSql,
-            new { PackageIds = packageIdList.ToArray() });
-
-        var packages = packageDtoList.Select(MapToContentPackage).ToList();
-
-        // If includeContent is true, fetch all content objects
-        if (includeContent)
-        {
-            var contentDtoList = await connection.QueryAsync<ContentDbDto>(
-                getContentSql,
-                new { PackageIds = packageIdList.ToArray() });
-
-            var contentIdsByPackage = contentDtoList
-                .GroupBy(x => x.PackageId)
-                .ToDictionary(g => g.Key, g => g);
-            
-            foreach (var package in packages)
-            {
-                if (contentIdsByPackage.TryGetValue(package.Id, out var contents))
-                {
-                    package.Contents = contents.Select(MapToExternalContent).ToList();
-                }
-            }
-        }
-
-        return packages;
-    }
-
-    /// <inheritdoc />
-    public async Task<ExternalContent?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
+    public async Task<ContentModel?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
         const string selectSql = """
                                  SELECT
@@ -322,37 +225,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             selectSql,
             new { ContentId = contentId });
 
-        if (dto == null)
-            return null;
-
-        return MapToExternalContent(dto);
-    }
-
-    /// <inheritdoc />
-    public async Task<IReadOnlyList<ExternalContent>> GetContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
-    {
-        var contentIdList = contentIds.ToList();
-        if (contentIdList.Count == 0)
-        {
-            return [];
-        }
-
-        const string selectSql = """
-                                 SELECT
-                                     id, package_id, content_type, created_at, size, user_id,
-                                     meta, url
-                                 FROM contents
-                                 WHERE id = ANY(@ContentIds)
-                                 """;
-
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        var dtoList = await connection.QueryAsync<ContentDbDto>(
-            selectSql,
-            new { ContentIds = contentIdList.ToArray() });
-
-        return dtoList.Select(MapToExternalContent).ToList();
+        return dto is null ? null : MapToContent(dto);
     }
 
     /// <inheritdoc />
@@ -370,7 +243,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                                             last_access_at = @AccessedAt
                                     WHERE id = @PackageId
                                       AND (max_access_count IS NULL OR current_access_count < max_access_count)
-                                      AND (expires_at IS NULL OR expires_at > @AccessedAt)
+                                      AND expires_at > @AccessedAt
                                     RETURNING current_access_count, max_access_count
                                     """;
         const string insertSessionSql = """
@@ -539,103 +412,6 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     }
 
     /// <inheritdoc />
-    public async Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-    {
-        const string queueBlobDeletionSql = """
-                                            INSERT INTO blob_deletion_jobs (blob_id, created_at)
-                                            SELECT url, @CreatedAt
-                                            FROM contents
-                                            WHERE id = @ContentId
-                                            ON CONFLICT (blob_id) DO NOTHING
-                                            """;
-        const string deleteSql = "DELETE FROM contents WHERE id = @ContentId";
-
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        var parameters = new { ContentId = contentId, CreatedAt = _timeProvider.GetUtcNow() };
-        await connection.ExecuteAsync(queueBlobDeletionSql, parameters, transaction);
-        var rowsAffected = await connection.ExecuteAsync(deleteSql, parameters, transaction);
-        await transaction.CommitAsync(cancellationToken);
-
-        var deleted = rowsAffected > 0;
-
-        return deleted;
-    }
-
-    /// <inheritdoc />
-    public async Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
-    {
-        var contentIdList = contentIds.ToList();
-        if (contentIdList.Count == 0)
-        {
-            return 0;
-        }
-
-        const string queueBlobDeletionsSql = """
-                                             INSERT INTO blob_deletion_jobs (blob_id, created_at)
-                                             SELECT url, @CreatedAt
-                                             FROM contents
-                                             WHERE id = ANY(@ContentIds)
-                                             ON CONFLICT (blob_id) DO NOTHING
-                                             """;
-        const string deleteSql = """
-                                 DELETE FROM contents
-                                 WHERE id = ANY(@ContentIds)
-                                 """;
-
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
-        var parameters = new { ContentIds = contentIdList.ToArray(), CreatedAt = _timeProvider.GetUtcNow() };
-        await connection.ExecuteAsync(queueBlobDeletionsSql, parameters, transaction);
-        var rowsAffected = await connection.ExecuteAsync(deleteSql, parameters, transaction);
-        await transaction.CommitAsync(cancellationToken);
-
-        return rowsAffected;
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> ExistsPackageAsync(Guid packageId, CancellationToken cancellationToken = default)
-    {
-        const string existsSql = """
-                                 SELECT EXISTS(
-                                     SELECT 1 FROM content_packages WHERE id = @PackageId
-                                 )
-                                 """;
-
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        var exists = await connection.ExecuteScalarAsync<bool>(
-            existsSql,
-            new { PackageId = packageId });
-
-        return exists;
-    }
-
-    /// <inheritdoc />
-    public async Task<bool> ExistsContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-    {
-        const string existsSql = """
-                                 SELECT EXISTS(
-                                     SELECT 1 FROM contents WHERE id = @ContentId
-                                 )
-                                 """;
-
-        await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        var exists = await connection.ExecuteScalarAsync<bool>(
-            existsSql,
-            new { ContentId = contentId });
-
-        return exists;
-    }
-
-    /// <inheritdoc />
     public async Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
     {
         // Two independent branches let the planner use the expiry index and
@@ -645,7 +421,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         const string getExpiredPackagesSql = """
                                              SELECT id
                                              FROM content_packages
-                                             WHERE expires_at IS NOT NULL AND expires_at <= @Now
+                                             WHERE expires_at <= @Now
                                              UNION
                                              SELECT id
                                              FROM content_packages
@@ -678,22 +454,22 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                                    SELECT
                                        COUNT(*)::int AS total_packages,
                                        COUNT(*) FILTER (WHERE NOT (
-                                           (expires_at IS NOT NULL AND expires_at <= @Now)
+                                           (expires_at <= @Now)
                                            OR (
                                                max_access_count IS NOT NULL
                                                AND current_access_count >= max_access_count
                                                AND last_access_at <= @ExhaustedBefore
                                            )
                                        ))::int AS active_packages,
-                                       COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= @Now)::int AS expired_packages,
+                                       COUNT(*) FILTER (WHERE expires_at <= @Now)::int AS expired_packages,
                                        COUNT(*) FILTER (WHERE max_access_count IS NOT NULL AND current_access_count >= max_access_count)::int AS exhausted_packages,
                                        COUNT(*) FILTER (WHERE unlock_verifier IS NOT NULL)::int AS protected_packages,
-                                       COUNT(*) FILTER (WHERE is_private IS TRUE)::int AS private_packages,
                                        COUNT(*) FILTER (WHERE NOT EXISTS (
                                            SELECT 1 FROM contents c WHERE c.package_id = p.id
                                        ))::int AS empty_packages,
                                        (SELECT COUNT(*)::int FROM contents) AS total_items,
-                                       (SELECT COALESCE(SUM(size), 0)::bigint FROM contents) AS total_bytes
+                                       (SELECT COALESCE(SUM(size), 0)::bigint FROM contents) AS total_bytes,
+                                       (SELECT COUNT(*)::int FROM blob_deletion_jobs) AS pending_blob_deletions
                                    FROM content_packages p
                                    """;
 
@@ -715,10 +491,10 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             ExpiredPackages = row.ExpiredPackages,
             ExhaustedPackages = row.ExhaustedPackages,
             ProtectedPackages = row.ProtectedPackages,
-            PrivatePackages = row.PrivatePackages,
             EmptyPackages = row.EmptyPackages,
             TotalItems = row.TotalItems,
             TotalBytes = row.TotalBytes,
+            PendingBlobDeletions = row.PendingBlobDeletions,
             CleanupPending = row.TotalPackages - row.ActivePackages
         };
     }
@@ -760,11 +536,11 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     }
 
     /// <summary>
-    /// Maps a DTO to ExternalContent domain model.
+    /// Maps a DTO to the ContentModel domain model.
     /// </summary>
-    private static ExternalContent MapToExternalContent(ContentDbDto dbDto)
+    private static ContentModel MapToContent(ContentDbDto dbDto)
     {
-        return new ExternalContent
+        return new ContentModel
         {
             Id = dbDto.Id,
             PackageId = dbDto.PackageId,
@@ -804,7 +580,6 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             Id = dbDto.Id,
             CreatedAt = dbDto.CreatedAt,
             UserId = dbDto.UserId,
-            IsPrivate = dbDto.IsPrivate,
             UnlockVerifier = dbDto.UnlockVerifier,
             MaxAccessCount = dbDto.MaxAccessCount,
             CurrentAccessCount = dbDto.CurrentAccessCount,
@@ -821,11 +596,10 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         public Guid Id { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public Guid? UserId { get; init; }
-        public bool? IsPrivate { get; init; }
         public int? MaxAccessCount { get; init; }
         public int CurrentAccessCount { get; init; }
         public DateTimeOffset? LastAccessAt { get; init; }
-        public DateTimeOffset? ExpiresAt { get; init; }
+        public DateTimeOffset ExpiresAt { get; init; }
         public string? UnlockVerifier { get; init; }
     }
 
@@ -836,7 +610,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         public Guid Id { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
-        public DateTimeOffset? ExpiresAt { get; init; }
+        public DateTimeOffset ExpiresAt { get; init; }
         public int ItemCount { get; init; }
         public long TotalSize { get; init; }
         public int? MaxAccessCount { get; init; }
@@ -877,10 +651,10 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         public int ExpiredPackages { get; init; }
         public int ExhaustedPackages { get; init; }
         public int ProtectedPackages { get; init; }
-        public int PrivatePackages { get; init; }
         public int EmptyPackages { get; init; }
         public int TotalItems { get; init; }
         public long TotalBytes { get; init; }
+        public int PendingBlobDeletions { get; init; }
     }
 
     /// <summary>

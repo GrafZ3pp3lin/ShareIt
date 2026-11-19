@@ -70,13 +70,20 @@ export function ComposerPage() {
           />
 
           <Show when={composer.progress()}>
-            <div
-              class="flex items-center justify-between gap-3 font-mono text-xs text-muted"
-              role="status"
-              aria-live="polite"
-            >
-              <span>{composer.progressLabel()}</span>
-            </div>
+            {(current) => (
+              <div class="grid gap-1 font-mono text-xs text-muted">
+                <span>{composer.progressLabel()}</span>
+                {/* A native, labeled progress bar. The accessible label is
+                    static; every percentage tick is deliberately not
+                    announced through aria-live. */}
+                <progress
+                  class="h-1.5 w-full appearance-none rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-panel-soft [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-brand"
+                  aria-label={t('composer.progress.label')}
+                  max={current().phase === 'uploading' ? current().totalBytes : undefined}
+                  value={current().phase === 'uploading' ? current().sentBytes : undefined}
+                />
+              </div>
+            )}
           </Show>
 
           <Show when={composer.error()}>
@@ -89,9 +96,6 @@ export function ComposerPage() {
                   <div class="flex flex-wrap gap-2">
                     <button type="button" class="btn btn-secondary" onClick={() => composer.handleSubmit()}>
                       {t('composer.retry')}
-                    </button>
-                    <button type="button" class="btn btn-ghost" onClick={composer.showLinkAnyway}>
-                      {t('composer.showLinkAnyway')}
                     </button>
                   </div>
                 </Show>

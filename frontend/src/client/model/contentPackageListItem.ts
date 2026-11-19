@@ -8,8 +8,7 @@
 export interface ContentPackageListItem {
   Id: string;
   CreatedAt: string;
-  /** @nullable */
-  ExpiresAt?: string | null;
+  ExpiresAt: string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   ItemCount: number | string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */

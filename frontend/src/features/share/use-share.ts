@@ -15,7 +15,6 @@ export type ShareItem = {
   Kind: string;
   Size: number;
   Meta?: string | null;
-  Payload?: string | null;
   index: number;
   decodedMeta: ItemMeta | null;
   displayName: string;
@@ -94,7 +93,6 @@ export function createShare(packageId: () => string) {
           Kind: item.Kind,
           Size: Number(item.Size),
           Meta: item.Meta,
-          Payload: item.Payload,
           index,
           decodedMeta,
           displayName: decodedMeta?.name ?? fallbackName,
@@ -181,12 +179,17 @@ export function createShare(packageId: () => string) {
       // access that was just claimed.
       saveAccessSession(id, outcome.data.AccessSession);
 
-      const decodedItems = await decodeItems(outcome.data.Items, key, id);
+      // The server decides protection. A passphrase typed into an unprotected
+      // link must not leave a key that makes file downloads frame-decrypt raw
+      // bytes.
+      const effectiveKey = outcome.data.Package.IsProtected ? key : undefined;
+
+      const decodedItems = await decodeItems(outcome.data.Items, effectiveKey, id);
       if (current !== attempt) {
         return;
       }
 
-      setPackageKey(key);
+      setPackageKey(effectiveKey);
       setAccessSessionToken(outcome.data.AccessSession.Token);
       setDetails(outcome.data);
       setItems(decodedItems);

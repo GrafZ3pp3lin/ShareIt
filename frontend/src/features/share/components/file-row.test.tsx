@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@solidjs/testing-library';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../../../i18n/i18n.tsx';
 import { utf8 } from '../../../shared/crypto/bytes.ts';
+import { seal } from '../../../shared/crypto/framed.ts';
+import { deriveKeyBits, frameAad, itemKey, packageSalt, type PackageKey } from '../../../shared/crypto/keys.ts';
 import { FileRow } from './file-row.tsx';
 import type { ShareItem } from '../use-share.ts';
 
@@ -27,6 +29,7 @@ const item: ShareItem = {
 
 const renderRow = (
   props: {
+    packageKey?: PackageKey;
     onAccessExpired?: (failedToken?: string) => void;
     onPackageGone?: () => void;
   } = {}
@@ -36,7 +39,7 @@ const renderRow = (
       <FileRow
         packageId={PACKAGE_ID}
         item={item}
-        packageKey={undefined}
+        packageKey={props.packageKey}
         accessSessionToken="session-1"
         onAccessExpired={props.onAccessExpired}
         onPackageGone={props.onPackageGone}
@@ -64,13 +67,13 @@ describe('<FileRow />', () => {
   });
 
   it('downloads the file lazily, saves the blob and revokes the object URL', async () => {
-    read.readShareItem.mockResolvedValue(utf8('file-bytes'));
+    read.fetchShareItem.mockResolvedValue(new Response('file-bytes', { status: 200 }));
     renderRow();
 
     fireEvent.click(screen.getByRole('button', { name: 'download' }));
 
     await vi.waitFor(() =>
-      expect(read.readShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, undefined, 'session-1', undefined, undefined)
+      expect(read.fetchShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, 'session-1', undefined, undefined)
     );
     await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
     const blob = createObjectURL.mock.calls[0][0];
@@ -81,31 +84,24 @@ describe('<FileRow />', () => {
     expect(screen.getByRole('button', { name: 'download' })).toBeInTheDocument();
   });
 
-  it('forwards the access-expired and package-gone callbacks to the reader', async () => {
+  it('forwards the access-expired and package-gone callbacks to the fetch', async () => {
     const onAccessExpired = vi.fn();
     const onPackageGone = vi.fn();
-    read.readShareItem.mockRejectedValueOnce(new Error('expired'));
+    read.fetchShareItem.mockRejectedValueOnce(new Error('expired'));
     renderRow({ onAccessExpired, onPackageGone });
 
     fireEvent.click(screen.getByRole('button', { name: 'download' }));
 
     await vi.waitFor(() =>
-      expect(read.readShareItem).toHaveBeenCalledWith(
-        PACKAGE_ID,
-        item,
-        undefined,
-        'session-1',
-        onAccessExpired,
-        onPackageGone
-      )
+      expect(read.fetchShareItem).toHaveBeenCalledWith(PACKAGE_ID, item, 'session-1', onAccessExpired, onPackageGone)
     );
   });
 
   it('shows a loading state while the download is in flight', async () => {
-    let resolveRead: ((bytes: Uint8Array) => void) | undefined;
-    read.readShareItem.mockReturnValue(
+    let resolveFetch: ((response: Response) => void) | undefined;
+    read.fetchShareItem.mockReturnValue(
       new Promise((resolve) => {
-        resolveRead = resolve;
+        resolveFetch = resolve;
       })
     );
     renderRow();
@@ -115,13 +111,15 @@ describe('<FileRow />', () => {
     const loading = await screen.findByRole('button', { name: 'downloading…' });
     expect(loading).toBeDisabled();
 
-    resolveRead?.(utf8('file-bytes'));
+    resolveFetch?.(new Response('file-bytes', { status: 200 }));
 
     expect(await screen.findByRole('button', { name: 'download' })).toBeEnabled();
   });
 
   it('keeps the error on the row and retries the same item', async () => {
-    read.readShareItem.mockRejectedValueOnce(new Error('session expired')).mockResolvedValueOnce(utf8('file-bytes'));
+    read.fetchShareItem
+      .mockRejectedValueOnce(new Error('session expired'))
+      .mockResolvedValueOnce(new Response('file-bytes', { status: 200 }));
     renderRow();
 
     fireEvent.click(screen.getByRole('button', { name: 'download' }));
@@ -133,7 +131,7 @@ describe('<FileRow />', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'retry' }));
 
-    await vi.waitFor(() => expect(read.readShareItem).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(read.fetchShareItem).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole('button', { name: 'download' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -158,7 +156,6 @@ describe('<FileRow />', () => {
     await vi.waitFor(() => expect(chunks).toHaveLength(1));
     expect(new TextDecoder().decode(chunks[0])).toBe('file-bytes');
     expect(showSaveFilePicker).toHaveBeenCalledWith({ suggestedName: 'report.pdf' });
-    expect(read.readShareItem).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(await screen.findByRole('button', { name: 'download' })).toBeInTheDocument();
   });
@@ -177,7 +174,7 @@ describe('<FileRow />', () => {
 
     await vi.waitFor(() => expect(screen.getByRole('button', { name: 'download' })).toBeEnabled());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(read.readShareItem).not.toHaveBeenCalled();
+    expect(read.fetchShareItem).not.toHaveBeenCalled();
   });
 
   it('falls back to the buffered save when the picker is blocked', async () => {
@@ -188,6 +185,18 @@ describe('<FileRow />', () => {
         throw blocked;
       })
     );
+    read.fetchShareItem.mockResolvedValue(new Response('file-bytes', { status: 200 }));
+
+    renderRow();
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    await vi.waitFor(() => expect(read.fetchShareItem).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the buffered reader when the response has no body', async () => {
+    read.fetchShareItem.mockResolvedValue(new Response(null, { status: 200 }));
     read.readShareItem.mockResolvedValue(utf8('file-bytes'));
 
     renderRow();
@@ -195,7 +204,58 @@ describe('<FileRow />', () => {
 
     await vi.waitFor(() => expect(read.readShareItem).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
-    expect(read.fetchShareItem).not.toHaveBeenCalled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('opens the file picker synchronously and decrypts a protected file stream', async () => {
+    const packageKey = await deriveKeyBits('correct horse battery', await packageSalt(PACKAGE_ID));
+    const sealedBytes = await seal(
+      await itemKey(packageKey, FILE_ID),
+      utf8('decrypted-file-bytes'),
+      frameAad(PACKAGE_ID, FILE_ID, 'item', 0, true)
+    );
+
+    const chunks: Uint8Array[] = [];
+    const writable = new WritableStream<Uint8Array>({
+      write: (chunk) => {
+        chunks.push(chunk);
+      }
+    });
+    const showSaveFilePicker = vi.fn(async () => ({ createWritable: async () => writable }));
+    vi.stubGlobal('showSaveFilePicker', showSaveFilePicker);
+    read.fetchShareItem.mockResolvedValue(new Response(sealedBytes, { status: 200 }));
+
+    renderRow({ packageKey });
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    // The picker must be invoked synchronously during the click handler before
+    // any async key derivation hop can lose user activation.
+    expect(showSaveFilePicker).toHaveBeenCalledWith({ suggestedName: 'report.pdf' });
+
+    await vi.waitFor(() => expect(chunks).toHaveLength(1));
+    expect(new TextDecoder().decode(chunks[0])).toBe('decrypted-file-bytes');
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'download' })).toBeInTheDocument();
+  });
+
+  it('shows an error and writes nothing when a protected file stream is tampered', async () => {
+    const packageKey = await deriveKeyBits('correct horse battery', await packageSalt(PACKAGE_ID));
+    const sealedBytes = await seal(
+      await itemKey(packageKey, FILE_ID),
+      utf8('secret-bytes'),
+      frameAad(PACKAGE_ID, FILE_ID, 'item', 0, true)
+    );
+    const tampered = new Uint8Array(sealedBytes);
+    tampered[tampered.length - 1] ^= 0xff;
+
+    read.fetchShareItem.mockResolvedValue(new Response(tampered, { status: 200 }));
+
+    renderRow({ packageKey });
+    fireEvent.click(screen.getByRole('button', { name: 'download' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Download failed.');
+    expect(alert).toHaveTextContent('Frame decryption failed');
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 });

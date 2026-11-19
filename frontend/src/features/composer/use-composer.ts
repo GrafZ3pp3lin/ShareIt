@@ -1,12 +1,13 @@
 import { createMemo, createSignal, onSettled } from 'solid-js';
 import { createPackage, getUploadLimits, uploadItem } from '../../shared/api/content.ts';
-import type { UploadLimits } from '../../shared/api/content.ts';
+import type { UploadItemResult, UploadLimits } from '../../shared/api/content.ts';
 import { getErrorMessage } from '../../shared/api/error-message.ts';
 import { toBase64Url } from '../../shared/crypto/base64url.ts';
 import { utf8 } from '../../shared/crypto/bytes.ts';
+import { encryptFile, sealedSizeOf } from '../../shared/crypto/framed.ts';
 import {
   deriveKeyBits,
-  itemAad,
+  frameAad,
   itemKey,
   packageSalt,
   unlockProof,
@@ -14,7 +15,6 @@ import {
 } from '../../shared/crypto/keys.ts';
 import { encodeMeta, type ItemMeta } from '../../shared/crypto/meta.ts';
 import { generatePassphrase, validatePassphrase } from '../../shared/crypto/passphrase.ts';
-import { seal, SEALED_OVERHEAD_BYTES } from '../../shared/crypto/sealed.ts';
 import { useI18n } from '../../i18n/i18n.tsx';
 import { useAuth } from '../auth/auth-context.tsx';
 import {
@@ -36,8 +36,6 @@ export type ComposerResult = {
   accessesLabel: string;
   passwordLabel: string;
   encrypted: boolean;
-  /** True when the result panel shows a link whose item uploads did not all finish. */
-  incomplete?: boolean;
 };
 
 export type ComposerProgress = {
@@ -50,8 +48,8 @@ export type ComposerProgress = {
 };
 
 type ComposerItem =
-  | { id: string; kind: 'text'; bytes: Uint8Array<ArrayBuffer>; meta: ItemMeta; sealedMeta?: string }
-  | { id: string; kind: 'file'; file: File; meta: ItemMeta; sealedMeta?: string };
+  | { id: string; kind: 'text'; bytes: Uint8Array<ArrayBuffer>; meta: ItemMeta }
+  | { id: string; kind: 'file'; file: File; meta: ItemMeta };
 
 type PartialPackage = {
   packageId: string;
@@ -73,6 +71,7 @@ const formatMb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
  *
  * Ids are generated once per attempt and kept in the partial state, so a retry
  * reuses the same package and item ids (the backend treats both as idempotent).
+ * Sealing is deterministic: retries produce identical frames and metadata.
  */
 export function createComposer() {
   const { t } = useI18n();
@@ -163,6 +162,8 @@ export function createComposer() {
     return isAuthenticated() ? available.AuthenticatedFileLimitBytes : available.AnonymousFileLimitBytes;
   });
 
+  const maxItemsPerPackage = createMemo(() => limits()?.MaxItemsPerPackage ?? null);
+
   const limitLabel = createMemo(() => {
     const limit = fileLimitBytes();
     return limit == null ? undefined : t('composer.limit', { limit: formatMb(limit) });
@@ -170,14 +171,17 @@ export function createComposer() {
 
   const canSubmit = createMemo(() => hasContent() && !submitting() && passphraseError() === null);
 
-  const fileBytesLeft = createMemo(() => {
-    const limit = fileLimitBytes();
-    if (limit == null) {
-      return null;
-    }
-    // Sealed items carry the fixed 32-byte SIE2 overhead.
-    return passwordMode() === 'off' ? limit : limit - SEALED_OVERHEAD_BYTES;
-  });
+  /**
+   * Stored size of one item after sealing. The server limit applies to the
+   * stored (encrypted) bytes, which are the plaintext plus one frame header
+   * and GCM tag per 4 MiB chunk.
+   */
+  const storedSizeOf = (item: ComposerItem) =>
+    passwordMode() === 'off'
+      ? item.kind === 'file'
+        ? item.file.size
+        : item.bytes.length
+      : sealedSizeOf(item.kind === 'file' ? item.file.size : item.bytes.length);
 
   const clearPartial = () => setPartial(null);
 
@@ -199,23 +203,61 @@ export function createComposer() {
       return !isSelected && !isRepeated;
     });
 
-    const limit = fileBytesLeft();
-    if (limit == null) {
-      setFiles([...files(), ...unique]);
-      setError(null);
+    const empty = unique.filter((file) => file.size === 0);
+    const nonEmpty = unique.filter((file) => file.size > 0);
+    const limit = fileLimitBytes();
+    const maxItems = maxItemsPerPackage();
+    if (limit == null && maxItems == null) {
+      setFiles([...files(), ...nonEmpty]);
+      setError(
+        empty.length > 0 ? t('composer.errors.emptyFile', { names: empty.map((file) => file.name).join(', ') }) : null
+      );
       return;
     }
 
-    const oversized = unique.filter((file) => file.size > limit);
-    setFiles([...files(), ...unique.filter((file) => file.size <= limit)]);
-    setError(
-      oversized.length > 0
-        ? t('composer.errors.fileTooLarge', {
-            names: oversized.map((file) => file.name).join(', '),
-            limit: formatMb(limit)
-          })
-        : null
-    );
+    let accepted = nonEmpty;
+    const oversized =
+      limit == null
+        ? []
+        : nonEmpty.filter((file) => (passwordMode() === 'off' ? file.size : sealedSizeOf(file.size)) > limit);
+    if (oversized.length > 0) {
+      accepted = nonEmpty.filter((file) => !oversized.includes(file));
+    }
+
+    const skippedByCount: File[] = [];
+    if (maxItems != null) {
+      // The text block occupies one item slot when present.
+      const remainingSlots = Math.max(0, maxItems - (hasText() ? 1 : 0) - files().length);
+      if (accepted.length > remainingSlots) {
+        skippedByCount.push(...accepted.slice(remainingSlots));
+        accepted = accepted.slice(0, remainingSlots);
+      }
+    }
+
+    setFiles([...files(), ...accepted]);
+    if (empty.length > 0) {
+      setError(
+        t('composer.errors.emptyFile', {
+          names: empty.map((file) => file.name).join(', ')
+        })
+      );
+    } else if (oversized.length > 0 && limit != null) {
+      setError(
+        t('composer.errors.fileTooLarge', {
+          names: oversized.map((file) => file.name).join(', '),
+          limit: formatMb(limit)
+        })
+      );
+    } else if (skippedByCount.length > 0 && maxItems != null) {
+      setError(
+        t('composer.errors.tooManyItemsSkipped', {
+          names: skippedByCount.map((file) => file.name).join(', '),
+          limit: maxItems
+        })
+      );
+    } else {
+      setError(null);
+    }
   };
 
   const removeFile = (index: number) => {
@@ -305,20 +347,33 @@ export function createComposer() {
     // On resume, items before nextIndex are already stored. Re-checking them
     // would block the retry if the limit changed in the meantime.
     const pending = items.slice(startIndex);
-    const limit = fileBytesLeft();
-    if (limit == null) {
+    const empty = pending.filter((item) => item.kind === 'file' && item.file.size === 0).map(itemName);
+    if (empty.length > 0) {
+      return t('composer.errors.emptyFile', { names: empty.join(', ') });
+    }
+
+    const limit = fileLimitBytes();
+    const maxItems = maxItemsPerPackage();
+    if (limit == null && maxItems == null) {
       // Limits are advisory when they could not be loaded; the server enforces
-      // them and reports a 413 per item.
+      // them per item.
       return null;
     }
 
-    const oversized = pending
-      .filter((item) => (item.kind === 'file' ? item.file.size : item.bytes.length) > limit)
-      .map((item) => itemName(item));
+    if (limit != null) {
+      const oversized = pending.filter((item) => storedSizeOf(item) > limit).map((item) => itemName(item));
+      if (oversized.length > 0) {
+        return t('composer.errors.fileTooLarge', { names: oversized.join(', '), limit: formatMb(limit) });
+      }
+    }
 
-    return oversized.length > 0
-      ? t('composer.errors.fileTooLarge', { names: oversized.join(', '), limit: formatMb(limit) })
-      : null;
+    // The item limit applies to the whole package, so the full item set is
+    // checked here — including items already stored on a resumed attempt.
+    if (maxItems != null && items.length > maxItems) {
+      return t('composer.errors.tooManyItems', { limit: maxItems, count: items.length });
+    }
+
+    return null;
   };
 
   const runSubmit = async (resume?: PartialPackage) => {
@@ -388,28 +443,27 @@ export function createComposer() {
         let payload: Blob;
         let meta: string;
         try {
+          // Unencrypted items are handed to the browser as they are: no
+          // arrayBuffer copy and no second File wrapper. The browser streams
+          // the original file straight from disk.
+          const source =
+            item.kind === 'file' ? item.file : new Blob([item.bytes], { type: 'application/octet-stream' });
+
           if (key) {
+            // Text and files are encrypted slice-by-slice into 4 MiB frames;
+            // a whole-file plaintext buffer is never allocated.
             // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
-            const plain = item.kind === 'file' ? new Uint8Array(await item.file.arrayBuffer()) : item.bytes;
-            // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
-            const sealed = await seal(await itemKey(key, item.id), plain, itemAad(packageId, item.id));
-            payload = new Blob([sealed], { type: 'application/octet-stream' });
+            payload = await encryptFile(await itemKey(key, item.id), source, (chunkIndex, isFinal) =>
+              frameAad(packageId, item.id, 'item', chunkIndex, isFinal)
+            );
           } else {
-            // Unencrypted items are handed to the browser as they are: no
-            // arrayBuffer copy and no second File wrapper. The browser streams
-            // the original file straight from disk.
-            payload = item.kind === 'file' ? item.file : new Blob([item.bytes], { type: 'application/octet-stream' });
+            payload = source;
           }
 
-          if (item.sealedMeta) {
-            // Reuse the exact sealed meta across retries. It contains a random
-            // IV, and the server uses it as part of the idempotency fingerprint.
-            meta = item.sealedMeta;
-          } else {
-            // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
-            meta = toBase64Url(await encodeMeta(item.meta, key, packageId, item.id));
-            item.sealedMeta = meta;
-          }
+          // Sealing is deterministic, so every retry derives the same meta
+          // blob — no caching is needed for idempotent retries.
+          // oxlint-disable-next-line no-await-in-loop -- items are prepared one at a time for progress
+          meta = toBase64Url(await encodeMeta(item.meta, key, packageId, item.id));
         } catch {
           setProgress(null);
           setError(t('errors.encrypt', { fileName }));
@@ -426,21 +480,28 @@ export function createComposer() {
           totalBytes: payload.size
         });
 
-        // oxlint-disable-next-line no-await-in-loop -- items are uploaded one at a time for progress/cancel
-        const outcome = await uploadItem(
-          packageId,
-          {
-            Id: item.id,
-            Kind: item.kind,
-            Meta: meta,
-            File: payload,
-            FileName: item.kind === 'text' ? 'content.txt' : fileName
-          },
-          (sentBytes, totalBytes) => {
-            setProgress((current) => (current ? { ...current, phase: 'uploading', sentBytes, totalBytes } : current));
-          },
-          abortController.signal
-        );
+        let outcome: UploadItemResult;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- items are uploaded one at a time for progress/cancel
+          outcome = await uploadItem(
+            packageId,
+            {
+              Id: item.id,
+              Kind: item.kind,
+              Meta: meta,
+              File: payload
+            },
+            (sentBytes, totalBytes) => {
+              setProgress((current) => (current ? { ...current, phase: 'uploading', sentBytes, totalBytes } : current));
+            },
+            abortController.signal
+          );
+        } catch (err) {
+          setProgress(null);
+          setError(getErrorMessage(err, t('errors.upload', { fileName })));
+          setPartial(toPartial(packageId, items, index, currentPassphrase, labels));
+          return;
+        }
 
         if (outcome.canceled) {
           setProgress(null);
@@ -489,29 +550,6 @@ export function createComposer() {
     setPartial(null);
     setResult(null);
     void runSubmit(resume ?? undefined);
-  };
-
-  const showLinkAnyway = () => {
-    const resume = partial();
-    if (!resume) {
-      return;
-    }
-
-    setPartial(null);
-    setError(null);
-    setResult({
-      link: `${window.location.origin}/s/${resume.packageId}`,
-      linkWithPassphrase: resume.passphrase
-        ? `${window.location.origin}/s/${resume.packageId}#s=${encodeURIComponent(resume.passphrase)}`
-        : undefined,
-      passphrase: resume.passphrase,
-      expiryLabel: resume.expiryLabel,
-      accessesLabel: resume.accessesLabel,
-      passwordLabel: resume.passwordLabel,
-      encrypted: resume.encrypted,
-      incomplete: true
-    });
-    setStage('result');
   };
 
   const handleCancel = () => {
@@ -596,7 +634,6 @@ export function createComposer() {
     setDownloads,
     handleSubmit,
     handleCancel,
-    showLinkAnyway,
     resetForm
   };
 }

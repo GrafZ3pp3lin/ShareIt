@@ -46,10 +46,10 @@ public sealed class ShareItMetricsTests
             ExpiredPackages = 1,
             ExhaustedPackages = 1,
             ProtectedPackages = 2,
-            PrivatePackages = 1,
             EmptyPackages = 4,
             TotalItems = 2,
             TotalBytes = 10,
+            PendingBlobDeletions = 3,
             CleanupPending = 2
         });
         metrics.SetDependencyHealth(postgresUp: true, s3Up: false);
@@ -73,10 +73,10 @@ public sealed class ShareItMetricsTests
         AssertMeasurement(captured, "shareit.packages", 1, "state", "expired");
         AssertMeasurement(captured, "shareit.packages", 1, "state", "exhausted");
         AssertMeasurement(captured, "shareit.packages", 2, "state", "protected");
-        AssertMeasurement(captured, "shareit.packages", 1, "state", "private");
         AssertMeasurement(captured, "shareit.packages", 4, "state", "empty");
         AssertMeasurement(captured, "shareit.items", 2);
         AssertMeasurement(captured, "shareit.storage.bytes", 10);
+        AssertMeasurement(captured, "shareit.blob_deletion.queue_depth", 3);
         AssertMeasurement(captured, "shareit.cleanup.pending", 2);
         AssertMeasurement(captured, "shareit.cleanup.last_success_timestamp_seconds", 1_234);
         AssertMeasurement(captured, "shareit.dependency.up", 1, "component", "postgres");

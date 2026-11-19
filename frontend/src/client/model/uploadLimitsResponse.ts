@@ -18,4 +18,6 @@ export interface UploadLimitsResponse {
   AnonymousMaxAccessCount: number | string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   AuthenticatedMaxAccessCount: number | string;
+  /** @pattern ^-?(?:0|[1-9]\d*)$ */
+  MaxItemsPerPackage: number | string;
 }

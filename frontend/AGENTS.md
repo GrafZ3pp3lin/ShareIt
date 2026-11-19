@@ -21,7 +21,7 @@ pnpm knip              # unused exports/deps/files
 pnpm generate:open-api # regenerate src/client from a *running* backend at http://localhost:5155/openapi/v1.json
 ```
 
-Run a single test file: `npx vitest run src/shared/crypto/sealed.test.ts`.
+Run a single test file: `npx vitest run src/shared/crypto/framed.test.ts`.
 
 oxlint runs with type-aware linting enabled (`.oxlintrc.json` → `options.typeAware`, powered by `oxlint-tsgolint`) plus the `typescript` plugin. Type-aware rules like `no-floating-promises` and `no-misused-promises` need that package — don't remove it from devDependencies.
 Run a single project: `npx vitest run --project unit` or `--project components`.
@@ -63,7 +63,7 @@ Features consume cross-cutting concerns from `src/shared/*` (`api`, `crypto`, `c
 The app never calls generated SDK functions directly except through `src/shared/api/`:
 
 - `fetch-client.ts` — `customFetch()` is the Orval mutator. It adds the runtime API base URL and identity headers: DPoP + bearer for an OIDC user, otherwise the persisted guest ID (`X-Guest-ID`, `localStorage` key `shareit-guest-id`). The unlock proof is only attached per call by `getPackageDetails`, never globally.
-- `content.ts` — `ApiResult` wrappers around the generated calls: `createPackage`, `uploadItem` (XHR, real progress + `AbortSignal` cancellation, `Size` part), `getPackageDetails(id, unlockProof)`, `downloadContent` (buffered `Blob`), `downloadContentResponse` (raw `Response` for streaming saves), `listPackages`, `deletePackage` and `getUploadLimits`. It also narrows generated `number | string` int64 fields.
+- `content.ts` — `ApiResult` wrappers around the generated calls: `createPackage`, `uploadItem` (raw binary PUT via XHR with real progress + `AbortSignal` cancellation; metadata rides in `X-Content-Kind`/`X-Content-Meta` headers), `getPackageDetails(id, unlockProof)`, `downloadContent` (buffered `Blob`), `downloadContentResponse` (raw `Response` for streaming saves), `listPackages`, `deletePackage` and `getUploadLimits`. It also narrows generated `number | string` int64 fields.
 - `error-message.ts` — `getErrorMessage()` normalizes error shapes (string, `Error`, RFC7807 `ProblemDetails`, generic `{message}`) into a display string.
 
 ### Composer flow
@@ -73,14 +73,14 @@ The app never calls generated SDK functions directly except through `src/shared/
 1. Generate the package id and one item id per text/file once per attempt.
 2. When a passphrase is set, derive the package key from the id (`keys.ts`) and compute the unlock verifier.
 3. `POST /package` with `Id` and `UnlockVerifier` (null when password-off).
-4. Per item: seal content + `meta` when protected, then `POST /package/{id}/upload` with `Id`, `Kind`, `Meta`, `Size`, `File` — one item per request, with progress/cancel and stable ids for retries. Parts must arrive in that order: the API validates the metadata before it reads the payload, and the browser streams the file from disk (unencrypted items are never read into JS memory).
+4. Per item: frame content + `meta` when protected, then `PUT /package/{id}/content/{contentId}` — one raw `application/octet-stream` body per request with `X-Content-Kind`/`X-Content-Meta` headers, with progress/cancel and stable ids for retries. The API validates the headers and `Content-Length` before it reads the payload, and the browser streams the file from disk (unencrypted items are never read into JS memory). Files are encrypted slice-by-slice into 4 MiB frames, never as one plaintext buffer; sealing is deterministic, so retries are byte-for-byte idempotent.
 5. The result shows the plain link and, when protected, the `#s=` combined link plus the passphrase (shown once).
 
 Per-file size limits come from `GET /package/limits` (anonymous vs authenticated), applied when files are added **and re-checked at submit**, then enforced server-side while streaming. A duplicate create with the owner's id is idempotent; reusing an item id with a different kind/size/meta is a `409`.
 
 ### Share flow
 
-`src/features/share/use-share.ts` is a `locked → unlocking → unlocked | invalid | gone` state machine. A plain link renders the gate with no request until submit; a `#s=` link derives the proof and fetches immediately (skeleton, no gate flash), then `history.replaceState` removes the fragment after success. `GET /package/{id}` carries `X-Unlock-Proof` plus any stored `X-Access-Session`; a valid session reuses the access instead of claiming another, and a wrong proof gets `401` before any access is counted. Text and file metadata are decoded per item; content comes from inline `payload` or a session-authorized download, and only then is the `SIE2` envelope opened. Unencrypted downloads use `save-file.ts`: when `showSaveFilePicker` exists, `response.body.pipeTo(createWritable())` writes straight to disk; otherwise the buffered `Blob` path is used. The session token lives in `sessionStorage` for the package lifetime (15 minutes) and is never put in a URL. `access-session.ts` owns that storage helper; the server is the authority for expiry, and the helper clears the token on a download `401` or a `410`/`404` package-gone response.
+`src/features/share/use-share.ts` is a `locked → unlocking → unlocked | invalid | gone` state machine. A plain link renders the gate with no request until submit; a `#s=` link derives the proof and fetches immediately (skeleton, no gate flash), then `history.replaceState` removes the fragment after success. `GET /package/{id}` carries `X-Unlock-Proof` plus any stored `X-Access-Session`; a valid session reuses the access instead of claiming another, and a wrong proof gets `401` before any access is counted. Text and file metadata are decoded per item; every item's bytes come through a session-authorized download (nothing is inlined), and framed ciphertext is decrypted frame by frame. Encrypted and unencrypted downloads share one path in `save-file.ts`: `response.body` pipes through the frame decryptor when protected, then into `showSaveFilePicker`'s writable where supported, or into a `Blob` collected from the plaintext chunks. The session token lives in `sessionStorage` for the package lifetime (15 minutes) and is never put in a URL. `access-session.ts` owns that storage helper; the server is the authority for expiry, and the helper clears the token on a download `401` or a `410`/`404` package-gone response.
 
 ### Auth (OIDC)
 
@@ -106,10 +106,10 @@ The app is a static SPA that must be reconfigured without rebuilding per environ
 One optional passphrase per package; one sealed format for text and files. The server stores opaque bytes only.
 
 - `ids.ts`: `normalizeId` / `idBytes` — the single UUID formatting used by keys and AAD.
-- `keys.ts`: `packageSalt(id)`, `deriveKeyBits(passphrase, salt)` (PBKDF2-SHA256, 150k, client constant), `unlockProof(key, id)` (HMAC verifier sent as `X-Unlock-Proof`), per-item `itemKey` / `metaKey` via HKDF, and `itemAad` / `metaAad`.
-- `sealed.ts`: `SIE2 | IV(12) | AES-GCM ciphertext+tag` — `seal`, `open`, `isSealed`.
+- `keys.ts`: `packageSalt(id)`, `deriveKeyBits(passphrase, salt)` (PBKDF2-SHA256, 150k, client constant), `unlockProof(key, id)` (HMAC verifier sent as `X-Unlock-Proof`), per-item `itemKey` / `metaKey` via HKDF, and `frameAad` (binds every frame to package, item, role, chunk index and final flag).
+- `framed.ts`: the `SIE3` frame container — `seal`/`sealFrame` (deterministic 12-byte IV derived from the chunk index), `encryptFile` (slice-by-slice 4 MiB frames), `openFrames` (buffered decrypt) and `frameDecryptStream` (a `TransformStream` that only emits a frame's plaintext after its GCM tag verifies). `isFramed`/`sealedSizeOf` round it out.
 - `meta.ts`: per-item `{ name, mime }` JSON, sealed with `metaKey` when protected; `buildMeta` / `parseMeta` / `encodeMeta` / `decodeMeta`, fallback `item-<n>` on invalid metadata.
-- `item-content.ts`: `openItemContent` — inline `payload` or session-authorized download, then open the envelope when sealed.
+- `item-content.ts`: `openItemContent` — session-authorized bytes, then open the envelope when sealed.
 - `passphrase.ts`: `generatePassphrase` and `validatePassphrase`.
 
 There is no legacy `SIE1`/JSON envelope reader.

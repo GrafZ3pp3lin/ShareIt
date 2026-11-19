@@ -64,11 +64,11 @@ public class PostgresStorageIntegrationTests
     public async Task StorePackageAsync_AndGetPackageAsync_RoundTripsPackageWithContent()
     {
         var lastAccessAt = DateTimeOffset.UtcNow.AddMinutes(-5);
-        var package = CreatePackage(maxAccessCount: 3, isPrivate: true) with
+        var package = CreatePackage(maxAccessCount: 3) with
         {
             LastAccessAt = lastAccessAt
         };
-        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
+        var content = CreateContent(package.Id) with { Url = "https://blob.example/file-1" };
 
         await _contentStorageHandler.StorePackageAsync(package);
         await _contentStorageHandler.StoreContentAsync(content);
@@ -79,7 +79,9 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual(package.Id, storedPackage.Id);
         Assert.AreEqual(package.UnlockVerifier, storedPackage.UnlockVerifier);
         Assert.AreEqual(package.MaxAccessCount, storedPackage.MaxAccessCount);
-        Assert.AreEqual(package.IsPrivate, storedPackage.IsPrivate);
+        Assert.IsTrue(
+            Math.Abs((storedPackage.ExpiresAt - package.ExpiresAt).TotalMilliseconds) < 1,
+            "PostgreSQL stores timestamps at microsecond precision.");
         Assert.IsNotNull(storedPackage.LastAccessAt);
         Assert.IsTrue(
             Math.Abs((storedPackage.LastAccessAt.Value - lastAccessAt).TotalMilliseconds) < 1,
@@ -111,7 +113,7 @@ public class PostgresStorageIntegrationTests
     public async Task DeletePackageAsync_RemovesPackageAndItsContents()
     {
         var package = CreatePackage();
-        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
+        var content = CreateContent(package.Id) with { Url = "https://blob.example/file-1" };
 
         await _contentStorageHandler.StorePackageAsync(package);
         await _contentStorageHandler.StoreContentAsync(content);
@@ -160,77 +162,6 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task StoreContentsAsync_GetContentsAsync_AndGetPackagesAsync_RoundTripBatch()
-    {
-        var firstPackage = CreatePackage();
-        var secondPackage = CreatePackage();
-        var firstContent = new ExternalContent(CreateContent(firstPackage.Id), "https://blob.example/file-1");
-        var secondContent = new ExternalContent(CreateContent(secondPackage.Id), "https://blob.example/file-2");
-
-        await _contentStorageHandler.StorePackageAsync(firstPackage);
-        await _contentStorageHandler.StorePackageAsync(secondPackage);
-        await _contentStorageHandler.StoreContentsAsync([firstContent, secondContent]);
-        await _contentStorageHandler.StoreContentsAsync([]);
-
-        var contents = await _contentStorageHandler.GetContentsAsync([firstContent.Id, secondContent.Id]);
-        var packagesWithContent = await _contentStorageHandler.GetPackagesAsync(
-            [firstPackage.Id, secondPackage.Id],
-            includeContent: true);
-        var packagesWithoutContent = await _contentStorageHandler.GetPackagesAsync(
-            [firstPackage.Id, secondPackage.Id],
-            includeContent: false);
-        var emptyContents = await _contentStorageHandler.GetContentsAsync([]);
-        var emptyPackages = await _contentStorageHandler.GetPackagesAsync([]);
-
-        Assert.HasCount(2, contents);
-        Assert.HasCount(2, packagesWithContent);
-        Assert.HasCount(1, packagesWithContent.Single(package => package.Id == firstPackage.Id).Contents!);
-        Assert.HasCount(1, packagesWithContent.Single(package => package.Id == secondPackage.Id).Contents!);
-        Assert.HasCount(2, packagesWithoutContent);
-        Assert.IsTrue(packagesWithoutContent.All(package => package.Contents is null));
-        Assert.IsEmpty(emptyContents);
-        Assert.IsEmpty(emptyPackages);
-    }
-
-    [TestMethod]
-    public async Task ExistsPackageAsync_AndExistsContentAsync_ReflectStoredRows()
-    {
-        var package = CreatePackage();
-        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
-
-        await _contentStorageHandler.StorePackageAsync(package);
-        await _contentStorageHandler.StoreContentAsync(content);
-
-        Assert.IsTrue(await _contentStorageHandler.ExistsPackageAsync(package.Id));
-        Assert.IsFalse(await _contentStorageHandler.ExistsPackageAsync(Guid.NewGuid()));
-        Assert.IsTrue(await _contentStorageHandler.ExistsContentAsync(content.Id));
-        Assert.IsFalse(await _contentStorageHandler.ExistsContentAsync(Guid.NewGuid()));
-    }
-
-    [TestMethod]
-    public async Task DeletePackagesAsync_AndDeleteContentsAsync_DeleteOnlyRequestedRows()
-    {
-        var firstPackage = CreatePackage();
-        var secondPackage = CreatePackage();
-        var firstContent = new ExternalContent(CreateContent(firstPackage.Id), "https://blob.example/file-1");
-        var secondContent = new ExternalContent(CreateContent(secondPackage.Id), "https://blob.example/file-2");
-
-        await _contentStorageHandler.StorePackageAsync(firstPackage);
-        await _contentStorageHandler.StorePackageAsync(secondPackage);
-        await _contentStorageHandler.StoreContentsAsync([firstContent, secondContent]);
-
-        Assert.AreEqual(1, await _contentStorageHandler.DeleteContentsAsync([firstContent.Id]));
-        Assert.AreEqual(0, await _contentStorageHandler.DeleteContentsAsync([]));
-        Assert.IsFalse(await _contentStorageHandler.ExistsContentAsync(firstContent.Id));
-        Assert.IsTrue(await _contentStorageHandler.ExistsContentAsync(secondContent.Id));
-
-        Assert.AreEqual(1, await _contentStorageHandler.DeletePackagesAsync([firstPackage.Id]));
-        Assert.AreEqual(0, await _contentStorageHandler.DeletePackagesAsync([]));
-        Assert.IsFalse(await _contentStorageHandler.ExistsPackageAsync(firstPackage.Id));
-        Assert.IsTrue(await _contentStorageHandler.ExistsPackageAsync(secondPackage.Id));
-    }
-
-    [TestMethod]
     public async Task GetPackagesToDeleteAsync_ReturnsExpiredImmediatelyAndExhaustedAfterRetention()
     {
         var activePackage = CreatePackage();
@@ -261,7 +192,7 @@ public class PostgresStorageIntegrationTests
     public async Task DeletePackageAsync_QueuesContentBlobsTransactionally()
     {
         var package = CreatePackage();
-        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
+        var content = CreateContent(package.Id) with { Url = "https://blob.example/file-1" };
 
         await _contentStorageHandler.StorePackageAsync(package);
         await _contentStorageHandler.StoreContentAsync(content);
@@ -280,34 +211,18 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task DeleteContentAsync_QueuesItsBlob()
-    {
-        var package = CreatePackage();
-        var content = new ExternalContent(CreateContent(package.Id), "https://blob.example/file-1");
-
-        await _contentStorageHandler.StorePackageAsync(package);
-        await _contentStorageHandler.StoreContentAsync(content);
-
-        Assert.IsTrue(await _contentStorageHandler.DeleteContentAsync(content.Id));
-
-        var pending = await _contentStorageHandler.GetPendingBlobDeletionsAsync(10);
-        CollectionAssert.AreEqual(new[] { content.Url }, pending.ToArray());
-    }
-
-    [TestMethod]
     public async Task DeletePackagesAsync_DeduplicatesSharedBlobKeys()
     {
         var firstPackage = CreatePackage();
         var secondPackage = CreatePackage();
-        var sharedUrl = "https://blob.example/shared";
+        const string sharedUrl = "https://blob.example/shared";
 
         await _contentStorageHandler.StorePackageAsync(firstPackage);
         await _contentStorageHandler.StorePackageAsync(secondPackage);
-        await _contentStorageHandler.StoreContentsAsync(
-        [
-            new ExternalContent(CreateContent(firstPackage.Id), sharedUrl),
-            new ExternalContent(CreateContent(secondPackage.Id), sharedUrl)
-        ]);
+        await _contentStorageHandler.StoreContentAsync(
+            CreateContent(firstPackage.Id) with { Url = sharedUrl });
+        await _contentStorageHandler.StoreContentAsync(
+            CreateContent(secondPackage.Id) with { Url = sharedUrl });
 
         Assert.AreEqual(2, await _contentStorageHandler.DeletePackagesAsync([firstPackage.Id, secondPackage.Id]));
 
@@ -317,10 +232,10 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
-    public async Task GetMetricsSnapshotAsync_ReportsPackageAndContentAggregates()
+    public async Task GetMetricsSnapshotAsync_ReportsPackageContentAndQueueAggregates()
     {
         var now = _timeProvider.GetUtcNow();
-        var activePackage = CreatePackage(expiresAt: now.AddHours(1), isPrivate: true);
+        var activePackage = CreatePackage(expiresAt: now.AddHours(1));
         var expiredPackage = CreatePackage(expiresAt: now.AddHours(-1)) with { UnlockVerifier = null };
         var exhaustedPackage = CreatePackage(maxAccessCount: 1) with { UnlockVerifier = null };
 
@@ -328,8 +243,15 @@ public class PostgresStorageIntegrationTests
         await _contentStorageHandler.StorePackageAsync(expiredPackage);
         await _contentStorageHandler.StorePackageAsync(exhaustedPackage);
         await _contentStorageHandler.StoreContentAsync(
-            new ExternalContent(CreateContent(activePackage.Id), "https://blob.example/file-1"));
+            CreateContent(activePackage.Id) with { Url = "https://blob.example/file-1" });
         await CreateAccessSessionAsync(exhaustedPackage.Id);
+
+        // Queue one blob so the queue-depth gauge has a row to count.
+        var queuedPackage = CreatePackage(expiresAt: now.AddHours(1));
+        await _contentStorageHandler.StorePackageAsync(queuedPackage);
+        await _contentStorageHandler.StoreContentAsync(
+            CreateContent(queuedPackage.Id) with { Url = "https://blob.example/queued" });
+        await _contentStorageHandler.DeletePackageAsync(queuedPackage.Id);
 
         var snapshot = await _metricsSnapshotProvider.GetMetricsSnapshotAsync(now);
 
@@ -338,10 +260,10 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual(1, snapshot.ExpiredPackages);
         Assert.AreEqual(1, snapshot.ExhaustedPackages);
         Assert.AreEqual(1, snapshot.ProtectedPackages);
-        Assert.AreEqual(1, snapshot.PrivatePackages);
         Assert.AreEqual(2, snapshot.EmptyPackages);
         Assert.AreEqual(1, snapshot.TotalItems);
         Assert.AreEqual(128, snapshot.TotalBytes);
+        Assert.AreEqual(1, snapshot.PendingBlobDeletions);
         Assert.AreEqual(1, snapshot.CleanupPending);
     }
 
@@ -362,9 +284,9 @@ public class PostgresStorageIntegrationTests
         }
 
         await _contentStorageHandler.StoreContentAsync(
-            new ExternalContent(CreateContent(oldest.Id) with { Size = 10 }, "blob://a"));
+            CreateContent(oldest.Id) with { Size = 10, Url = "blob://a" });
         await _contentStorageHandler.StoreContentAsync(
-            new ExternalContent(CreateContent(oldest.Id) with { Size = 20 }, "blob://b"));
+            CreateContent(oldest.Id) with { Size = 20, Url = "blob://b" });
 
         var firstPage = await _contentStorageHandler.ListPackagesAsync(ownerId, cursor: null, take: 2);
 
@@ -428,7 +350,6 @@ public class PostgresStorageIntegrationTests
 
     private static ContentPackage CreatePackage(
         int? maxAccessCount = null,
-        bool? isPrivate = null,
         DateTimeOffset? expiresAt = null,
         DateTimeOffset? createdAt = null,
         Guid? userId = null)
@@ -439,9 +360,8 @@ public class PostgresStorageIntegrationTests
             UnlockVerifier = "verifier",
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             UserId = userId ?? Guid.NewGuid(),
-            IsPrivate = isPrivate,
             MaxAccessCount = maxAccessCount,
-            ExpiresAt = expiresAt
+            ExpiresAt = expiresAt ?? DateTimeOffset.UtcNow.AddDays(1)
         };
     }
 

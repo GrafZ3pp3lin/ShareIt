@@ -2,6 +2,7 @@ using System.Buffers.Text;
 using System.Net;
 using Amazon.S3.Model;
 using Dapper;
+using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 using kroet.ShareIt.Api.Storage;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,12 +18,12 @@ namespace kroet.ShareIt.Api.IntegrationTest.Endpoints;
 public sealed class ContentEndpointValidationTests : ShareItApiTestBase
 {
     [TestMethod]
-    public async Task UploadContent_WithoutFile_Returns400()
+    public async Task UploadContent_WithEmptyBody_Returns400()
     {
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId);
 
-        var response = await SendUploadWithoutFileAsync(packageId, guestId);
+        var response = await SendUploadItemAsync(packageId, "file", [], guestId: guestId);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -52,16 +53,34 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task UploadContent_WithEmptyFile_Returns400()
+    public async Task UploadContent_ToExpiredPackage_Returns410()
     {
         var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
 
-        var response = await SendUploadItemAsync(packageId, "file", [], guestId: guestId);
+        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
 
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+
+        Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Empty content", problem.Title);
+        Assert.AreEqual("Package expired", problem.Title);
+        Assert.AreEqual(0, (await GetDatabaseCountsAsync()).ContentCount);
+    }
+
+    [TestMethod]
+    public async Task CreatePackage_RetryAfterExpiry_Returns410()
+    {
+        var guestId = Guid.NewGuid();
+        var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
+
+        TimeProvider.UtcNow = TimeProvider.UtcNow.AddHours(2);
+
+        var response = await SendCreatePackageAsync(packageId, guestId: guestId, timeToLiveHours: 1);
+
+        Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
+        var problem = await ReadProblemAsync(response);
+        Assert.AreEqual("Package expired", problem.Title);
     }
 
     [TestMethod]
@@ -137,7 +156,6 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         });
         Assert.AreEqual("application/octet-stream", metadata.ContentType);
         Assert.AreEqual(contentId.ToString(), metadata.Metadata["x-amz-meta-original-filename"]);
-        Assert.IsFalse(metadata.Metadata["x-amz-meta-original-filename"].Contains("secret-name", StringComparison.Ordinal));
 
         var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
         Assert.AreEqual(meta, details.Items.Single().Meta);
@@ -227,6 +245,10 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Content not in package", problem.Title);
+        Assert.AreNotEqual(
+            ProblemTypes.PackageGone,
+            problem.Type,
+            "A content-level 404 must not be classified as package-gone.");
     }
 
     [TestMethod]
@@ -254,6 +276,10 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Content not found", problem.Title);
+        Assert.AreNotEqual(
+            ProblemTypes.PackageGone,
+            problem.Type,
+            "A missing blob must not clear the package session.");
     }
 
     [TestMethod]
@@ -295,6 +321,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Package not found", problem.Title);
+        Assert.AreEqual(ProblemTypes.PackageGone, problem.Type);
     }
 
     [TestMethod]
@@ -322,5 +349,6 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Package expired", problem.Title);
+        Assert.AreEqual(ProblemTypes.PackageGone, problem.Type);
     }
 }

@@ -24,7 +24,7 @@ internal sealed class ControllableBlobStorageHandler(IBlobStorageHandler inner) 
     public Task<Stream> DownloadAsync(string blobId, CancellationToken cancellationToken = default)
         => inner.DownloadAsync(blobId, cancellationToken);
 
-    public Task<bool> DeleteAsync(string blobId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(string blobId, CancellationToken cancellationToken = default)
     {
         var call = Interlocked.Increment(ref _deleteCallCount);
         if (FailOnDeleteCall == call)
@@ -34,9 +34,6 @@ internal sealed class ControllableBlobStorageHandler(IBlobStorageHandler inner) 
 
         return inner.DeleteAsync(blobId, cancellationToken);
     }
-
-    public Task<bool> ExistsAsync(string blobId, CancellationToken cancellationToken = default)
-        => inner.ExistsAsync(blobId, cancellationToken);
 
     public Task InitializeAsync(CancellationToken cancellationToken = default)
         => inner.InitializeAsync(cancellationToken);

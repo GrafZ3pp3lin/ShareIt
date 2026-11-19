@@ -31,7 +31,6 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
 
         // No metadata, no items, no names, no proof echo.
         Assert.IsFalse(body.Contains("Items", StringComparison.Ordinal), body);
-        Assert.IsFalse(body.Contains("Payload", StringComparison.Ordinal), body);
         Assert.IsFalse(body.Contains("AccessSession", StringComparison.Ordinal), body);
         Assert.IsFalse(body.Contains(verifier, StringComparison.Ordinal), body);
 
@@ -81,6 +80,24 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     }
 
     [TestMethod]
+    public async Task GetPackage_ReportsWhetherThePackageIsProtected()
+    {
+        var guestId = Guid.NewGuid();
+        var (openPackageId, _) = await CreatePackageWithItemAsync(guestId: guestId);
+
+        var open = await GetPackageDetailsAsync(openPackageId, guestId: guestId);
+        Assert.IsFalse(open.Package.IsProtected);
+
+        var verifier = Verifier();
+        var (protectedPackageId, _) = await CreatePackageWithItemAsync(
+            guestId: guestId, unlockVerifier: verifier);
+
+        var locked = await GetPackageDetailsAsync(
+            protectedPackageId, guestId: guestId, unlockProof: verifier);
+        Assert.IsTrue(locked.Package.IsProtected);
+    }
+
+    [TestMethod]
     public async Task GetPackage_WithSessionAndProof_ReusesTheAccess()
     {
         var guestId = Guid.NewGuid();
@@ -119,7 +136,6 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Unlock required", problem.Title);
         Assert.IsFalse(body.Contains("Items", StringComparison.Ordinal), body);
-        Assert.IsFalse(body.Contains("Payload", StringComparison.Ordinal), body);
         Assert.IsFalse(body.Contains("AccessSession", StringComparison.Ordinal), body);
         Assert.AreEqual(1, (await GetShellAsync(packageId)).CurrentAccessCount);
     }
@@ -141,8 +157,10 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task GetPackage_WhenExhaustedPackageHasMissingInlineBlob_Returns410WithoutReadingIt()
+    public async Task GetPackage_WhenExhaustedPackageHasMissingBlob_Returns410WithoutReadingIt()
     {
+        // An open performs zero blob reads, so a missing object must not turn
+        // a second, rejected read of an exhausted package into a 500.
         var guestId = Guid.NewGuid();
         var (packageId, contentId) = await CreatePackageWithItemAsync(
             bytes: SmallItemBytes, guestId: guestId, maxAccessCount: 1);

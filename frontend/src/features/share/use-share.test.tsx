@@ -28,15 +28,15 @@ const packageDetails = (): ContentPackageDetailsResponse => ({
     MaxAccessCount: 1,
     CurrentAccessCount: 0,
     RemainingAccesses: 1,
-    ExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    ExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    IsProtected: false
   },
   Items: [
     {
       Id: TEXT_ID,
       Kind: 'text',
       Size: 5,
-      Meta: toBase64Url(utf8(JSON.stringify({ name: null, mime: 'text/plain' }))),
-      Payload: toBase64Url(utf8('hello'))
+      Meta: toBase64Url(utf8(JSON.stringify({ name: null, mime: 'text/plain' })))
     }
   ],
   AccessSession: {
@@ -104,6 +104,18 @@ describe('createShare', () => {
 
     await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
     expect(api.getPackageDetails).toHaveBeenCalledWith(PACKAGE_ID, undefined, undefined);
+  });
+
+  it('does not retain a derived key when a passphrase is entered for an unprotected package', async () => {
+    const state = renderShare();
+
+    state.setPassphrase('unnecessary passphrase');
+    flush();
+    state.unlock();
+
+    await vi.waitFor(() => expect(state.status()).toBe('unlocked'));
+    expect(api.getPackageDetails).toHaveBeenCalledWith(PACKAGE_ID, expect.any(String), undefined);
+    expect(state.packageKey()).toBeUndefined();
   });
 
   it.each([400, 404])('treats an HTTP %i as gone', async (httpStatus) => {
@@ -227,15 +239,13 @@ describe('createShare', () => {
             Id: TEXT_ID,
             Kind: 'text',
             Size: '7',
-            Meta: toBase64Url(utf8('not json')),
-            Payload: toBase64Url(utf8('hello'))
+            Meta: toBase64Url(utf8('not json'))
           },
           {
             Id: FILE_ID,
             Kind: 'file',
             Size: '2',
-            Meta: null,
-            Payload: null
+            Meta: null
           }
         ]
       }
@@ -262,7 +272,7 @@ describe('createShare', () => {
 
   it('falls back when metadata is sealed but the link has no key', async () => {
     const key = await deriveKeyBits('correct horse battery', await packageSalt(PACKAGE_ID));
-    const sealedMeta = await encodeMeta({ name: 'secret.txt', mime: 'text/plain' }, key, PACKAGE_ID, TEXT_ID);
+    const framedMeta = await encodeMeta({ name: 'secret.txt', mime: 'text/plain' }, key, PACKAGE_ID, TEXT_ID);
     api.getPackageDetails.mockResolvedValueOnce({
       status: 200,
       data: {
@@ -272,8 +282,7 @@ describe('createShare', () => {
             Id: TEXT_ID,
             Kind: 'text',
             Size: 5,
-            Meta: toBase64Url(sealedMeta),
-            Payload: toBase64Url(utf8('hello'))
+            Meta: toBase64Url(framedMeta)
           }
         ]
       }

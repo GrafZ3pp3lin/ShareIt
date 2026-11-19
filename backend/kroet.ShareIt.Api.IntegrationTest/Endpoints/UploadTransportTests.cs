@@ -1,14 +1,15 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 
 namespace kroet.ShareIt.Api.IntegrationTest.Endpoints;
 
 /// <summary>
-/// Transport contract of the upload endpoint: the body is a streamed
-/// <c>multipart/form-data</c> request with metadata parts before the payload,
-/// and the declared size is both a limit input and part of the idempotency
-/// fingerprint.
+/// Transport contract of the upload endpoint: a raw binary PUT whose
+/// <c>Content-Length</c> is both the limit input and part of the idempotency
+/// fingerprint, with metadata in the <c>X-Content-Kind</c> and
+/// <c>X-Content-Meta</c> headers.
 /// </summary>
 [TestClass]
 public sealed class UploadTransportTests : ShareItApiTestBase
@@ -56,193 +57,80 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task Upload_WithoutSizePart_Returns400()
+    public async Task Upload_WithoutContentLength_Returns400()
     {
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId);
 
-        using var form = new MultipartFormDataContent
-        {
-            { new StringContent(Guid.NewGuid().ToString()), "Id" },
-            { new StringContent("file"), "Kind" },
-            { new StringContent("bWV0YQ"), "Meta" },
-            { new ByteArrayContent(SmallItemBytes), "File", "item.bin" }
-        };
+        // A non-seekable body forces chunked transfer encoding: no
+        // Content-Length header reaches the endpoint.
+        using var content = new StreamContent(new NonSeekableStream(SmallItemBytes));
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
-        var response = await SendRawUploadAsync(packageId, form, guestId);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/v1/content/package/{packageId}/content/{Guid.NewGuid()}")
+        {
+            Content = content
+        };
+        request.Headers.TransferEncodingChunked = true;
+        request.Headers.Add("X-Content-Kind", "file");
+        request.Headers.Add("X-Content-Meta", "bWV0YQ");
+        AddIdentity(request, guestId, null);
+
+        var response = await Client.SendAsync(request);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Invalid size", problem.Title);
+        Assert.AreEqual("Content length required", problem.Title);
     }
 
     [TestMethod]
-    public async Task Upload_WithFilePartBeforeMetadata_Returns400()
+    public async Task Upload_WithNonOctetStreamContentType_Returns415()
     {
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId);
 
-        using var form = new MultipartFormDataContent
-        {
-            { new ByteArrayContent(SmallItemBytes), "File", "item.bin" },
-            { new StringContent(Guid.NewGuid().ToString()), "Id" },
-            { new StringContent("file"), "Kind" },
-            { new StringContent("bWV0YQ"), "Meta" },
-            { new StringContent(SmallItemBytes.Length.ToString()), "Size" }
-        };
+        using var content = new ByteArrayContent(SmallItemBytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        var response = await SendRawUploadAsync(
+            packageId, Guid.NewGuid(), "file", "bWV0YQ", content, guestId);
 
-        var response = await SendRawUploadAsync(packageId, form, guestId);
-
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
-        var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Content id required", problem.Title);
-    }
-
-    [TestMethod]
-    public async Task Upload_WithUnknownPart_Returns400()
-    {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
-
-        using var form = new MultipartFormDataContent
-        {
-            { new StringContent("unexpected"), "Bogus" },
-            { new StringContent(Guid.NewGuid().ToString()), "Id" },
-            { new StringContent("file"), "Kind" },
-            { new StringContent("bWV0YQ"), "Meta" },
-            { new StringContent(SmallItemBytes.Length.ToString()), "Size" },
-            { new ByteArrayContent(SmallItemBytes), "File", "item.bin" }
-        };
-
-        var response = await SendRawUploadAsync(packageId, form, guestId);
-
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
-        var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Invalid upload", problem.Title);
-        StringAssert.Contains(problem.Detail, "Bogus");
-    }
-
-    [TestMethod]
-    public async Task Upload_WithNonMultipartContentType_Returns415()
-    {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
-
-        using var content = new StringContent("{\"Id\":\"ignored\"}", Encoding.UTF8, "application/json");
-        var response = await SendRawUploadAsync(packageId, content, guestId);
-
-        // The endpoint only advertises multipart/form-data, so the framework
-        // rejects other content types before the handler runs.
         Assert.AreEqual(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
-    }
-
-    [TestMethod]
-    public async Task Upload_WithMultipartContentTypeWithoutBoundary_Returns400()
-    {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
-
-        using var content = new StringContent("not-a-multipart-body", Encoding.UTF8);
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("multipart/form-data");
-        var response = await SendRawUploadAsync(packageId, content, guestId);
-
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Invalid content type", problem.Title);
     }
 
-
     [TestMethod]
-    public async Task Upload_WithQuotedBoundary_Returns200()
+    public async Task Upload_WithoutKindHeader_Returns400()
     {
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId);
-        var contentId = Guid.NewGuid();
-        const string boundary = "quoted-boundary";
-        var body = ValidMultipartBody(boundary, contentId, "hello");
 
-        using var content = new StringContent(body, Encoding.UTF8);
-        content.Headers.ContentType =
-            System.Net.Http.Headers.MediaTypeHeaderValue.Parse($"multipart/form-data; boundary=\"{boundary}\"");
-
-        var response = await SendRawUploadAsync(packageId, content, guestId);
-
-        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, await response.Content.ReadAsStringAsync());
-        Assert.AreEqual(1, (await GetDatabaseCountsAsync()).ContentCount);
-        Assert.AreEqual(1, await CountStoredObjectsAsync());
-    }
-
-    [TestMethod]
-    public async Task Upload_WithTruncatedMultipartBody_Returns400AndStoresNothing()
-    {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
-        var contentId = Guid.NewGuid();
-        const string boundary = "truncated-boundary";
-        var body = ValidMultipartBody(boundary, contentId, "hello", closingBoundary: false);
-
-        using var content = new StringContent(body, Encoding.UTF8);
-        content.Headers.ContentType =
-            System.Net.Http.Headers.MediaTypeHeaderValue.Parse($"multipart/form-data; boundary={boundary}");
-
-        var response = await SendRawUploadAsync(packageId, content, guestId);
+        using var content = new ByteArrayContent(SmallItemBytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        var response = await SendRawUploadAsync(
+            packageId, Guid.NewGuid(), kind: null, "bWV0YQ", content, guestId);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Invalid upload", problem.Title);
-        Assert.AreEqual(0, (await GetDatabaseCountsAsync()).ContentCount);
-        Assert.AreEqual(0, await CountStoredObjectsAsync());
+        Assert.AreEqual("Invalid kind", problem.Title);
     }
 
     [TestMethod]
-    public async Task Upload_WithDuplicateMetadataPart_Returns400()
+    public async Task Upload_WithoutMetaHeader_Returns400()
     {
         var guestId = Guid.NewGuid();
         var packageId = await CreatePackageAsync(guestId: guestId);
-        const string boundary = "duplicate-part-boundary";
-        var body = ValidMultipartBody(boundary, Guid.NewGuid(), "hello")
-            .Replace(
-                $"Content-Disposition: form-data; name=\"Size\"\r\n\r\n5\r\n",
-                $"Content-Disposition: form-data; name=\"Size\"\r\n\r\n5\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"Size\"\r\n\r\n5\r\n");
 
-        using var content = new StringContent(body, Encoding.UTF8);
-        content.Headers.ContentType =
-            System.Net.Http.Headers.MediaTypeHeaderValue.Parse($"multipart/form-data; boundary={boundary}");
-
-        var response = await SendRawUploadAsync(packageId, content, guestId);
+        using var content = new ByteArrayContent(SmallItemBytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        var response = await SendRawUploadAsync(
+            packageId, Guid.NewGuid(), "file", meta: null, content, guestId);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Invalid upload", problem.Title);
-        StringAssert.Contains(problem.Detail, "Duplicate part");
-        Assert.AreEqual(0, (await GetDatabaseCountsAsync()).ContentCount);
-        Assert.AreEqual(0, await CountStoredObjectsAsync());
-    }
-
-    [TestMethod]
-    public async Task Upload_WithTrailingPartAfterFile_Returns400AndStoresNothing()
-    {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
-        const string boundary = "trailing-part-boundary";
-        var body = ValidMultipartBody(boundary, Guid.NewGuid(), "hello", closingBoundary: false) +
-            $"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"Extra\"\r\n\r\nx\r\n--{boundary}--\r\n";
-
-        using var content = new StringContent(body, Encoding.UTF8);
-        content.Headers.ContentType =
-            System.Net.Http.Headers.MediaTypeHeaderValue.Parse($"multipart/form-data; boundary={boundary}");
-
-        var response = await SendRawUploadAsync(packageId, content, guestId);
-
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
-        var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("Invalid upload", problem.Title);
-        Assert.AreEqual(0, (await GetDatabaseCountsAsync()).ContentCount);
-
-        // The item was stored before the trailing section was seen; deletion
-        // goes through the durable queue.
-        await RunCleanupAsync();
-        Assert.AreEqual(0, await CountStoredObjectsAsync());
+        Assert.AreEqual("Invalid meta", problem.Title);
     }
 
     [TestMethod]
@@ -263,28 +151,6 @@ public sealed class UploadTransportTests : ShareItApiTestBase
         Assert.AreEqual("Content size mismatch", problem.Title);
         Assert.AreEqual(0, (await GetDatabaseCountsAsync()).ContentCount);
         Assert.AreEqual(0, await CountStoredObjectsAsync());
-    }
-
-    private static string ValidMultipartBody(
-        string boundary,
-        Guid contentId,
-        string payload,
-        bool closingBoundary = true)
-    {
-        var body = $"--{boundary}\r\n" +
-            $"Content-Disposition: form-data; name=\"Id\"\r\n\r\n{contentId}\r\n" +
-            $"--{boundary}\r\n" +
-            "Content-Disposition: form-data; name=\"Kind\"\r\n\r\nfile\r\n" +
-            $"--{boundary}\r\n" +
-            "Content-Disposition: form-data; name=\"Meta\"\r\n\r\nbWV0YQ\r\n" +
-            $"--{boundary}\r\n" +
-            $"Content-Disposition: form-data; name=\"Size\"\r\n\r\n{Encoding.UTF8.GetByteCount(payload)}\r\n" +
-            $"--{boundary}\r\n" +
-            "Content-Disposition: form-data; name=\"File\"; filename=\"item.bin\"\r\n" +
-            "Content-Type: application/octet-stream\r\n\r\n" +
-            payload;
-
-        return closingBoundary ? $"{body}\r\n--{boundary}--\r\n" : body;
     }
 
     [TestMethod]
@@ -356,5 +222,60 @@ public sealed class UploadTransportTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
         var problem = await ReadProblemAsync(conflict);
         Assert.AreEqual("Content id reused with different content", problem.Title);
+    }
+
+    /// <summary>
+    /// Wraps a byte array in a non-seekable stream so the HTTP client cannot
+    /// compute a Content-Length and falls back to chunked transfer encoding.
+    /// </summary>
+    private sealed class NonSeekableStream(byte[] bytes) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var remaining = bytes.Length - _position;
+            var toCopy = Math.Min(count, remaining);
+            Array.Copy(bytes, _position, buffer, offset, toCopy);
+            _position += toCopy;
+            return toCopy;
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            var remaining = bytes.Length - _position;
+            var toCopy = Math.Min(count, remaining);
+            Array.Copy(bytes, _position, buffer, offset, toCopy);
+            _position += toCopy;
+            return Task.FromResult(toCopy);
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

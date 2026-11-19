@@ -131,6 +131,28 @@ describe('<ComposerPage />', () => {
     ).toBeInTheDocument();
   });
 
+  it('uses a static accessible label for upload progress', async () => {
+    let resolveUpload: ((result: { data: { Id: string } }) => void) | undefined;
+    api.uploadItem.mockImplementation(
+      (_packageId, _item, onProgress: (sent: number, total: number) => void) =>
+        new Promise((resolve) => {
+          onProgress(5, 10);
+          resolveUpload = resolve;
+        })
+    );
+    renderPage();
+    fireEvent.input(screen.getByPlaceholderText('paste or type your text'), { target: { value: 'hello' } });
+    flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(await screen.findByRole('progressbar', { name: 'Upload progress' })).toBeInTheDocument();
+    expect(screen.getByText('Uploading 1/1: 50%')).toBeInTheDocument();
+
+    resolveUpload?.({ data: { Id: 'package-1' } });
+    await screen.findByText('link ready');
+  });
+
   it('submits with Ctrl+Enter from the textarea', async () => {
     renderPage();
     const textarea = screen.getByPlaceholderText('paste or type your text');
@@ -215,7 +237,6 @@ describe('<ComposerPage />', () => {
 
     expect(await screen.findByText('storage unreachable')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'retry upload' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'show link anyway' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'retry upload' }));
 
@@ -223,7 +244,7 @@ describe('<ComposerPage />', () => {
     expect(api.uploadItem).toHaveBeenCalledTimes(2);
   });
 
-  it('can show the link with an incomplete-upload warning', async () => {
+  it('offers only the retry path after a failed upload — no partial link', async () => {
     api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
     renderPage();
     fireEvent.input(screen.getByPlaceholderText('paste or type your text'), { target: { value: 'hello' } });
@@ -232,9 +253,8 @@ describe('<ComposerPage />', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
     await screen.findByText('storage unreachable');
 
-    fireEvent.click(screen.getByRole('button', { name: 'show link anyway' }));
-
-    await screen.findByText('link ready');
-    expect(screen.getByText(/Some items did not finish uploading/)).toBeInTheDocument();
+    // Links are only shown once every item is uploaded.
+    expect(screen.queryByRole('button', { name: 'show link anyway' })).not.toBeInTheDocument();
+    expect(screen.queryByText('link ready')).not.toBeInTheDocument();
   });
 });

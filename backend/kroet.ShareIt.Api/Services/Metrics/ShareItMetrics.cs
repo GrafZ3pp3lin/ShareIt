@@ -22,10 +22,10 @@ public sealed class ShareItMetrics
         ExpiredPackages = 0,
         ExhaustedPackages = 0,
         ProtectedPackages = 0,
-        PrivatePackages = 0,
         EmptyPackages = 0,
         TotalItems = 0,
         TotalBytes = 0,
+        PendingBlobDeletions = 0,
         CleanupPending = 0
     };
 
@@ -44,6 +44,7 @@ public sealed class ShareItMetrics
     private readonly ObservableGauge<int> _packages;
     private readonly ObservableGauge<int> _items;
     private readonly ObservableGauge<long> _storageBytes;
+    private readonly ObservableGauge<int> _pendingBlobDeletions;
     private readonly ObservableGauge<int> _cleanupPending;
     private readonly ObservableGauge<long> _cleanupLastSuccess;
     private readonly ObservableGauge<int> _dependencyUp;
@@ -102,7 +103,7 @@ public sealed class ShareItMetrics
         _rateLimited = meter.CreateCounter<long>(
             "shareit.rate.limited",
             unit: "{request}",
-            description: "Number of requests rejected by the package-read or download rate limiter.");
+            description: "Number of requests rejected by the package-read, download or upload rate limiter.");
 
         _packages = meter.CreateObservableGauge(
             "shareit.packages",
@@ -121,6 +122,12 @@ public sealed class ShareItMetrics
             () => Volatile.Read(ref _snapshot).TotalBytes,
             unit: "By",
             description: "Current logical size of all stored content, in bytes.");
+
+        _pendingBlobDeletions = meter.CreateObservableGauge(
+            "shareit.blob_deletion.queue_depth",
+            () => Volatile.Read(ref _snapshot).PendingBlobDeletions,
+            unit: "{job}",
+            description: "Number of queued blob deletions waiting for the cleanup service.");
 
         _cleanupPending = meter.CreateObservableGauge(
             "shareit.cleanup.pending",
@@ -235,9 +242,6 @@ public sealed class ShareItMetrics
         yield return new Measurement<int>(
             snapshot.ProtectedPackages,
             new KeyValuePair<string, object?>("state", "protected"));
-        yield return new Measurement<int>(
-            snapshot.PrivatePackages,
-            new KeyValuePair<string, object?>("state", "private"));
         yield return new Measurement<int>(
             snapshot.EmptyPackages,
             new KeyValuePair<string, object?>("state", "empty"));

@@ -1,10 +1,11 @@
 # Crypto v2 — passphrase-gated packages
 
-Protocol reference for the shipped package format: key schedule, sealed envelope, transport, unlock
+Protocol reference for the shipped package format: key schedule, framed encryption, transport, unlock
 proof, metadata and access accounting. Keep this in sync with the code when changing anything that
 affects existing links.
 
-Scope: `frontend/src/shared/crypto`, share page, composer flow, package/item storage, `GET /package/{id}`.
+Scope: `frontend/src/shared/crypto`, share page, composer flow, package/item storage, `GET /package/{id}`
+and the item download endpoint.
 
 ---
 
@@ -58,7 +59,7 @@ itemKey(i)  = HKDF-SHA256(key, salt = itemId, info = "shareit/item")      // 32 
 metaKey(i)  = HKDF-SHA256(key, salt = itemId, info = "shareit/item-meta") // 32 bytes
 ```
 
-- `key` is `deriveBits`, not `deriveKey`: it is used as an AES key, an HMAC key and as HKDF input.
+- `key` is `deriveBits`, not `deriveKey`: it is used as an HMAC key and as HKDF input.
 - **Iterations are a constant in the client**, not on the package and not in the envelope: the client
   must derive the verifier before it can fetch anything, so there is nothing to read first. Raising it
   later breaks existing packages — accepted pre-release.
@@ -71,42 +72,60 @@ PBKDF2 per candidate.
 
 ---
 
-## 4. The sealed envelope
+## 4. Framed encryption
 
-One container for everything:
+One container for everything — `meta`, text and files — a sequence of frames:
 
 ```
-sealed = "SIE2" (4) | IV (12) | AES-GCM ciphertext + tag (16)
+blob = "SIE3" magic + frames…
+frame = magic (4) | chunkIndex u32 BE (4) | flags u8 (1: bit 0 = isFinal)
+      | ciphertextLength u32 BE (4) | AES-GCM ciphertext + tag (ciphertextLength + 16)
 ```
 
-- Overhead: 32 bytes.
-- `seal(key, bytes, aad) -> Uint8Array`, `open(key, sealed, aad) -> Uint8Array`.
-- Detection is `isSealed(bytes)` on the magic. No JSON parsing, no MIME marker, no per-type branch.
+- Fixed 4 MiB plaintext frames. Small items (`meta`, text, files ≤ 4 MiB) are a single final frame:
+  `chunkIndex = 0, isFinal = 1`.
+- Frame overhead: 13 header bytes + 16 GCM tag bytes per frame.
+- The 12-byte AES-GCM IV is **derived, not stored**:
+  `iv = SHA-256(utf8("shareit/frame-iv:") || chunkIndex u32 BE)[0..12]`. Keys are already unique per
+  `(packageId, itemId, role)`, so the same IV across items is safe, and re-sealing one item produces
+  byte-identical frames — retries are idempotent by construction.
+- Files are encrypted slice-by-slice with `file.slice(...)`: the whole-file plaintext is never held
+  as one `ArrayBuffer`. Downloads are decrypted frame by frame through a `TransformStream`; a frame's
+  plaintext is emitted only after its GCM tag verifies.
+- Detection follows package protection: the client only retains the package key for protected packages.
+  With a key, the frame magic is required and a missing/invalid magic is an integrity error; without a
+  key, the bytes are raw. `isFramed` remains the magic check inside the frame reader. No JSON parsing,
+  no MIME marker, no per-type branch.
 
 ---
 
-## 5. Transport rule — size, not type
+## 5. Transport rule — everything downloads through the session
 
-Text and files are the same bytes. The only decision is whether `GET /{id}` carries them inline:
+Text and files are the same bytes and travel the same way: `GET /package/{id}` returns **only**
+metadata (no blob reads at all), and every item's bytes are fetched with the package's access session:
 
-| item | response |
-| --- | --- |
-| stored bytes ≤ `InlinePayloadLimitBytes` (16 KB) **and** the response budget (64 KB) is not spent | `payload` = base64url(bytes) |
-| otherwise | no payload; download with the package's `accessSession` |
+```
+GET /package/{packageId}/content/{contentId}/download
+X-Access-Session: <opaque token>
+```
 
-Iterate items in a stable order (by creation) and spend the budget. `Size` is always the stored byte
-length — no base64 inflation in the database. Nothing is issued per deferred item: the session returned
-by the open authorizes the download when the recipient clicks it.
+`Size` is always the stored byte length. Nothing is minted per item: the session returned by the open
+authorizes the download when the recipient opens the item, and downloads never consume it.
 
 ```ts
-const bytes = item.payload
-  ? base64urlDecode(item.payload)
-  : await download(packageId, item.id, accessSession.token);
-const plain = isSealed(bytes) ? await open(itemKey(item.id), bytes, itemAad(packageId, item.id)) : bytes;
+const bytes = await download(packageId, item.id, accessSession.token);
+const plain = key
+  ? await openFrames(itemKey(item.id), bytes, (chunkIndex, isFinal) =>
+      frameAad(packageId, item.id, 'item', chunkIndex, isFinal)
+    )
+  : bytes;
 ```
 
 - `kind` only decides *rendering* (document block vs file row), never transport.
 - Unencrypted items are raw bytes (UTF-8 for text); the magic distinguishes them.
+- Downloads stream: `response.body` pipes through the frame decryptor (protected packages) or
+  straight through, into a writable destination picked with `showSaveFilePicker` where available, or
+  into a `Blob` collected from the plaintext chunks as the fallback.
 
 ---
 
@@ -117,18 +136,18 @@ downloading every file. A per-package manifest solves that, and adds a second wr
 from the item rows. Instead, **the metadata lives on the item**:
 
 ```
-meta(bytes) = sealed( utf8(JSON { name, mime }) )   when the package is protected
-            = utf8(JSON { name, mime })             when it is not
+meta(bytes) = sealed frame( utf8(JSON { name, mime }) )   when the package is protected
+            = utf8(JSON { name, mime })                   when it is not
 
-POST /{id}/upload   fields: Id, Kind, Meta (base64url of those bytes), File (content bytes)
-GET  /{id} item     { id, kind, size, meta: base64url(meta bytes), payload? }
+PUT /{packageId}/content/{contentId}   headers: X-Content-Kind, X-Content-Meta (base64url)
+GET  /{id} item                        { id, kind, size, meta: base64url(meta bytes) }
 ```
 
 - The server stores `Meta` verbatim as opaque **text** (base64url) in the `contents.meta` column and
   never decodes or parses it. It is text, not `bytea`: the wire form is already the storage form, and
   nothing server-side needs the decoded bytes.
-- Client: `bytes = base64urlDecode(item.meta)` → `isSealed(bytes) ? open(metaKey(item.id), bytes, metaAad(packageId, item.id)) : JSON.parse(bytes)`.
-- Same rule as `payload`, so one helper reads both.
+- Client: `bytes = base64urlDecode(item.meta)` → `key ? openFrames(metaKey(item.id), bytes, frameAad(..., 'meta')) : JSON.parse(bytes)`; with a key, plaintext metadata is an integrity error.
+- Same rule as content, so the frame reader reads both.
 - `{ name, mime }` is all that is needed; `kind` and `size` stay in the clear because the server needs
   them for limits and routing, and the ciphertext length leaks `size` anyway.
 - Unprotected packages keep plaintext JSON — their content is public by definition, and the server
@@ -137,7 +156,7 @@ GET  /{id} item     { id, kind, size, meta: base64url(meta bytes), payload? }
 Why not a manifest:
 
 - no second write and no window where items exist without names;
-- no "manifest entry without item" fallback, no size cap, no extra key/AAD/Build step;
+- no "manifest entry without item" fallback, no size cap, no extra key/AAD/build step;
 - the name is written with the item in the same row, so it can never drift;
 - `file_name` / `mime_type` columns disappear entirely — `meta` replaces both.
 
@@ -151,23 +170,25 @@ security-relevant ever trusts the server's `kind`.
 
 ---
 
-## 7. AAD — binding every blob to its place
+## 7. AAD — binding every frame to its place
 
-Both `seal` and `open` take Additional Authenticated Data: authenticated by the GCM tag, never
-encrypted, never stored.
+Every frame's GCM tag authenticates the AAD, which is never encrypted and never stored:
 
 ```
-aad(item) = utf8("shareit/item:1:" || packageId || ":" || itemId)
-aad(meta) = utf8("shareit/meta:1:" || packageId || ":" || itemId)
+aad(packageId, itemId, role, chunkIndex, isFinal) =
+  utf8("shareit/frame:1:" || packageId || ":" || itemId || ":" || role || ":" || chunkIndex || ":" || (isFinal ? 1 : 0))
+  role ∈ { "item", "meta" }
 ```
 
 - Ids are **normalised once** — lowercase, hyphenated UUID — in a single helper shared with key
-  derivation. A mismatch otherwise surfaces as “wrong passphrase”.
-- Nothing about the AAD goes into the envelope: both sides reconstruct it from the URL and the ids.
-- Role + version prefix means an item blob can never be accepted as metadata, or a future format as
-  the current one.
-- This is defence-in-depth: the key schedule (per-package salt, per-item HKDF, distinct `info`) already
-  separates packages, items and roles. AAD makes it explicit and keeps it if the schedule changes.
+  derivation. A mismatch otherwise surfaces as a decryption failure.
+- Nothing about the AAD goes into the frame: both sides reconstruct it from the URL and the ids.
+- Role, chunk index and final flag in the AAD mean an item frame can never be accepted as metadata,
+  a reordered or duplicated chunk never verifies, and a non-final frame cannot be presented as a
+  complete item.
+- This is defence-in-depth: the key schedule (per-package salt, per-item HKDF, distinct `info`)
+  already separates packages, items and roles. AAD makes it explicit and keeps it if the schedule
+  changes.
 
 ---
 
@@ -200,13 +221,15 @@ Server, in order:
    generic body. **No counter change, no metadata.**
 4. Load content metadata; an empty package → `410` without claiming.
 5. Validate `X-Access-Session` if present. A valid session skips the claim and is returned again.
-6. Prepare inline payloads. Any failure here leaves the counter unchanged.
+6. Prepare the item list (metadata only — zero blob reads). Any failure here leaves the counter
+   unchanged.
 7. Atomically claim one access and insert the session in the same transaction; return the items and the
    session. Concurrent claims serialize on the package row and can never exceed the limit.
 
-Rate limiting: 20 package reads / 15 min per `(packageId, remoteIp)` and 120 downloads / 1 min per
-remote IP (configurable via `RateLimitSettings`), successful unlocks included, then `429` +
-`Retry-After`. Log failures without the proof or session value; never log the headers.
+Rate limiting: 20 package reads / 15 min per `(packageId, remoteIp)`, 120 downloads / 1 min per
+remote IP and 120 uploads / 1 min per remote IP (configurable via `RateLimitSettings`), successful
+unlocks included, then `429` + `Retry-After`. Log failures without the proof or session value; never
+log the headers.
 
 `401` vs `404`: knowing the id equals holding the link, so "this id exists and is protected" is not
 treated as a secret. `401` for protected, `404` for unknown.
@@ -229,7 +252,8 @@ not consume another access.
 | --- | --- |
 | `Id` | client-supplied; salt and verifier derive from it |
 | `UnlockVerifier` | `TEXT`, nullable: base64url HMAC verifier; null for unprotected packages |
-| `UserId`, timestamps, counters, expires, `IsPrivate` | owner, access accounting and expiry |
+| `UserId`, timestamps, counters | owner, access accounting |
+| `ExpiresAt` | `TIMESTAMPTZ NOT NULL`: every package expires, so abandoned uploads are swept by cleanup |
 | `Title`, `Description` | not stored; the links list names rows by creation timestamp |
 
 `access_sessions`
@@ -244,7 +268,7 @@ not consume another access.
 
 | Column | Notes |
 | --- | --- |
-| `Meta` | `TEXT` (base64url): sealed or plaintext JSON `{ name, mime }`, stored verbatim, never decoded or parsed server-side |
+| `Meta` | `TEXT` (base64url): framed or plaintext JSON `{ name, mime }`, stored verbatim, never decoded or parsed server-side |
 | `ContentType` (`text` / `file`) | display and limits only; never decides transport |
 | `Size` | stored byte length |
 | `Id`, `Url`, `PackageId` | item id, blob URL, owning package |
@@ -262,12 +286,17 @@ ciphertext length, metadata blob length.
 The package id must exist before anything is encrypted (salt and verifier derive from it).
 
 1. Generate the package id (`crypto.randomUUID()`) and one id per item.
-2. `POST /package` with `Id` and `UnlockVerifier` (null when password is off).
-3. For each item: seal the content bytes (or leave raw), build `meta` (sealed or plaintext JSON), then
-   `POST /package/{id}/upload` with `Id`, `Kind`, `Meta`, `File`.
-4. Result screen: plain link and combined link (§8). No salt fragment.
+2. `POST /package` with `Id`, `UnlockVerifier` (null when password is off), `TimeToLiveHours`
+   (required: every package expires) and `MaxAccessCount`.
+3. For each item: frame the content slice-by-slice into 4 MiB frames (text and files alike) or
+   leave it raw, build `meta` (framed or plaintext JSON), then
+   `PUT /package/{id}/content/{contentId}` with the bytes as a raw `application/octet-stream` body and
+   `X-Content-Kind` / `X-Content-Meta` headers. `Content-Length` is the declared size.
+4. Result screen: plain link and combined link (§8). No salt fragment. The link is shown only after
+   every item uploaded; failed uploads offer retry with the same ids.
 
-Retries keep the ids stable; a duplicate create from the same owner returns the existing package.
+Retries keep the ids stable and sealing is deterministic, so a duplicate upload is byte-for-byte
+idempotent; a duplicate create from the same owner returns the existing package.
 
 ### Share
 
@@ -278,8 +307,9 @@ Retries keep the ids stable; a duplicate create from the same owner returns the 
    protected ones answer `401`).
 3. `GET /package/{id}` with the proof header when a passphrase was entered, plus the stored session
    when this tab already has one. A valid session avoids claiming another access.
-4. Per item: decode `meta` → `open` or parse → `{ name, mime }`.
-5. Per item content: `payload` → decode, or `accessSession` → fetch; `isSealed(bytes) ? open : bytes`.
+4. Per item: decode `meta` → open frames or parse → `{ name, mime }`.
+5. Per item content: always download with the access session; framed bytes are decrypted frame by
+   frame (streamed into the save destination for files, buffered for text blocks).
 6. Wrong passphrase → `401`, inline error, field kept, no access consumed.
 7. After success, store the session in `sessionStorage` for this package and remove the fragment with
    `history.replaceState`; the key stays in memory only.
@@ -288,8 +318,8 @@ The gate is the whole page until step 3 succeeds; nothing from the package is re
 
 ### Links list
 
-`GET /packages` (authenticated only). Rows carry the creation timestamp, id, aggregate size, item
-count, counters and protection state — no names, no local storage. The list is keyset-paginated on
+`GET /packages` (authenticated only). Rows carry the creation timestamp, id, expiry, aggregate size,
+item count, counters and protection state — no names, no local storage. The list is keyset-paginated on
 `(created_at, id)`; the client loads more pages explicitly.
 
 ---
@@ -302,17 +332,17 @@ Improved:
 - A wrong passphrase costs the recipient nothing and leaks nothing.
 - A crawler, chat preview or mail scanner cannot burn an access or read names.
 - Names and real MIME types no longer sit in the database.
-- Every blob is bound to its role, package and item via AAD and the key schedule — moving, relabelling
-  or replaying blobs between packages/items fails to decrypt.
+- Every frame is bound to its role, package, item, chunk index and final flag via AAD and the key
+  schedule — moving, relabelling, reordering or replaying frames fails to decrypt.
 - Access sessions are bearer grants: the token is returned only in the response body, stored in
   `sessionStorage`, and persisted server-side only as a SHA-256 hash. It is bound to the package and
   the caller's user/guest id, expires after 15 minutes, and is never put in a URL.
+- Opening a package performs zero blob reads, so unlock cost does not scale with item sizes.
 
 Residual, by design:
 
 - Existence, ciphertext length, item count, timestamps, owner and counters are visible to the server.
-- Ciphertext length reveals the plaintext length within 32 bytes. Inline items add base64 (~33%) on
-  the wire only, never in storage.
+- Ciphertext length reveals the plaintext length within 29 bytes per 4 MiB frame.
 - Metadata blob length leaks the name/MIME length.
 - Offline guessing against the ciphertext (and verifier) is possible; strength depends entirely on the
   passphrase.
@@ -327,8 +357,8 @@ Residual, by design:
 
 ## 13. No legacy
 
-Only the current format is read: the v1 per-item-salt envelopes (`{v:1, …}`, `SIE1`) are not supported.
-One format ships: `SIE2`.
+Only the current format is read: the v1 per-item-salt envelopes (`{v:1, …}`, `SIE1`) and the `SIE2`
+envelope are not supported. One format ships: the `SIE3` frame container.
 
 ---
 
@@ -339,10 +369,15 @@ The automated tests pin these down.
 Unit (frontend):
 
 - derive/verify vectors: same passphrase + id → same verifier; different id → different verifier.
-- `seal`/`open` round-trip for arbitrary bytes; one helper reads both `payload` and `meta`.
-- AAD binding: a blob sealed for package A / item A does not open under package B, item B or the other
-  role; normalised ids produce identical AAD from differently formatted inputs.
-- meta round-trip, sealed and plaintext; fallback when missing/corrupt.
+- frame round-trips for arbitrary bytes; one helper reads both content and `meta`.
+- deterministic sealing: identical plaintext, key and AAD produce identical frames.
+- multi-frame round-trips; tampered, truncated, reordered and duplicated frames fail; trailing bytes
+  after the final frame fail.
+- the streaming decryptor handles byte-at-a-time and arbitrary chunk boundaries and never emits
+  plaintext from a frame whose tag does not verify.
+- AAD binding: a frame sealed for package A / item A / role A does not open under package B, item B or
+  the other role; normalised ids produce identical AAD from differently formatted inputs.
+- meta round-trip, framed and plaintext; fallback when missing/corrupt.
 
 Integration (backend):
 
@@ -351,17 +386,14 @@ Integration (backend):
 - correct proof → details, counter +1; second call at the limit → `410`.
 - failed attempts hit the rate limit → `429`.
 - unencrypted package → open, no header.
+- `GET /package/{id}` performs zero blob reads (a missing object still answers normally).
 - `meta` is returned verbatim (byte-for-byte after base64url decoding) and never parsed.
-- payload rule: small → `payload`, large → session download; budget exhausted → session downloads.
-- session reuse: a re-fetch with a valid session does not increment the counter.
-- download retries and parallel downloads with the same session all succeed.
-- an expired session → `401`; a package expired during a valid session → `410`.
-- cleanup retains an exhausted package for at least the session lifetime.
-
----
-
-## 15. Future considerations
-
-1. Padding ciphertext to buckets: worth the cost?
-2. Passphrase alphabet: generated phrases are 16 random bytes base64url (22 chars, hard to type). A
-   four-word phrase would be friendlier for the “send it in another channel” flow.
+- every item downloads through the session; downloads retry, run in parallel and do not consume
+  another access; an expired session → `401`; a package expired during a valid session → `410`.
+- upload: raw binary PUT with `Content-Length` as the declared size; declared/actual mismatch → `400`,
+  above the identity limit → `413`, missing `Content-Length` → `400`, wrong content type → `415`;
+  idempotent retries reuse the stored item, reusing the id with different kind/size/meta → `409`.
+- `TimeToLiveHours` is required (1..max); `MaxItemsPerPackage` bounds a package; the upload rate limit
+  returns `429` after the permit limit.
+- owner deletion queues blobs; cleanup retains an exhausted package for at least the session lifetime
+  and deletes expired packages immediately.

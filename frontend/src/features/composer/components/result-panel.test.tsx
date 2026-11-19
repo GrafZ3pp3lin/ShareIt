@@ -56,10 +56,8 @@ describe('ResultPanel', () => {
     expect(writeText).toHaveBeenCalledWith('http://localhost:3001/s/package-1#s=a%20b%26c');
   });
 
-  it('shows the incomplete notice and resets the form', () => {
-    const { onReset } = renderPanel({ ...baseResult, incomplete: true });
-
-    expect(screen.getByText(/Some items did not finish uploading/)).toBeInTheDocument();
+  it('resets the form', () => {
+    const { onReset } = renderPanel(baseResult);
 
     fireEvent.click(screen.getByRole('button', { name: 'Upload another' }));
     expect(onReset).toHaveBeenCalledTimes(1);

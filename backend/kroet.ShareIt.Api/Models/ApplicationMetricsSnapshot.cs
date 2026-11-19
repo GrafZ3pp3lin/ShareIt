@@ -36,11 +36,6 @@ public sealed record ApplicationMetricsSnapshot
     public required int ProtectedPackages { get; init; }
 
     /// <summary>
-    /// Packages marked as private.
-    /// </summary>
-    public required int PrivatePackages { get; init; }
-
-    /// <summary>
     /// Packages without any content items.
     /// </summary>
     public required int EmptyPackages { get; init; }
@@ -54,6 +49,11 @@ public sealed record ApplicationMetricsSnapshot
     /// Sum of the logical stored item sizes, in bytes.
     /// </summary>
     public required long TotalBytes { get; init; }
+
+    /// <summary>
+    /// Number of blob-deletion queue entries waiting for the cleanup service.
+    /// </summary>
+    public required int PendingBlobDeletions { get; init; }
 
     /// <summary>
     /// Packages eligible for cleanup at snapshot time: expired, or exhausted

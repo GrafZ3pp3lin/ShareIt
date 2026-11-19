@@ -66,10 +66,10 @@ public sealed class MetricsSnapshotServiceTests
                 ExpiredPackages = 1,
                 ExhaustedPackages = 1,
                 ProtectedPackages = 2,
-                PrivatePackages = 1,
                 EmptyPackages = 4,
                 TotalItems = 7,
                 TotalBytes = 1234,
+                PendingBlobDeletions = 5,
                 CleanupPending = 2
             });
         _blobStorageHandler.CheckHealthAsync(Arg.Any<CancellationToken>()).Returns(true);
@@ -82,6 +82,7 @@ public sealed class MetricsSnapshotServiceTests
         AssertMeasurement("shareit.packages", 5, "state", "total");
         AssertMeasurement("shareit.items", 7);
         AssertMeasurement("shareit.storage.bytes", 1234);
+        AssertMeasurement("shareit.blob_deletion.queue_depth", 5);
         AssertMeasurement("shareit.cleanup.pending", 2);
         AssertMeasurement("shareit.cleanup.last_success_timestamp_seconds", 1_234);
         AssertMeasurement("shareit.dependency.up", 1, "component", "postgres");
@@ -117,10 +118,10 @@ public sealed class MetricsSnapshotServiceTests
                 ExpiredPackages = 0,
                 ExhaustedPackages = 0,
                 ProtectedPackages = 0,
-                PrivatePackages = 0,
                 EmptyPackages = 0,
                 TotalItems = 0,
                 TotalBytes = 0,
+                PendingBlobDeletions = 0,
                 CleanupPending = 0
             });
         _blobStorageHandler.CheckHealthAsync(Arg.Any<CancellationToken>())

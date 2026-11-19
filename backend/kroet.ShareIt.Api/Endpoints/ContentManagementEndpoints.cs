@@ -1,6 +1,5 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Security.Claims;
-using kroet.Permission.AspNetCore;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Services.Metrics;
 using kroet.ShareIt.Api.Services.Observability;
@@ -24,7 +23,7 @@ public static class ContentManagementEndpoints
         // The owner's links list: authenticated only, no names server-side.
         packageGroup
             .MapGet("", ListPackagesAsync)
-            .RequirePermission("List.Packages")
+            .RequireAuthorization()
             .Produces<ContentPackageListResponse>()
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
@@ -35,7 +34,7 @@ public static class ContentManagementEndpoints
         // Package endpoints
         packageGroup
             .MapDelete("/{packageId:guid}", DeletePackageAsync)
-            .RequirePermission("Delete.Package")
+            .RequireAuthorization()
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
@@ -53,30 +52,14 @@ public static class ContentManagementEndpoints
     private static async Task<Results<Ok<ContentPackageListResponse>, ProblemHttpResult>> ListPackagesAsync(
         [FromQuery] int? take,
         [FromQuery] string? cursor,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler contentStorageHandler,
         [FromServices] TimeProvider timeProvider,
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
     {
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
+        if (!claimsPrincipal.TryGetUserIdentity(out var userIdentity))
         {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        if (userIdentity.IsGuest)
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "Authentication required",
-                Detail = "Only authenticated users can list their packages",
-                Status = StatusCodes.Status401Unauthorized
-            });
+            return AuthenticationRequiredProblem();
         }
 
         var pageSize = Math.Clamp(take ?? 50, 1, 100);
@@ -91,11 +74,11 @@ public static class ContentManagementEndpoints
     }
 
     /// <summary>
-    /// Deletes a package and optionally its content.
+    /// Deletes a package owned by the authenticated user, queueing its blobs
+    /// for the cleanup service.
     /// </summary>
     private static async Task<Results<NoContent, ProblemHttpResult>> DeletePackageAsync(
         [FromRoute] Guid packageId,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler contentStorageHandler,
         [FromServices] IStorageHandler storageHandler,
         [FromServices] ShareItMetrics metrics,
@@ -104,17 +87,10 @@ public static class ContentManagementEndpoints
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.delete");
 
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
+        if (!claimsPrincipal.TryGetUserIdentity(out var userIdentity))
         {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
+            return AuthenticationRequiredProblem();
         }
-
-        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
 
         var package = await contentStorageHandler.GetPackageAsync(packageId, false, cancellationToken);
         if (package is null)
@@ -150,4 +126,12 @@ public static class ContentManagementEndpoints
         activity?.SetTag("shareit.package.result", "deleted");
         return TypedResults.NoContent();
     }
+
+    private static ProblemHttpResult AuthenticationRequiredProblem()
+        => TypedResults.Problem(new ProblemDetails
+        {
+            Title = "Authentication required",
+            Detail = "Only authenticated users can manage their packages",
+            Status = StatusCodes.Status401Unauthorized
+        });
 }

@@ -29,11 +29,18 @@ public sealed class UploadSettings : ISettings
     };
 
     /// <summary>
-    /// Maximum total size of a single HTTP request body (all files in one upload),
-    /// in megabytes. Applies to every caller.
+    /// Maximum size of a single raw upload request body, in megabytes. Uploads
+    /// carry one item per request. Applies to every caller.
     /// Default: 512 MB.
     /// </summary>
     public int MaxRequestBodySizeMb { get; set; } = 512;
+
+    /// <summary>
+    /// Maximum number of items (text and files combined) a single package may
+    /// contain. Applies to every caller.
+    /// Default: 100.
+    /// </summary>
+    public int MaxItemsPerPackage { get; set; } = 100;
 
     public static string SectionName => "UploadSettings";
 }
@@ -68,6 +75,8 @@ public sealed class UploadSettingsValidator : AbstractValidator<UploadSettings>
         RuleFor(x => x.Authenticated.FileLimitMb).GreaterThanOrEqualTo(x => x.Anonymous.FileLimitMb);
 
         RuleFor(x => x.MaxRequestBodySizeMb).GreaterThanOrEqualTo(x => x.Authenticated.FileLimitMb);
+
+        RuleFor(x => x.MaxItemsPerPackage).GreaterThan(0);
 
         RuleFor(x => x.Anonymous.MaxLifetimeHours).GreaterThan(0);
 

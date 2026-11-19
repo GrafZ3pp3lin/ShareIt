@@ -87,21 +87,23 @@ The application instruments are emitted from the `ShareIt` meter.
 | `shareit_access_sessions_reused_total` | counter | Package reads that reused a valid access session instead of claiming another access |
 | `shareit_bytes_authorized_total` | counter | Logical content bytes whose download was authorized by an access session |
 | `shareit_unlock_failures_total` | counter | Failed unlock attempts |
-| `shareit_rate_limited_total` | counter | Requests rejected by the package-read or download rate limiter |
-| `shareit_packages{state}` | gauge | Package counts: `total`, `active`, `expired`, `exhausted`, `protected`, `private`, `empty` |
+| `shareit_rate_limited_total` | counter | Requests rejected by the package-read, download or upload rate limiter |
+| `shareit_packages{state}` | gauge | Package counts: `total`, `active`, `expired`, `exhausted`, `protected`, `empty` |
 | `shareit_items` | gauge | Stored content items |
 | `shareit_storage_bytes` | gauge | Logical size of stored content |
+| `shareit_blob_deletion_queue_depth` | gauge | Queued blob deletions waiting for the cleanup service |
 | `shareit_cleanup_pending` | gauge | Packages currently eligible for cleanup |
 | `shareit_cleanup_last_success_timestamp_seconds` | gauge | Last run that completed session cleanup and package metadata deletion, or 0 |
 | `shareit_dependency_up{component}` | gauge | `postgres` / `s3` reachability |
 | `shareit_build_info{version,environment}` | gauge | Running build information |
 
 `shareit_packages{state}` is a set of independent counts, not a partition:
-`expired`, `exhausted`, `protected`, `private` and `empty` can overlap.
+`expired`, `exhausted`, `protected` and `empty` can overlap.
 `active` excludes expired packages and exhausted packages whose retention
 window has elapsed; an exhausted package that is still inside that window
 counts as active. `shareit_cleanup_pending` is `total - active`: packages
 eligible for cleanup at snapshot time, not the blob-deletion queue depth.
+The queue depth has its own gauge: `shareit_blob_deletion_queue_depth`.
 
 Important distinctions:
 
@@ -115,8 +117,9 @@ Important distinctions:
   measures authorization, not completed transfers. A client disconnect or
   storage failure during streaming still records the full logical content size.
   Retries and parallel downloads are counted per authorized response.
-- Inline items are delivered in the package response and are not represented in
-  the authorized-bytes counter.
+- Every item's bytes are fetched through a session-authorized download, so
+  every item contributes to the authorized-bytes counter when its download is
+  authorized.
 - Counters reset when the API process restarts. PromQL `increase()` and `rate()`
   handle resets; the dashboard should use those rather than reading raw
   counter totals.
@@ -125,8 +128,9 @@ Important distinctions:
   configured. The in-memory development store intentionally has no snapshot
   provider. The OTLP export never queries Postgres or S3 directly from a
   metric callback.
-- Blob-deletion queue failures are logged and retried by cleanup. No
-  blob-queue depth or failure metric is exported yet (planned for PR5).
+- Blob-deletion queue failures are logged and retried by cleanup. The queue
+  depth is exported as the `shareit_blob_deletion_queue_depth` gauge (see the
+  table above); no per-failure counter is exported.
 - The metric labels are aggregate-only. Never add package IDs, user IDs,
   guest IDs, access sessions, URLs or content to metric labels. Traces and logs are
   per-request and may contain opaque package/content IDs, but never access sessions,
@@ -149,7 +153,6 @@ activity source:
 | `metrics.snapshot` | Periodic database-derived gauge refresh |
 
 Spans carry counts and sizes such as `shareit.package.items`,
-`shareit.package.inline_items`, `shareit.package.deferred_items`,
 `shareit.package.access_claimed`, `shareit.access.session_reused`,
 `shareit.content.kind`, `shareit.content.size_bytes` and
 `shareit.cleanup.*`. Package and content IDs are not added as separate

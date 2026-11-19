@@ -189,8 +189,8 @@ public class S3BlobStorageHandlerIntegrationTests
         var secondBlobId = await _handler.UploadAsync(secondStream, "application/octet-stream", "second.bin");
 
         Assert.AreNotEqual(firstBlobId, secondBlobId);
-        Assert.IsTrue(await _handler.ExistsAsync(firstBlobId));
-        Assert.IsTrue(await _handler.ExistsAsync(secondBlobId));
+        await AssertDownloadRoundTripsAsync(firstBlobId, [1, 2, 3]);
+        await AssertDownloadRoundTripsAsync(secondBlobId, [4, 5, 6]);
     }
 
     [TestMethod]
@@ -225,31 +225,30 @@ public class S3BlobStorageHandlerIntegrationTests
     }
 
     [TestMethod]
-    public async Task DeleteAsync_WhenBlobExists_DeletesObjectAndReturnsTrue()
+    public async Task DeleteAsync_WhenBlobExists_DeletesObject()
     {
         await using var stream = new MemoryStream([1, 2, 3]);
         var blobId = await _handler.UploadAsync(stream, DefaultContentType, "delete-me.txt");
 
-        var deleted = await _handler.DeleteAsync(blobId);
+        await _handler.DeleteAsync(blobId);
 
-        Assert.IsTrue(deleted);
-        Assert.IsFalse(await _handler.ExistsAsync(blobId));
         await Assert.ThrowsAsync<AmazonS3Exception>(() => _inspectionClient.GetObjectMetadataAsync(
             new GetObjectMetadataRequest
             {
                 BucketName = _bucketName,
                 Key = blobId
             }));
+        await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => _handler.DownloadAsync(blobId));
     }
 
     [TestMethod]
-    public async Task DeleteAsync_WhenBlobDoesNotExist_ReturnsFalse()
+    public async Task DeleteAsync_WhenBlobDoesNotExist_SucceedsWithoutProbe()
     {
+        // S3 deletes are idempotent: a missing object already satisfies the
+        // deletion goal, so no HEAD probe is made before the DELETE.
         await _inspectionClient.PutBucketAsync(_bucketName);
 
-        var deleted = await _handler.DeleteAsync(Guid.NewGuid().ToString());
-
-        Assert.IsFalse(deleted);
+        await _handler.DeleteAsync(Guid.NewGuid().ToString());
     }
 
     [TestMethod]
@@ -258,24 +257,6 @@ public class S3BlobStorageHandlerIntegrationTests
         using var handler = CreateHandler(UnreachableServiceUrl);
 
         await Assert.ThrowsAsync<HttpRequestException>(() => handler.DeleteAsync(Guid.NewGuid().ToString()));
-    }
-
-    [TestMethod]
-    public async Task ExistsAsync_WhenBlobDoesNotExist_ReturnsFalse()
-    {
-        await _inspectionClient.PutBucketAsync(_bucketName);
-
-        var exists = await _handler.ExistsAsync(Guid.NewGuid().ToString());
-
-        Assert.IsFalse(exists);
-    }
-
-    [TestMethod]
-    public async Task ExistsAsync_WhenServiceIsUnavailable_Throws()
-    {
-        using var handler = CreateHandler(UnreachableServiceUrl);
-
-        await Assert.ThrowsAsync<HttpRequestException>(() => handler.ExistsAsync(Guid.NewGuid().ToString()));
     }
 
     [TestMethod]
@@ -309,14 +290,12 @@ public class S3BlobStorageHandlerIntegrationTests
             () => _handler.DeleteAsync(Guid.NewGuid().ToString(), cancellationTokenSource.Token));
     }
 
-    [TestMethod]
-    public async Task ExistsAsync_WhenCancelled_ThrowsOperationCanceledException()
+    private async Task AssertDownloadRoundTripsAsync(string blobId, byte[] expected)
     {
-        using var cancellationTokenSource = new CancellationTokenSource();
-        await cancellationTokenSource.CancelAsync();
-
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => _handler.ExistsAsync(Guid.NewGuid().ToString(), cancellationTokenSource.Token));
+        await using var downloaded = await _handler.DownloadAsync(blobId);
+        using var buffer = new MemoryStream();
+        await downloaded.CopyToAsync(buffer);
+        CollectionAssert.AreEqual(expected, buffer.ToArray());
     }
 
     [TestMethod]

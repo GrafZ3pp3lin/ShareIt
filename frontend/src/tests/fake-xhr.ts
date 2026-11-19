@@ -35,8 +35,9 @@ export class FakeXhr {
     }
   };
 
+  #method = '';
   #url = '';
-  #form: FormData | null = null;
+  #body: unknown = null;
   #aborted = false;
   #headers = new Map<string, string>();
   #listeners = new Map<string, XhrListener[]>();
@@ -55,7 +56,8 @@ export class FakeXhr {
     }
   }
 
-  open(_method: string, url: string) {
+  open(method: string, url: string) {
+    this.#method = method;
     this.#url = url;
   }
 
@@ -77,8 +79,8 @@ export class FakeXhr {
     }
   }
 
-  send(form: FormData) {
-    this.#form = form;
+  send(body: unknown) {
+    this.#body = body;
     FakeXhr.sent.push(this);
     setTimeout(() => this.#finish(), FakeXhr.loadDelayMs);
   }
@@ -95,8 +97,12 @@ export class FakeXhr {
     return this.#url;
   }
 
-  get form() {
-    return this.#form;
+  get method() {
+    return this.#method;
+  }
+
+  get body() {
+    return this.#body;
   }
 
   get requestHeaders() {

@@ -36,12 +36,7 @@ export function SharedDocument(props: SharedDocumentProps) {
   ) => t(count === 1 ? singular : plural, { count });
 
   const expiryLabel = createMemo(() => {
-    const expiresAt = props.package.ExpiresAt;
-    if (!expiresAt) {
-      return null;
-    }
-
-    const expires = Date.parse(expiresAt);
+    const expires = Date.parse(props.package.ExpiresAt);
     if (Number.isNaN(expires)) {
       return null;
     }

@@ -1,3 +1,4 @@
+using ContentModel = kroet.ShareIt.Api.Models.Content;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using Microsoft.Extensions.Options;
@@ -7,7 +8,7 @@ namespace kroet.ShareIt.Api.Storage.InMemory;
 public class InMemoryContentStorageHandler : IContentStorageHandler
 {
     private readonly List<ContentPackage> _packages = [];
-    private readonly List<ExternalContent> _contents = [];
+    private readonly List<ContentModel> _contents = [];
     private readonly List<AccessSession> _accessSessions = [];
     private readonly List<string> _pendingBlobDeletions = [];
     private readonly object _lock = new();
@@ -32,21 +33,11 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
         return Task.CompletedTask;
     }
 
-    public Task StoreContentAsync(ExternalContent content, CancellationToken cancellationToken = default)
+    public Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
             _contents.Add(content);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    public Task StoreContentsAsync(IEnumerable<ExternalContent> contents, CancellationToken cancellationToken = default)
-    {
-        lock (_lock)
-        {
-            _contents.AddRange(contents);
         }
 
         return Task.CompletedTask;
@@ -122,43 +113,12 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
         }
     }
 
-    public Task<IReadOnlyList<ContentPackage>> GetPackagesAsync(IEnumerable<Guid> packageIds, bool includeContent = true, CancellationToken cancellationToken = default)
-    {
-        lock (_lock)
-        {
-            var packages = _packages.Where(p => packageIds.Contains(p.Id)).ToList();
-
-            if (includeContent)
-            {
-                var contents = _contents.Where(c => packageIds.Contains(c.PackageId)).ToList();
-                var packagesWithContent = packages.Select(p =>
-                {
-                    var packageContents = contents.Where(c => c.PackageId == p.Id).ToList();
-                    return p with { Contents = packageContents };
-                }).ToList();
-
-                return Task.FromResult<IReadOnlyList<ContentPackage>>(packagesWithContent);
-            }
-
-            return Task.FromResult<IReadOnlyList<ContentPackage>>(packages);
-        }
-    }
-
-    public Task<ExternalContent?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
+    public Task<ContentModel?> GetContentAsync(Guid contentId, CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
             var content = _contents.FirstOrDefault(c => c.Id == contentId);
-            return Task.FromResult<ExternalContent?>(content);
-        }
-    }
-
-    public Task<IReadOnlyList<ExternalContent>> GetContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
-    {
-        lock (_lock)
-        {
-            var contents = _contents.Where(c => contentIds.Contains(c.Id)).ToList();
-            return Task.FromResult<IReadOnlyList<ExternalContent>>(contents);
+            return Task.FromResult(content);
         }
     }
 
@@ -264,50 +224,6 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
         }
     }
 
-    public Task<int> DeleteContentsAsync(IEnumerable<Guid> contentIds, CancellationToken cancellationToken = default)
-    {
-        lock (_lock)
-        {
-            var requestedIds = contentIds.ToHashSet();
-            QueueBlobDeletions(_contents.Where(content => requestedIds.Contains(content.Id)));
-            var removed = _contents.RemoveAll(c => requestedIds.Contains(c.Id));
-            return Task.FromResult(removed);
-        }
-    }
-
-    public Task<bool> DeleteContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-    {
-        lock (_lock)
-        {
-            var content = _contents.FirstOrDefault(c => c.Id == contentId);
-            if (content is null || !_contents.Remove(content))
-            {
-                return Task.FromResult(false);
-            }
-
-            QueueBlobDeletions([content]);
-            return Task.FromResult(true);
-        }
-    }
-
-    public Task<bool> ExistsPackageAsync(Guid packageId, CancellationToken cancellationToken = default)
-    {
-        lock (_lock)
-        {
-            var exists = _packages.Any(p => p.Id == packageId);
-            return Task.FromResult(exists);
-        }
-    }
-
-    public Task<bool> ExistsContentAsync(Guid contentId, CancellationToken cancellationToken = default)
-    {
-        lock (_lock)
-        {
-            var exists = _contents.Any(c => c.Id == contentId);
-            return Task.FromResult(exists);
-        }
-    }
-
     public Task<IReadOnlyList<Guid>> GetPackagesToDeleteAsync(CancellationToken cancellationToken = default)
     {
         lock (_lock)
@@ -349,9 +265,13 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
            && lastAccessAt <= exhaustedBefore;
 
     // Callers hold _lock for the lifetime of this helper.
-    private void QueueBlobDeletions(IEnumerable<ExternalContent> contents)
+    private void QueueBlobDeletions(IEnumerable<ContentModel> contents)
     {
-        foreach (var blobId in contents.Select(content => content.Url).Distinct(StringComparer.Ordinal))
+        foreach (var blobId in contents
+                     .Select(content => content.Url)
+                     .Where(url => url is not null)
+                     .Select(url => url!)
+                     .Distinct(StringComparer.Ordinal))
         {
             if (!_pendingBlobDeletions.Contains(blobId, StringComparer.Ordinal))
             {
