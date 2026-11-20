@@ -1,0 +1,77 @@
+# Test suite. Runs on every pull request and is called by release.yml so a
+# release tests exactly the same commits a PR did.
+#
+# Steps are deliberately identical to what release.yml used to inline: a
+# dependency bump that passes here is what the release pipeline will run.
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  backend:
+    name: Test backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('backend/Directory.Packages.props', 'backend/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # Integration tests boot PostgreSQL and RustFS via Testcontainers, so this
+      # needs the Docker daemon that the ubuntu-latest image provides.
+      - name: Run backend tests
+        run: dotnet test backend/kroet.ShareIt.slnx --configuration Release --nologo
+
+  frontend:
+    name: Test frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+          cache: true
+          cache_dependency_path: frontend/pnpm-lock.yaml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      # --frozen-lockfile also re-verifies the install-time gates in
+      # frontend/pnpm-workspace.yaml (minimumReleaseAge, trustPolicy, allowBuilds)
+      # against the committed lockfile.
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend checks and tests
+        working-directory: frontend
+        run: pnpm verify
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build

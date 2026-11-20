@@ -12,73 +12,21 @@ permissions: {}
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Test the exact commit before creating a tag or building release images
+  # Test the exact commit before creating a tag or building release images.
+  # The jobs live in ci.yml so pull requests run the identical suite.
   # ---------------------------------------------------------------------------
-  test-backend:
-    name: Test backend
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  test:
+    name: Test
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('backend/Directory.Packages.props', 'backend/**/*.csproj') }}
-          restore-keys: nuget-${{ runner.os }}-
-
-      - name: Run backend tests
-        run: dotnet test backend/kroet.ShareIt.slnx --configuration Release --nologo
-
-  test-frontend:
-    name: Test frontend
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          package_json_file: frontend/package.json
-          cache: true
-          cache_dependency_path: frontend/pnpm-lock.yaml
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-
-      - name: Run frontend checks and tests
-        working-directory: frontend
-        run: pnpm verify
-
-      - name: Build frontend
-        working-directory: frontend
-        run: pnpm build
 
   # ---------------------------------------------------------------------------
   # Conventional Commits -> next SemVer -> git tag + GitHub Release
   # ---------------------------------------------------------------------------
   version-and-release:
     name: Version and release
-    needs: [test-backend, test-frontend]
+    needs: [test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
