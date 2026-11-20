@@ -11,7 +11,10 @@
 #     here; keep them equal to each other and to the local pnpm.
 #   - Docker: both Dockerfiles. The `node:` tag must stay in sync with
 #     .node-version by hand.
-#   - GitHub Actions: the actions used by .github/workflows/release.yml.
+#   - GitHub Actions: the actions used by .github/workflows/. They are pinned to
+#     full-length commit SHAs because the repository setting "Require actions to
+#     be pinned to a full-length commit SHA" is enabled; Dependabot updates the
+#     SHA and the trailing "# vX.Y.Z" comment together.
 #   - .NET SDK: global.json.
 #
 # Version updates are delayed ("cooldown") so a hijacked release is usually yanked

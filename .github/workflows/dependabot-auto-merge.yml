@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@v3
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
       # `update-type` is the highest bump contained in the PR, so a grouped PR is
       # always classified minor/patch (majors are never grouped) and stays safe
