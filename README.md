@@ -40,8 +40,9 @@ flowchart LR
 
 ## Run it locally
 
-Requirements: [.NET 11 SDK](https://dotnet.microsoft.com/), the Aspire CLI
-(`dotnet tool install -g Aspire.Cli`), a running Docker daemon, Node.js, and `pnpm`.
+Requirements: [.NET 11 SDK](https://dotnet.microsoft.com/) (pinned in `global.json`), the Aspire CLI
+(`dotnet tool install -g Aspire.Cli`), a running Docker daemon, Node.js (pinned in
+`.node-version`), and `pnpm`.
 
 ```bash
 dotnet run apphost.cs

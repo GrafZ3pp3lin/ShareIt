@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Build stage: Node 26 on Debian (glibc). Deliberately NOT Alpine: the
+# Build stage: Node 26.13.1 on Debian (glibc). Deliberately NOT Alpine: the
 # @solidjs/compiler build-time dependency ships no musl binary, so an Alpine
 # builder would fail to load the compiler.
-FROM node:26-slim AS build
+# Keep the version in sync with the root .node-version (used by CI).
+FROM node:26.13.1-slim AS build
 WORKDIR /app
 
 # Node 25+ no longer bundles corepack, so install pnpm directly.
