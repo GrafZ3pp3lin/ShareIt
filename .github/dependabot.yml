@@ -1,0 +1,120 @@
+# Dependabot version updates.
+# Reference: https://docs.github.com/code-security/dependabot/dependabot-options-reference
+#
+# Coverage and known gaps:
+#   - NuGet: backend/Directory.Packages.props (Central Package Management) and the
+#     *.csproj files. The Aspire packages pinned via `#:package` in apphost.cs are
+#     not read by Dependabot (dependabot-core#12057); bump those by hand and keep
+#     the group in lockstep.
+#   - npm (pnpm): frontend/package.json + pnpm-lock.yaml. The "packageManager"
+#     field and the `pnpm@...` install in frontend/Dockerfile are not updated
+#     here; keep them equal to each other and to the local pnpm.
+#   - Docker: both Dockerfiles. The `node:` tag must stay in sync with
+#     .node-version by hand.
+#   - GitHub Actions: the actions used by .github/workflows/release.yml.
+#   - .NET SDK: global.json.
+#
+# Version updates are delayed ("cooldown") so a hijacked release is usually yanked
+# before it reaches a pull request. For npm this must not fall below the
+# `minimumReleaseAge: 1440` (1 day) gate in frontend/pnpm-workspace.yaml, or
+# `pnpm install` fails on an immature version instead of opening a PR. A frontend
+# update that fails to update the lockfile is usually one of the supply-chain
+# gates in that file (minimumReleaseAge, trustPolicy): wait for the release to
+# age past the cutoff and re-run the job instead of loosening the gate.
+#
+# Commit prefixes follow Conventional Commits, which is what
+# .github/scripts/version-and-release.sh reads; "chore" bumps the patch version.
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 3
+    groups:
+      # Routine bumps land as one PR; majors stay separate because they need a
+      # migration. Update the Aspire packages in apphost.cs with the apphost PR.
+      nuget-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 3
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/frontend"
+      - "/backend/kroet.ShareIt.Api"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 3
+    groups:
+      # Majors stay out of every group so a group PR is always classified
+      # minor/patch and cannot smuggle a major past the auto-merge rule. A major
+      # that auto-merges (GitHub Actions) is a separate PR, so its CI failure
+      # does not block the routine bumps.
+      docker-images:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  - package-ecosystem: "dotnet-sdk"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 3
+    groups:
+      dotnet-sdk:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"

@@ -1,0 +1,64 @@
+# Turns on GitHub's auto-merge for Dependabot PRs according to this policy:
+#   - minor and patch updates in every ecosystem
+#   - any GitHub Actions update, majors included: actions only publish moving
+#     major tags (checkout@v7 -> v8 is a major bump), so a minor/patch-only rule
+#     would never match them
+# Auto-merge only merges once the required status checks pass, so this never
+# bypasses the CI workflow -- it just removes the manual click.
+#
+# `pull_request_target` rather than `pull_request`: a workflow triggered by
+# Dependabot on `pull_request` gets a read-only GITHUB_TOKEN, which cannot merge.
+# This workflow never checks out or executes the pull request's code (it only
+# reads PR metadata and calls the API), so the write token never reaches
+# contributor-controlled input.
+#
+# Prerequisites, both in repository settings:
+#   - Settings -> General -> "Allow auto-merge" enabled.
+#   - A branch protection rule or ruleset on the target branch that requires the
+#     "Test backend" and "Test frontend" checks. Without required checks,
+#     auto-merge would fire immediately instead of waiting for CI.
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+
+      # `update-type` is the highest bump contained in the PR, so a grouped PR is
+      # always classified minor/patch (majors are never grouped) and stays safe
+      # to merge unattended. Matching the suffix rather than the full string
+      # keeps this correct if the value is reported as `security-update:semver-*`.
+      # An action major is accepted too: actions usually only re-tag the major
+      # number (checkout@v7 -> v8), so a minor/patch-only rule would leave most
+      # action updates open indefinitely.
+      - name: Enable auto-merge
+        if: >-
+          steps.metadata.outputs.package-ecosystem == 'github-actions' ||
+          endsWith(steps.metadata.outputs.update-type, 'semver-minor') ||
+          endsWith(steps.metadata.outputs.update-type, 'semver-patch')
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # `gh pr merge --auto` exits non-zero when auto-merge is already on,
+          # which happens when Dependabot rebases and re-fires `synchronize`.
+          if [ "$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest')" != "null" ]; then
+            echo "Auto-merge is already enabled for $PR_URL."
+            exit 0
+          fi
+          gh pr merge --auto --squash "$PR_URL"
