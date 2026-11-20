@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact version to release (e.g. 1.0.0), must exceed the latest tag. Empty = compute from commits.'
+        required: false
+        type: string
 
 permissions: {}
 
@@ -27,7 +32,9 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "version=$(bash .github/scripts/version-and-release.sh)" >> "$GITHUB_OUTPUT"
+          VERSION_OVERRIDE: ${{ inputs.version }}
+        # The assignment keeps the script's exit code; `echo "$(...)"` would swallow it.
+        run: version="$(bash .github/scripts/version-and-release.sh)" && echo "version=$version" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
   # Build & push both images to ghcr.io in parallel
