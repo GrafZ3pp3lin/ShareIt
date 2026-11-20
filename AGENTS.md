@@ -5,7 +5,7 @@
 
 ### Run everything with Aspire
 - `dotnet run apphost.cs` from the repo root starts the AuthTwin, API, frontend
-  (`pnpm dev`), PostgreSQL 18, and RustFS together. It requires the Aspire CLI
+  (`pnpm dev`), PostgreSQL 19, and RustFS together. It requires the Aspire CLI
   (`dotnet tool install -g Aspire.Cli`), a running Docker daemon, and `pnpm`.
   `aspire run` also works with Aspire CLI 17 or later.
 - The AppHost is the file-based `apphost.cs`; it registers the API and AuthTwin by path with

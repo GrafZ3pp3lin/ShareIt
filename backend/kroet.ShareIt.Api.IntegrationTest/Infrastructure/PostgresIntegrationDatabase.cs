@@ -19,7 +19,7 @@ public sealed class PostgresIntegrationDatabase : IAsyncDisposable
     {
         Environment.SetEnvironmentVariable("TESTCONTAINERS_RYUK_DISABLED", "true");
 
-        var container = new PostgreSqlBuilder("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:19-alpine")
             .WithDatabase("shareit_integration")
             .WithUsername("postgres")
             .WithPassword("postgres")

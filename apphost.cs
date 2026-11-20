@@ -20,7 +20,7 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 var postgresPassword = builder.AddParameter("postgres-password", PostgresPassword, secret: true);
 var postgres = builder.AddPostgres("postgres")
-    .WithImageTag("18-alpine")
+    .WithImageTag("19-alpine")
     .WithPassword(postgresPassword)
     .WithDataVolume("shareit-postgres-data");
 var database = postgres.AddDatabase("shareit");
