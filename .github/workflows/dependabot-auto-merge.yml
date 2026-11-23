@@ -12,6 +12,11 @@
 # reads PR metadata and calls the API), so the write token never reaches
 # contributor-controlled input.
 #
+# GitHub blocks `pull_request_target` by default in public repositories (enforced
+# since 2026-12-02). The repository has an Actions event policy that allows the
+# event for this workflow file only; anything else that adds the trigger, or a new
+# trigger here (e.g. `workflow_dispatch`), needs its own policy entry first.
+#
 # Prerequisites, both in repository settings:
 #   - Settings -> General -> "Allow auto-merge" enabled.
 #   - A branch protection rule or ruleset on the target branch that requires the
