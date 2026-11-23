@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { API_BASE_URL } = vi.hoisted(() => ({ API_BASE_URL: 'http://localhost:5155' }));
+
+// The URL assertions below are about how the wrappers build and send requests,
+// not about which environment supplied the base URL. Pinning it here keeps the
+// file independent of a developer's local .env.local (CI has no VITE_API_BASE_URL).
+vi.mock('../config/runtime-config.ts', () => ({
+  getRuntimeConfig: () => ({ apiBaseUrl: API_BASE_URL })
+}));
+
 import { FakeXhr } from '../../tests/fake-xhr.ts';
 import {
   createPackage,
@@ -14,6 +23,10 @@ import {
 
 const originalXhr = globalThis.XMLHttpRequest;
 const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -92,7 +105,7 @@ describe('createPackage', () => {
     expect(result.data).toEqual({ Id: 'pkg-1', ItemCount: 0 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:5155/api/v1/content/package');
+    expect(url).toBe(`${API_BASE_URL}/api/v1/content/package`);
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
     expect(init?.body).toBe(JSON.stringify(request));
@@ -123,7 +136,7 @@ describe('getPackageDetails', () => {
     expect(result.data).toEqual(body);
     expect(result.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1');
+    expect(url).toBe(`${API_BASE_URL}/api/v1/content/package/pkg-1`);
     expect(new Headers(init?.headers).get('X-Unlock-Proof')).toBe('proof-1');
     expect(new Headers(init?.headers).get('X-Access-Session')).toBe('session-1');
   });
@@ -191,7 +204,7 @@ describe('downloadContent', () => {
     expect(result.data).toBeInstanceOf(Blob);
     expect(result.status).toBe(200);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1/content/item-1/download');
+    expect(url).toBe(`${API_BASE_URL}/api/v1/content/package/pkg-1/content/item-1/download`);
     expect(new Headers(init?.headers).get('X-Access-Session')).toBe('session-1');
   });
 
@@ -244,7 +257,7 @@ describe('downloadContentResponse', () => {
     expect(await result.response?.text()).toBe('file-bytes');
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://localhost:5155/api/v1/content/package/pkg-1/content/item-1/download');
+    expect(url).toBe(`${API_BASE_URL}/api/v1/content/package/pkg-1/content/item-1/download`);
     expect(new Headers(init?.headers).get('X-Access-Session')).toBe('session-1');
   });
 
@@ -296,7 +309,7 @@ describe('listPackages', () => {
       ],
       nextCursor: 'cursor-2'
     });
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:5155/api/v1/content/packages?cursor=cursor-1');
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE_URL}/api/v1/content/packages?cursor=cursor-1`);
   });
 
   it('maps a missing cursor to null', async () => {
@@ -335,7 +348,7 @@ describe('deletePackage', () => {
     const result = await deletePackage('pkg-1');
 
     expect(result).toMatchObject({ data: true, status: 204 });
-    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:5155/api/v1/content/packages/pkg-1');
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE_URL}/api/v1/content/packages/pkg-1`);
     expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE');
   });
 
