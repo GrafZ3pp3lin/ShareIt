@@ -46,6 +46,15 @@
 - Test clocks use `FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` (version in `Directory.Packages.props`); advance it with `SetUtcNow`/`Advance` rather than writing a custom `TimeProvider`.
 - When an OTLP endpoint is configured, the API pushes OpenTelemetry metrics, traces and logs via `OTEL_EXPORTER_OTLP_ENDPOINT` (see `docs/observability.md`). It exposes no metrics endpoint. Database-derived gauges come from the SQL store only and refresh only when metrics export is enabled. Metric labels are aggregate-only: never add package, user or content identifiers as labels. Traces and logs may contain opaque package/content IDs from request URLs, but never tokens, unlock proofs, user/guest IDs, filenames or content.
 
+## Pull requests
+- Every PR lands on `main` via **squash merge**. Merge commits and rebase merging are disabled in
+  the repo settings, so `--merge`/`--rebase` fail; `gh pr merge` without a method flag squashes.
+- The `main` ruleset also requires a linear history and the `Test backend`/`Test frontend` checks.
+  Only repository admins can bypass it.
+- Squash commits use the PR title as subject and the PR body as message (`PR_TITLE`/`PR_BODY`), so
+  the PR title and description are what persists in history — write them accordingly.
+- Head branches are deleted automatically after merge.
+
 ## Code Style Guidelines
 
 ### General
