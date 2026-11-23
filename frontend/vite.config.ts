@@ -21,14 +21,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
-    isolate: false,
+    // Keep the default per-file isolation: with `isolate: false` the module
+    // registry, `vi.mock` state and globals such as `fetch` are shared between
+    // test files, so one file's stubs leak into the next and the result depends
+    // on how Vitest distributes files across workers.
     projects: [
       {
         test: {
           include: ['src/**/*.{test,spec}.ts'],
           name: 'unit',
-          environment: 'node',
-          isolate: false
+          environment: 'node'
         }
       },
       {
@@ -36,7 +38,6 @@ export default defineConfig({
           include: ['src/**/*.{test,spec}.tsx'],
           name: 'components',
           environment: 'happy-dom',
-          isolate: false,
           setupFiles: './src/tests/vitest-setup.ts'
         }
       }
