@@ -128,4 +128,14 @@ public interface IContentStorageHandler
     /// this operation is safe.
     /// </summary>
     Task CompleteBlobDeletionAsync(string blobId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Performs a lightweight health check against the backing metadata
+    /// store. Implementations that cannot fail (for example the in-memory
+    /// store) use the default healthy result.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True if the store is reachable, false otherwise.</returns>
+    Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
 }

@@ -530,6 +530,30 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         await connection.ExecuteAsync(completeSql, new { BlobId = blobId });
     }
 
+    /// <inheritdoc />
+    public async Task<bool> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+
+            await using var connection = CreateConnection();
+            await connection.OpenAsync(timeout.Token);
+            await connection.ExecuteScalarAsync<int>("SELECT 1", commandTimeout: 5);
+
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     private NpgsqlConnection CreateConnection()
     {
         return new NpgsqlConnection(_settings.ConnectionString);
