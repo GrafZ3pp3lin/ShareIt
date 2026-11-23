@@ -6,6 +6,7 @@ using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Services;
 using kroet.ShareIt.Api.Services.Cleanup;
+using kroet.ShareIt.Api.Services.Health;
 using kroet.ShareIt.Api.Services.Metrics;
 using kroet.ShareIt.Api.Services.Observability;
 using kroet.ShareIt.Api.Services.Storage;
@@ -17,6 +18,15 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+
+// Docker healthcheck probe mode for the chiseled runtime image (no shell,
+// no HTTP client): `dotnet kroet.ShareIt.Api.dll --healthcheck [url]`
+// performs a single GET against the readiness endpoint and exits with its
+// HTTP result, without starting the server.
+if (args.FirstOrDefault() == "--healthcheck")
+{
+    return await HealthCheckProbe.RunAsync(args.Skip(1).FirstOrDefault());
+}
 
 WebApplication? app = null;
 
@@ -157,6 +167,9 @@ try
     
     // Main storage handler
     builder.Services.AddSingleton<IStorageHandler, StorageHandler>();
+
+    // Liveness/readiness health checks for orchestrators and load balancers
+    builder.Services.AddShareItHealthChecks();
 
     // Register System TimeProvider
     builder.Services.AddSingleton(TimeProvider.System);
@@ -354,6 +367,9 @@ try
     app.UseExceptionHandler();
 
     app.UseRateLimiter();
+
+    // Liveness/readiness probes, outside the versioned API surface.
+    app.MapHealthEndpoints();
 
     if (app.Environment.IsDevelopment())
     {

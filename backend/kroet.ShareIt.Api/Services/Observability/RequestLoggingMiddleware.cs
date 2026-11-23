@@ -12,6 +12,14 @@ internal sealed class RequestLoggingMiddleware(RequestDelegate next, ILogger<Req
 {
     public async Task InvokeAsync(HttpContext context)
     {
+        // Health probes fire every few seconds from orchestrators; keep them
+        // out of the request log so they don't drown real traffic.
+        if (context.Request.Path.StartsWithSegments("/health"))
+        {
+            await next(context);
+            return;
+        }
+
         var start = Stopwatch.GetTimestamp();
         try
         {
