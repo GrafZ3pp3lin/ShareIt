@@ -41,6 +41,9 @@ public sealed class ShareItMetrics : IDisposable
     private readonly Counter<long> _authorizedBytes;
     private readonly Counter<long> _unlockFailures;
     private readonly Counter<long> _rateLimited;
+    private readonly Counter<long> _shortCodeLookups;
+    private readonly Counter<long> _shortCodeAllocations;
+    private readonly Counter<long> _shortCodeBurns;
 
     private readonly ObservableGauge<int> _packages;
     private readonly ObservableGauge<int> _items;
@@ -104,7 +107,22 @@ public sealed class ShareItMetrics : IDisposable
         _rateLimited = _meter.CreateCounter<long>(
             "shareit.rate.limited",
             unit: "{request}",
-            description: "Number of requests rejected by the package-read, download or upload rate limiter.");
+            description: "Number of requests rejected by the package-read, short-code, download or upload rate limiter.");
+
+        _shortCodeLookups = _meter.CreateCounter<long>(
+            "shareit.short_code.lookups",
+            unit: "{request}",
+            description: "Short-code lookup results, by bounded result value.");
+
+        _shortCodeAllocations = _meter.CreateCounter<long>(
+            "shareit.short_code.allocations",
+            unit: "{request}",
+            description: "Short-code allocation results, by bounded result value.");
+
+        _shortCodeBurns = _meter.CreateCounter<long>(
+            "shareit.short_code.burns",
+            unit: "{package}",
+            description: "Short-code packages burned after five failed unlock proofs.");
 
         _packages = _meter.CreateObservableGauge(
             "shareit.packages",
@@ -201,6 +219,21 @@ public sealed class ShareItMetrics : IDisposable
     public void RateLimited()
     {
         _rateLimited.Add(1);
+    }
+
+    public void ShortCodeLookup(string result)
+    {
+        _shortCodeLookups.Add(1, new KeyValuePair<string, object?>("result", result));
+    }
+
+    public void ShortCodeAllocation(string result)
+    {
+        _shortCodeAllocations.Add(1, new KeyValuePair<string, object?>("result", result));
+    }
+
+    public void ShortCodeBurned()
+    {
+        _shortCodeBurns.Add(1);
     }
 
     public void SetSnapshot(ApplicationMetricsSnapshot snapshot)

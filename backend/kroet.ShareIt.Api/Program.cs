@@ -34,15 +34,15 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
     var configuration = builder.Configuration;
-    
+
     builder.AddObservability();
-    
+
     builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
     {
         options.SerializerOptions.PropertyNameCaseInsensitive = true;
         options.SerializerOptions.PropertyNamingPolicy = null;
     });
-    
+
     builder.Services.AddCors();
 
     // Map unhandled exceptions to RFC 7807 ProblemDetails (HTTP 500)
@@ -94,6 +94,20 @@ try
                 {
                     PermitLimit = rateLimitSettings.PackageReadPermitLimit,
                     Window = TimeSpan.FromMinutes(rateLimitSettings.PackageReadWindowMinutes),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
+        options.AddPolicy(RateLimitPolicies.ShortCodeLookup, httpContext =>
+        {
+            var remoteIp = RemoteIpKey.From(httpContext.Connection.RemoteIpAddress);
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                remoteIp,
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = rateLimitSettings.ShortCodeLookupPermitLimit,
+                    Window = TimeSpan.FromMinutes(rateLimitSettings.ShortCodeLookupWindowMinutes),
                     QueueLimit = 0,
                     AutoReplenishment = true
                 });
@@ -160,13 +174,16 @@ try
 
     // Blob Storage configuration
     builder.Services.AddBlobStorage(configuration);
-    
+
     // Register content storage handler
     builder.Services.AddContentStorage(configuration);
-    
+
+    // Code-mode packages get a server-generated locator; regular links have none.
+    builder.Services.AddSingleton<IShortCodeGenerator, ShortCodeGenerator>();
+
     // Register access session storage handler
     builder.Services.AddAccessSessionStorage();
-    
+
     // Main storage handler
     builder.Services.AddSingleton<IStorageHandler, StorageHandler>();
 
@@ -178,7 +195,7 @@ try
 
     // Background cleanup service
     builder.Services.AddCleanupService();
-    
+
     // Authentication:
     // - JWT bearer validation is only enabled when Auth:Authority is configured,
     //   so auth stays fully optional per environment.
@@ -292,7 +309,7 @@ try
         options.AssumeDefaultVersionWhenUnspecified = true;
         options.ApiVersionReader = new QueryStringApiVersionReader();
     });
-        
+
     builder.Services.AddOpenApi(options =>
     {
         // The raw binary upload body is read directly from Request.Body, so no
@@ -383,12 +400,12 @@ try
     {
         app.MapOpenApi();
     }
-    
+
     var versionSet = app.NewApiVersionSet()
         .HasApiVersion(new ApiVersion(1, 0))
         .ReportApiVersions()
         .Build();
-    
+
     var v1ApiEndpoints = app.MapGroup("/api")
         .WithApiVersionSet(versionSet)
         .MapToApiVersion(new ApiVersion(1, 0));

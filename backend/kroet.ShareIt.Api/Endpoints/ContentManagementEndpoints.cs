@@ -97,7 +97,9 @@ public static class ContentManagementEndpoints
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Package not found", Detail = $"Package with ID {packageId} was not found", Status = StatusCodes.Status404NotFound
+                Title = "Package not found",
+                Detail = $"Package with ID {packageId} was not found",
+                Status = StatusCodes.Status404NotFound
             });
         }
 
@@ -105,7 +107,9 @@ public static class ContentManagementEndpoints
         {
             return TypedResults.Problem(new ProblemDetails
             {
-                Title = "Forbidden", Detail = "Only the owner of the package can delete it", Status = StatusCodes.Status403Forbidden
+                Title = "Forbidden",
+                Detail = "Only the owner of the package can delete it",
+                Status = StatusCodes.Status403Forbidden
             });
         }
 

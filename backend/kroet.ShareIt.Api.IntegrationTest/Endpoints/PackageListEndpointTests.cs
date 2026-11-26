@@ -61,8 +61,8 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
     public async Task ListPackages_ReportsItemCountTotalSizeAndRemainingAccesses()
     {
         var ownerId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(
-            userId: ownerId, maxAccessCount: 3, timeToLiveHours: 24);
+        var created = await CreateShortCodePackageAsync(userId: ownerId);
+        var packageId = created.Id;
 
         await SendUploadItemAsync(packageId, "file", new byte[10], guestId: null, userId: ownerId);
         TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddMinutes(1));
@@ -72,13 +72,14 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
 
         var row = page.Items.Single();
         Assert.AreEqual(packageId, row.Id);
+        Assert.IsTrue(row.HasShortCode);
         Assert.AreEqual(2, row.ItemCount);
         Assert.AreEqual(30, row.TotalSize);
-        Assert.AreEqual(3, row.MaxAccessCount);
+        Assert.AreEqual(1, row.MaxAccessCount);
         Assert.AreEqual(0, row.CurrentAccessCount);
-        Assert.AreEqual(3, row.RemainingAccesses);
+        Assert.AreEqual(1, row.RemainingAccesses);
         Assert.IsFalse(row.IsExpired);
-        Assert.IsFalse(row.IsProtected);
+        Assert.IsTrue(row.IsProtected);
     }
 
     [TestMethod]
@@ -95,8 +96,10 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         Assert.HasCount(2, page.Items);
         var protectedRow = page.Items.Single(item => item.Id == protectedPackage);
         Assert.IsTrue(protectedRow.IsProtected);
+        Assert.IsFalse(protectedRow.HasShortCode);
         var unprotectedRow = page.Items.Single(item => item.Id == unprotected);
         Assert.IsFalse(unprotectedRow.IsProtected);
+        Assert.IsFalse(unprotectedRow.HasShortCode);
     }
 
     [TestMethod]

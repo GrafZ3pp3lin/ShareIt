@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using ContentModel = kroet.ShareIt.Api.Models.Content;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
@@ -39,31 +39,81 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         const string insertPackageSql = """
                                         INSERT INTO content_packages (
-                                            id, created_at, user_id,
-                                            max_access_count, current_access_count, last_access_at,
-                                            expires_at, unlock_verifier
+                                            id, short_code, created_at, user_id,
+                                            max_access_count, current_access_count, failed_unlock_attempts,
+                                            last_access_at, expires_at, unlock_verifier
                                         ) VALUES (
-                                            @Id, @CreatedAt, @UserId,
-                                            @MaxAccessCount, 0, @LastAccessAt,
-                                            @ExpiresAt, @UnlockVerifier
+                                            @Id, @ShortCode, @CreatedAt, @UserId,
+                                            @MaxAccessCount, 0, @FailedUnlockAttempts,
+                                            @LastAccessAt, @ExpiresAt, @UnlockVerifier
                                         );
                                         """;
 
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await connection.ExecuteAsync(
-            insertPackageSql,
-            new
-            {
-                package.Id,
-                package.CreatedAt,
-                package.UserId,
-                package.MaxAccessCount,
-                package.LastAccessAt,
-                package.ExpiresAt,
-                package.UnlockVerifier
-            });
+        try
+        {
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    insertPackageSql,
+                    new
+                    {
+                        package.Id,
+                        package.ShortCode,
+                        package.CreatedAt,
+                        package.UserId,
+                        package.MaxAccessCount,
+                        package.FailedUnlockAttempts,
+                        package.LastAccessAt,
+                        package.ExpiresAt,
+                        package.UnlockVerifier
+                    },
+                    cancellationToken: cancellationToken));
+        }
+        catch (PostgresException ex) when (
+            ex.SqlState == PostgresErrorCodes.UniqueViolation
+            && ex.ConstraintName == "content_packages_pkey")
+        {
+            throw new PackageIdConflictException(ex);
+        }
+        catch (PostgresException ex) when (
+            ex.SqlState == PostgresErrorCodes.UniqueViolation
+            && ex.ConstraintName == "uq_packages_short_code")
+        {
+            throw new ShortCodeConflictException(ex);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RegisterFailedUnlockAttemptAsync(
+        Guid packageId,
+        int burnAfter,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        const string updateSql = """
+                                 UPDATE content_packages
+                                 SET failed_unlock_attempts = failed_unlock_attempts + 1,
+                                     expires_at = CASE
+                                         WHEN failed_unlock_attempts + 1 >= @BurnAfter
+                                             THEN @Now - INTERVAL '1 microsecond'
+                                         ELSE expires_at
+                                     END
+                                 WHERE id = @PackageId
+                                   AND short_code IS NOT NULL
+                                 RETURNING failed_unlock_attempts >= @BurnAfter
+                                 """;
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var burned = await connection.QuerySingleOrDefaultAsync<bool?>(new CommandDefinition(
+            updateSql,
+            new { PackageId = packageId, BurnAfter = burnAfter, Now = now },
+            cancellationToken: cancellationToken));
+
+        return burned ?? false;
     }
 
     /// <inheritdoc />
@@ -102,13 +152,14 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         const string getPackageSql = """
                                      SELECT
-                                         id, created_at, user_id,
-                                         max_access_count, current_access_count, last_access_at, expires_at,
-                                         unlock_verifier
+                                         id, short_code, created_at, user_id,
+                                         max_access_count, current_access_count, failed_unlock_attempts,
+                                         last_access_at, expires_at, unlock_verifier,
+                                         (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = content_packages.id) AS item_count
                                      FROM content_packages
                                      WHERE id = @PackageId
                                      """;
-        
+
         const string getContentSql = """
                                         SELECT
                                             id, package_id, content_type, created_at, size, user_id,
@@ -148,6 +199,30 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         => GetPackageAsync(packageId, includeContent: false, cancellationToken);
 
     /// <inheritdoc />
+    public async Task<ContentPackage?> GetPackageShellByShortCodeAsync(
+        string shortCode,
+        CancellationToken cancellationToken = default)
+    {
+        const string getPackageSql = """
+                                     SELECT
+                                         id, short_code, created_at, user_id,
+                                         max_access_count, current_access_count, failed_unlock_attempts,
+                                         last_access_at, expires_at, unlock_verifier,
+                                         (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = content_packages.id) AS item_count
+                                     FROM content_packages
+                                     WHERE short_code = @ShortCode
+                                     """;
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var packageData = await connection.QuerySingleOrDefaultAsync<PackageDbDto>(
+            new CommandDefinition(getPackageSql, new { ShortCode = shortCode }, cancellationToken: cancellationToken));
+
+        return packageData is null ? null : MapToContentPackage(packageData);
+    }
+
+    /// <inheritdoc />
     public async Task<PackageListPage> ListPackagesAsync(
         Guid userId,
         string? cursor,
@@ -160,7 +235,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
 
         const string listSql = """
                                SELECT
-                                   p.id, p.created_at, p.expires_at, p.max_access_count, p.current_access_count,
+                                   p.id, p.short_code, p.created_at, p.expires_at, p.max_access_count, p.current_access_count,
                                    p.unlock_verifier,
                                    (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = p.id) AS item_count,
                                    (SELECT COALESCE(SUM(c.size), 0)::bigint FROM contents c WHERE c.package_id = p.id) AS total_size
@@ -195,6 +270,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         var items = rows.Select(row => new ContentPackageSummary
         {
             Id = row.Id,
+            HasShortCode = row.ShortCode is not null,
             CreatedAt = row.CreatedAt,
             ExpiresAt = row.ExpiresAt,
             ItemCount = row.ItemCount,
@@ -498,7 +574,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             CleanupPending = row.TotalPackages - row.ActivePackages
         };
     }
-    
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> GetPendingBlobDeletionsAsync(
         int take,
@@ -576,7 +652,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             Url = dbDto.Url
         };
     }
-    
+
     /// <summary>
     /// Maps a DTO to the AccessSession domain model.
     /// </summary>
@@ -602,13 +678,16 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         return new ContentPackage
         {
             Id = dbDto.Id,
+            ShortCode = dbDto.ShortCode,
             CreatedAt = dbDto.CreatedAt,
             UserId = dbDto.UserId,
             UnlockVerifier = dbDto.UnlockVerifier,
             MaxAccessCount = dbDto.MaxAccessCount,
             CurrentAccessCount = dbDto.CurrentAccessCount,
+            FailedUnlockAttempts = dbDto.FailedUnlockAttempts,
             LastAccessAt = dbDto.LastAccessAt,
-            ExpiresAt = dbDto.ExpiresAt
+            ExpiresAt = dbDto.ExpiresAt,
+            ItemCount = dbDto.ItemCount
         };
     }
 
@@ -618,13 +697,16 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     private sealed class PackageDbDto
     {
         public Guid Id { get; init; }
+        public string? ShortCode { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public Guid? UserId { get; init; }
         public int? MaxAccessCount { get; init; }
         public int CurrentAccessCount { get; init; }
+        public int FailedUnlockAttempts { get; init; }
         public DateTimeOffset? LastAccessAt { get; init; }
         public DateTimeOffset ExpiresAt { get; init; }
         public string? UnlockVerifier { get; init; }
+        public int ItemCount { get; init; }
     }
 
     /// <summary>
@@ -633,6 +715,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     private sealed class PackageSummaryDbDto
     {
         public Guid Id { get; init; }
+        public string? ShortCode { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public DateTimeOffset ExpiresAt { get; init; }
         public int ItemCount { get; init; }

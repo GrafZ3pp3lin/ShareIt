@@ -80,6 +80,13 @@ public sealed class HealthEndpointUnhealthyDependencyTests : ShareItApiTestBase
         public Task StorePackageAsync(ContentPackage package, CancellationToken cancellationToken = default)
             => inner.StorePackageAsync(package, cancellationToken);
 
+        public Task<bool> RegisterFailedUnlockAttemptAsync(
+            Guid packageId,
+            int burnAfter,
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+            => inner.RegisterFailedUnlockAttemptAsync(packageId, burnAfter, now, cancellationToken);
+
         public Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default)
             => inner.StoreContentAsync(content, cancellationToken);
 
@@ -88,6 +95,9 @@ public sealed class HealthEndpointUnhealthyDependencyTests : ShareItApiTestBase
 
         public Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default)
             => inner.GetPackageShellAsync(packageId, cancellationToken);
+
+        public Task<ContentPackage?> GetPackageShellByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default)
+            => inner.GetPackageShellByShortCodeAsync(shortCode, cancellationToken);
 
         public Task<PackageListPage> ListPackagesAsync(Guid userId, string? cursor, int take, CancellationToken cancellationToken = default)
             => inner.ListPackagesAsync(userId, cursor, take, cancellationToken);

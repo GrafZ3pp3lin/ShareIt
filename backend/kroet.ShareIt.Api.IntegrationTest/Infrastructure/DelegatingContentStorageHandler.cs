@@ -15,6 +15,13 @@ internal sealed class DelegatingContentStorageHandler(
     public Task StorePackageAsync(ContentPackage package, CancellationToken cancellationToken = default)
         => inner.StorePackageAsync(package, cancellationToken);
 
+    public Task<bool> RegisterFailedUnlockAttemptAsync(
+        Guid packageId,
+        int burnAfter,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+        => inner.RegisterFailedUnlockAttemptAsync(packageId, burnAfter, now, cancellationToken);
+
     public Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default)
         => inner.StoreContentAsync(content, cancellationToken);
 
@@ -26,6 +33,11 @@ internal sealed class DelegatingContentStorageHandler(
 
     public Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default)
         => inner.GetPackageShellAsync(packageId, cancellationToken);
+
+    public Task<ContentPackage?> GetPackageShellByShortCodeAsync(
+        string shortCode,
+        CancellationToken cancellationToken = default)
+        => inner.GetPackageShellByShortCodeAsync(shortCode, cancellationToken);
 
     public Task<PackageListPage> ListPackagesAsync(
         Guid userId,

@@ -3,9 +3,10 @@ using FluentValidation;
 namespace kroet.ShareIt.Api.Configuration;
 
 /// <summary>
-/// Rate limits for reading a package link and downloading its content. Package
-/// reads are partitioned on (package id, remote IP); downloads are partitioned
-/// on remote IP only, which bounds limiter cardinality.
+/// Rate limits for reading a package link, resolving a short code and
+/// downloading content. Package reads are partitioned on (package id, remote
+/// IP); downloads and short-code lookups are partitioned on remote IP only,
+/// which bounds limiter cardinality.
 /// </summary>
 public sealed class RateLimitSettings : ISettings
 {
@@ -20,6 +21,18 @@ public sealed class RateLimitSettings : ISettings
     /// Default: 15.
     /// </summary>
     public int PackageReadWindowMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// Number of short-code lookups allowed per remote IP window.
+    /// Default: 20.
+    /// </summary>
+    public int ShortCodeLookupPermitLimit { get; set; } = 20;
+
+    /// <summary>
+    /// Length of the short-code lookup window in minutes.
+    /// Default: 15.
+    /// </summary>
+    public int ShortCodeLookupWindowMinutes { get; set; } = 15;
 
     /// <summary>
     /// Download requests allowed per remote IP window. A valid session can
@@ -62,6 +75,11 @@ public static class RateLimitPolicies
     public const string PackageRead = "package-read";
 
     /// <summary>
+    /// Limits short-code lookups, partitioned on remote IP only.
+    /// </summary>
+    public const string ShortCodeLookup = "short-code-lookup";
+
+    /// <summary>
     /// Limits downloads, partitioned on remote IP.
     /// </summary>
     public const string Download = "download";
@@ -79,6 +97,10 @@ public sealed class RateLimitSettingsValidator : AbstractValidator<RateLimitSett
         RuleFor(x => x.PackageReadPermitLimit).GreaterThan(0);
 
         RuleFor(x => x.PackageReadWindowMinutes).GreaterThan(0);
+
+        RuleFor(x => x.ShortCodeLookupPermitLimit).GreaterThan(0);
+
+        RuleFor(x => x.ShortCodeLookupWindowMinutes).GreaterThan(0);
 
         RuleFor(x => x.DownloadPermitLimit).GreaterThan(0);
 

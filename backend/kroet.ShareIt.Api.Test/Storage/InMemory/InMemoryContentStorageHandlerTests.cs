@@ -1,6 +1,8 @@
 using System.Globalization;
 using kroet.ShareIt.Api.Configuration;
+using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Models;
+using kroet.ShareIt.Api.Storage;
 using kroet.ShareIt.Api.Storage.InMemory;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -30,8 +32,10 @@ public class InMemoryContentStorageHandlerTests
 
         Assert.IsNotNull(withContent);
         Assert.HasCount(2, withContent.Contents!);
+        Assert.AreEqual(2, withContent.ItemCount);
         Assert.IsNotNull(withoutContent);
         Assert.IsNull(withoutContent.Contents);
+        Assert.AreEqual(2, withoutContent.ItemCount);
         Assert.IsNull(missing);
     }
 
@@ -311,7 +315,77 @@ public class InMemoryContentStorageHandlerTests
 
         Assert.IsNotNull(shell);
         Assert.IsNull(shell.Contents);
+        Assert.AreEqual(1, shell.ItemCount);
         Assert.AreEqual("verifier", shell.UnlockVerifier);
+    }
+
+    [TestMethod]
+    public async Task GetPackageShellByShortCodeAsync_ReturnsThePackageShell()
+    {
+        var package = CreatePackage(shortCode: "ABC");
+        await _handler.StorePackageAsync(package);
+        await _handler.StoreContentAsync(CreateContent(package.Id));
+
+        var shell = await _handler.GetPackageShellByShortCodeAsync("ABC");
+
+        Assert.IsNotNull(shell);
+        Assert.AreEqual(package.Id, shell.Id);
+        Assert.AreEqual("ABC", shell.ShortCode);
+        Assert.AreEqual(1, shell.ItemCount);
+        Assert.IsNull(shell.Contents);
+        Assert.IsNull(await _handler.GetPackageShellByShortCodeAsync("ABD"));
+    }
+
+    [TestMethod]
+    public async Task StorePackageAsync_RejectsDuplicatePackageIds()
+    {
+        var package = CreatePackage();
+        await _handler.StorePackageAsync(package);
+
+        await Assert.ThrowsExactlyAsync<PackageIdConflictException>(() =>
+            _handler.StorePackageAsync(package));
+    }
+
+    [TestMethod]
+    public async Task StorePackageAsync_AllowsPackagesWithoutACode()
+    {
+        await _handler.StorePackageAsync(CreatePackage() with { ShortCode = null });
+        await _handler.StorePackageAsync(CreatePackage() with { ShortCode = null });
+    }
+
+    [TestMethod]
+    public async Task StorePackageAsync_RejectsDuplicateShortCodes()
+    {
+        await _handler.StorePackageAsync(CreatePackage(shortCode: "ABC"));
+
+        await Assert.ThrowsExactlyAsync<ShortCodeConflictException>(() =>
+            _handler.StorePackageAsync(CreatePackage(shortCode: "ABC")));
+    }
+
+    [TestMethod]
+    public async Task RegisterFailedUnlockAttemptAsync_CountsOnlyShortCodePackagesAndBurnsAtTheLimit()
+    {
+        var now = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture);
+        var coded = CreatePackage(shortCode: "ABC", expiresAt: now.AddMinutes(10));
+        var regular = CreatePackage(expiresAt: now.AddMinutes(10)) with { ShortCode = null };
+        await _handler.StorePackageAsync(coded);
+        await _handler.StorePackageAsync(regular);
+
+        // A regular package has no locator to burn; its counter stays at zero.
+        Assert.IsFalse(await _handler.RegisterFailedUnlockAttemptAsync(regular.Id, 5, now));
+        Assert.AreEqual(0, (await _handler.GetPackageShellAsync(regular.Id))!.FailedUnlockAttempts);
+
+        for (var attempt = 1; attempt < 5; attempt++)
+        {
+            Assert.IsFalse(await _handler.RegisterFailedUnlockAttemptAsync(coded.Id, 5, now));
+        }
+
+        Assert.IsTrue(await _handler.RegisterFailedUnlockAttemptAsync(coded.Id, 5, now));
+
+        var burned = await _handler.GetPackageShellAsync(coded.Id);
+        Assert.IsNotNull(burned);
+        Assert.AreEqual(5, burned.FailedUnlockAttempts);
+        Assert.IsTrue(burned.IsExpired(now));
     }
 
     private static AccessSession NewSession(Guid packageId, DateTimeOffset? createdAt = null)
@@ -331,13 +405,16 @@ public class InMemoryContentStorageHandlerTests
         string? unlockVerifier = null,
         int? maxAccessCount = null,
         int currentAccessCount = 0,
-        DateTimeOffset? expiresAt = null)
+        DateTimeOffset? expiresAt = null,
+        string? shortCode = null,
+        Guid? userId = null)
     {
         return new ContentPackage
         {
             Id = Guid.NewGuid(),
+            ShortCode = shortCode ?? new ShortCodeGenerator().Next(),
             CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture),
-            UserId = Guid.NewGuid(),
+            UserId = userId ?? Guid.NewGuid(),
             UnlockVerifier = unlockVerifier,
             MaxAccessCount = maxAccessCount,
             CurrentAccessCount = currentAccessCount,

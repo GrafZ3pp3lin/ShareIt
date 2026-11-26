@@ -65,7 +65,7 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
-        var package = await ReadJsonAsync<ContentPackageResponse>(response);
+        var package = await ReadJsonAsync<ContentPackageOwnerResponse>(response);
         Assert.AreEqual(1, package.ItemCount);
     }
 
@@ -130,7 +130,7 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
-        var package = await ReadJsonAsync<ContentPackageResponse>(response);
+        var package = await ReadJsonAsync<ContentPackageOwnerResponse>(response);
         Assert.AreEqual(1, package.ItemCount);
     }
 }

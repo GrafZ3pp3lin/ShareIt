@@ -12,6 +12,13 @@ public sealed record ContentPackageSummary
     public required Guid Id { get; init; }
 
     /// <summary>
+    /// Whether the package is reachable through a code access locator.
+    /// The locator itself is deliberately not exposed in list rows: without
+    /// the client secret it is not a usable code.
+    /// </summary>
+    public required bool HasShortCode { get; init; }
+
+    /// <summary>
     /// When the package was created.
     /// </summary>
     public required DateTimeOffset CreatedAt { get; init; }

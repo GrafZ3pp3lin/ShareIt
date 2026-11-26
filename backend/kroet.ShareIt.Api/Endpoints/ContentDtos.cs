@@ -12,15 +12,28 @@ public class CreatePackageRequest
     /// <summary>
     /// Client-generated package ID (a GUID). The client needs it before
     /// anything is encrypted because the salt and unlock verifier derive from
-    /// it. Repeating the request with the same id is idempotent for its owner.
+    /// it. Repeating the request with the same id is idempotent for its owner
+    /// when the access mode matches; code-mode retries must also use the same
+    /// unlock verifier.
     /// </summary>
     public Guid? Id { get; set; }
 
     /// <summary>
     /// Base64url HMAC-SHA256 proof of the package passphrase (32 bytes).
-    /// Null when the package is not protected.
+    /// Null when the package is not protected. Required when
+    /// <see cref="UseShortCode"/> is true.
     /// </summary>
     public string? UnlockVerifier { get; set; }
+
+    /// <summary>
+    /// Opts the package into code access. The server allocates a unique
+    /// three-character locator, clamps the lifetime to ten minutes and
+    /// <see cref="MaxAccessCount"/> to one, and returns the locator as
+    /// <c>ShortCode</c>. The browser appends its own three-character secret to
+    /// form the six-character code. Requires a matching
+    /// <c>X-Unlock-Proof</c> header.
+    /// </summary>
+    public bool UseShortCode { get; set; }
 
     /// <summary>
     /// Maximum number of times this package can be accessed.
@@ -129,7 +142,77 @@ public class ContentPackageResponse
         {
             Id = package.Id,
             CreatedAt = package.CreatedAt,
-            ItemCount = package.Contents?.Count ?? 0,
+            ItemCount = package.Contents?.Count ?? package.ItemCount,
+            MaxAccessCount = package.MaxAccessCount,
+            CurrentAccessCount = package.CurrentAccessCount,
+            RemainingAccesses = package.RemainingAccesses,
+            ExpiresAt = package.ExpiresAt,
+            IsProtected = package.UnlockVerifier is not null,
+        };
+    }
+}
+
+/// <summary>
+/// Owner-facing package response. It adds the short code, when the owner has
+/// enabled code access; recipients never see this DTO.
+/// </summary>
+public class ContentPackageOwnerResponse
+{
+    /// <summary>
+    /// Package ID.
+    /// </summary>
+    public required Guid Id { get; init; }
+
+    /// <summary>
+    /// Three-character server locator for code access, or null for a regular
+    /// link. The remaining three characters of the six-character user code are
+    /// a client secret the server never sees.
+    /// </summary>
+    public string? ShortCode { get; init; }
+
+    /// <summary>
+    /// When the package was created.
+    /// </summary>
+    public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// Number of items in the package.
+    /// </summary>
+    public required int ItemCount { get; init; }
+
+    /// <summary>
+    /// Maximum access count.
+    /// </summary>
+    public int? MaxAccessCount { get; init; }
+
+    /// <summary>
+    /// Number of accesses consumed so far.
+    /// </summary>
+    public required int CurrentAccessCount { get; init; }
+
+    /// <summary>
+    /// Remaining accesses.
+    /// </summary>
+    public int? RemainingAccesses { get; init; }
+
+    /// <summary>
+    /// Expiration timestamp. Every package has one.
+    /// </summary>
+    public required DateTimeOffset ExpiresAt { get; init; }
+
+    /// <summary>
+    /// Whether the package requires an unlock proof (has a password).
+    /// </summary>
+    public required bool IsProtected { get; init; }
+
+    public static ContentPackageOwnerResponse FromPackage(ContentPackage package)
+    {
+        return new ContentPackageOwnerResponse
+        {
+            Id = package.Id,
+            ShortCode = package.ShortCode,
+            CreatedAt = package.CreatedAt,
+            ItemCount = package.Contents?.Count ?? package.ItemCount,
             MaxAccessCount = package.MaxAccessCount,
             CurrentAccessCount = package.CurrentAccessCount,
             RemainingAccesses = package.RemainingAccesses,
@@ -232,6 +315,13 @@ public class ContentPackageListItem
     public required Guid Id { get; init; }
 
     /// <summary>
+    /// Whether the package is reachable through a code access locator. The
+    /// locator itself is not exposed: without its client secret it is not a
+    /// usable code.
+    /// </summary>
+    public required bool HasShortCode { get; init; }
+
+    /// <summary>
     /// When the package was created.
     /// </summary>
     public required DateTimeOffset CreatedAt { get; init; }
@@ -281,6 +371,7 @@ public class ContentPackageListItem
         return new ContentPackageListItem
         {
             Id = summary.Id,
+            HasShortCode = summary.HasShortCode,
             CreatedAt = summary.CreatedAt,
             ExpiresAt = summary.ExpiresAt,
             ItemCount = summary.ItemCount,
@@ -292,4 +383,31 @@ public class ContentPackageListItem
             IsProtected = summary.IsProtected
         };
     }
+}
+
+/// <summary>
+/// Request to resolve a short-code locator. The three-character locator
+/// travels in the body so it never appears in access logs, browser history or
+/// referrers.
+/// </summary>
+public class ResolveShortCodeRequest
+{
+    /// <summary>
+    /// Three-character locator as entered by the recipient; hyphens,
+    /// whitespace and case are normalized before lookup.
+    /// </summary>
+    public string? Code { get; init; }
+}
+
+/// <summary>
+/// Response for a short-code lookup. It intentionally contains only the
+/// package id: the recipient still opens the package through the normal
+/// unlock/access flow.
+/// </summary>
+public class ResolveShortCodeResponse
+{
+    /// <summary>
+    /// Canonical package id for the code.
+    /// </summary>
+    public required Guid PackageId { get; init; }
 }

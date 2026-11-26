@@ -106,11 +106,13 @@ public abstract class ShareItApiTestBase
         Guid? packageId = null,
         int? maxAccessCount = 1,
         int timeToLiveHours = 1,
-        string? unlockVerifier = null)
+        string? unlockVerifier = null,
+        bool useShortCode = false)
         => new()
         {
             Id = packageId ?? Guid.NewGuid(),
             UnlockVerifier = unlockVerifier,
+            UseShortCode = useShortCode,
             MaxAccessCount = maxAccessCount,
             TimeToLiveHours = timeToLiveHours
         };
@@ -124,22 +126,30 @@ public abstract class ShareItApiTestBase
         Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
-        string? unlockVerifier = null)
+        string? unlockVerifier = null,
+        bool useShortCode = false)
         => SendCreatePackageAsync(
-            PackageRequest(packageId, maxAccessCount, timeToLiveHours ?? 0, unlockVerifier),
+            PackageRequest(packageId, maxAccessCount, timeToLiveHours ?? 0, unlockVerifier, useShortCode),
             guestId,
-            userId);
+            userId,
+            unlockVerifier);
 
     protected async Task<HttpResponseMessage> SendCreatePackageAsync(
         CreatePackageRequest request,
         Guid? guestId = null,
-        Guid? userId = null)
+        Guid? userId = null,
+        string? unlockProof = null)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package")
         {
             Content = JsonContent.Create(request, options: JsonOptions)
         };
         AddIdentity(message, guestId, userId);
+        if (unlockProof is not null)
+        {
+            message.Headers.Add("X-Unlock-Proof", unlockProof);
+        }
+
         return await Client.SendAsync(message);
     }
 
@@ -154,14 +164,27 @@ public abstract class ShareItApiTestBase
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
+        => (await CreatePackageOwnerAsync(
+            packageId, maxAccessCount, guestId, userId, timeToLiveHours, unlockVerifier)).Id;
+
+    /// <summary>
+    /// Creates a package and returns the owner response. The package starts
+    /// without a short code because code access is opt-in.
+    /// </summary>
+    protected async Task<ContentPackageOwnerResponse> CreatePackageOwnerAsync(
+        Guid? packageId = null,
+        int? maxAccessCount = 1,
+        Guid? guestId = null,
+        Guid? userId = null,
+        int? timeToLiveHours = 1,
+        string? unlockVerifier = null)
     {
         var response = await SendCreatePackageAsync(
             packageId, maxAccessCount, guestId, userId, timeToLiveHours, unlockVerifier);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
-        var package = await ReadJsonAsync<ContentPackageResponse>(response);
-        return package.Id;
+        return await ReadJsonAsync<ContentPackageOwnerResponse>(response);
     }
 
     /// <summary>
@@ -278,6 +301,48 @@ public abstract class ShareItApiTestBase
         }
 
         return await Client.SendAsync(request);
+    }
+
+    /// <summary>
+    /// Creates a code-mode package: the verifier is the body value and the
+    /// proof is the same string in <c>X-Unlock-Proof</c> (the client knows the
+    /// secret before it creates the package).
+    /// </summary>
+    protected async Task<ContentPackageOwnerResponse> CreateShortCodePackageAsync(
+        Guid? packageId = null,
+        Guid? guestId = null,
+        Guid? userId = null,
+        string? verifier = null)
+    {
+        var proof = verifier ?? Verifier();
+        var response = await SendCreatePackageAsync(
+            PackageRequest(packageId, useShortCode: true, unlockVerifier: proof),
+            guestId,
+            userId,
+            proof);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
+
+        return await ReadJsonAsync<ContentPackageOwnerResponse>(response);
+    }
+
+    /// <summary>
+    /// Sends POST /package/code/resolve without identity headers. Pass an
+    /// origin to exercise the CORS response headers.
+    /// </summary>
+    protected async Task<HttpResponseMessage> ResolveShortCodeAsync(string code, string? origin = null)
+    {
+        using var message = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/v1/content/package/code/resolve")
+        {
+            Content = JsonContent.Create(new ResolveShortCodeRequest { Code = code }, options: JsonOptions)
+        };
+        if (origin is not null)
+        {
+            message.Headers.Add("Origin", origin);
+        }
+        return await Client.SendAsync(message);
     }
 
     /// <summary>

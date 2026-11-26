@@ -11,6 +11,22 @@ public record ContentPackage
     public required Guid Id { get; init; }
 
     /// <summary>
+    /// Three-character server locator for code access, or null for a regular
+    /// link. The id remains the cryptographic identifier; clients resolve the
+    /// locator to the id before deriving keys or opening the package. The
+    /// three-character client secret of the six-character user code is never
+    /// stored here.
+    /// </summary>
+    public string? ShortCode { get; init; }
+
+    /// <summary>
+    /// Number of rejected unlock proofs received so far. Only short-code
+    /// packages are tracked; reaching the configured limit invalidates the
+    /// package.
+    /// </summary>
+    public int FailedUnlockAttempts { get; init; }
+
+    /// <summary>
     /// Base64url HMAC-SHA256 proof of the package passphrase, or null when
     /// the package is not protected. The server only compares it in constant
     /// time and never logs it.
@@ -31,6 +47,12 @@ public record ContentPackage
     /// List of contents in this package.
     /// </summary>
     public List<Content>? Contents { get; set; }
+
+    /// <summary>
+    /// Number of content items in the package. Package-shell queries populate
+    /// this cheaply so response DTOs do not need to load every content row.
+    /// </summary>
+    public int ItemCount { get; init; }
 
     /// <summary>
     /// Maximum number of times this package can be accessed.

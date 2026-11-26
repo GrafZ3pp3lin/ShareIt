@@ -1,3 +1,4 @@
+using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Models;
 using System.Globalization;
 
@@ -52,6 +53,7 @@ public class ContentPackageTests
         return new ContentPackage
         {
             Id = Guid.NewGuid(),
+            ShortCode = new ShortCodeGenerator().Next(),
             CreatedAt = DateTimeOffset.Parse("2026-03-05T10:00:00+00:00", CultureInfo.InvariantCulture),
             MaxAccessCount = maxAccessCount,
             CurrentAccessCount = currentAccessCount,

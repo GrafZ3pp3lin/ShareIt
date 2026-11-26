@@ -1,4 +1,5 @@
 using kroet.ShareIt.Api.Configuration;
+using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage;
@@ -62,12 +63,62 @@ public class PostgresStorageIntegrationTests
     }
 
     [TestMethod]
+    public async Task RegisterFailedUnlockAttemptAsync_BurnsTheShortCodePackageAfterTheLimit()
+    {
+        var ownerId = Guid.NewGuid();
+        var now = _timeProvider.GetUtcNow();
+        var coded = CreatePackage(userId: ownerId, expiresAt: now.AddMinutes(10)) with
+        {
+            ShortCode = "ABC",
+            FailedUnlockAttempts = 0
+        };
+        var regular = CreatePackage(userId: ownerId) with { ShortCode = null };
+        await _contentStorageHandler.StorePackageAsync(coded);
+        await _contentStorageHandler.StorePackageAsync(regular);
+
+        // A package without a locator is not tracked.
+        Assert.IsFalse(await _contentStorageHandler.RegisterFailedUnlockAttemptAsync(regular.Id, 5, now));
+        Assert.AreEqual(
+            0,
+            (await _contentStorageHandler.GetPackageShellAsync(regular.Id))!.FailedUnlockAttempts);
+
+        for (var attempt = 1; attempt < 5; attempt++)
+        {
+            Assert.IsFalse(await _contentStorageHandler.RegisterFailedUnlockAttemptAsync(coded.Id, 5, now));
+        }
+
+        Assert.IsTrue(await _contentStorageHandler.RegisterFailedUnlockAttemptAsync(coded.Id, 5, now));
+
+        var burned = await _contentStorageHandler.GetPackageShellAsync(coded.Id);
+        Assert.IsNotNull(burned);
+        Assert.AreEqual(5, burned.FailedUnlockAttempts);
+        Assert.IsTrue(burned.IsExpired(now));
+    }
+
+    [TestMethod]
+    public async Task GetPackageShellByShortCodeAsync_PopulatesItemCount()
+    {
+        var package = CreatePackage() with { ShortCode = "ABC" };
+        await _contentStorageHandler.StorePackageAsync(package);
+        await _contentStorageHandler.StoreContentAsync(
+            CreateContent(package.Id) with { Url = "https://blob.example/file-1" });
+
+        var shell = await _contentStorageHandler.GetPackageShellByShortCodeAsync("ABC");
+
+        Assert.IsNotNull(shell);
+        Assert.AreEqual(package.Id, shell.Id);
+        Assert.AreEqual(1, shell.ItemCount);
+        Assert.IsNull(shell.Contents);
+    }
+
+    [TestMethod]
     public async Task StorePackageAsync_AndGetPackageAsync_RoundTripsPackageWithContent()
     {
         var lastAccessAt = DateTimeOffset.UtcNow.AddMinutes(-5);
         var package = CreatePackage(maxAccessCount: 3) with
         {
-            LastAccessAt = lastAccessAt
+            LastAccessAt = lastAccessAt,
+            FailedUnlockAttempts = 2
         };
         var content = CreateContent(package.Id) with { Url = "https://blob.example/file-1" };
 
@@ -80,6 +131,8 @@ public class PostgresStorageIntegrationTests
         Assert.AreEqual(package.Id, storedPackage.Id);
         Assert.AreEqual(package.UnlockVerifier, storedPackage.UnlockVerifier);
         Assert.AreEqual(package.MaxAccessCount, storedPackage.MaxAccessCount);
+        Assert.AreEqual(package.FailedUnlockAttempts, storedPackage.FailedUnlockAttempts);
+        Assert.AreEqual(1, storedPackage.ItemCount);
         Assert.IsLessThan(
             1, Math.Abs((storedPackage.ExpiresAt - package.ExpiresAt).TotalMilliseconds),
             "PostgreSQL stores timestamps at microsecond precision.");
@@ -357,6 +410,7 @@ public class PostgresStorageIntegrationTests
         return new ContentPackage
         {
             Id = Guid.NewGuid(),
+            ShortCode = new ShortCodeGenerator().Next(),
             UnlockVerifier = "verifier",
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             UserId = userId ?? Guid.NewGuid(),

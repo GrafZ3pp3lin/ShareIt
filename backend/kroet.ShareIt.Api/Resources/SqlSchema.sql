@@ -6,13 +6,22 @@
 -- draft/ready state machine.
 CREATE TABLE IF NOT EXISTS content_packages (
     id UUID PRIMARY KEY,
+    -- Three-character server locator for code access. Null for a regular
+    -- link. The six-character user code is this locator plus a three-character
+    -- client secret the server never receives.
+    short_code VARCHAR(3),
     created_at TIMESTAMPTZ NOT NULL,
     user_id UUID,
     max_access_count INT,
     current_access_count INT NOT NULL DEFAULT 0,
+    -- Rejected unlock proofs. Reaching five burns a short-code package.
+    failed_unlock_attempts INT NOT NULL DEFAULT 0,
     last_access_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ NOT NULL,
     unlock_verifier TEXT,
+    CONSTRAINT uq_packages_short_code UNIQUE (short_code),
+    CONSTRAINT chk_short_code CHECK (short_code ~ '^[2-9A-HJ-KM-NP-Z]{3}$'),
+    CONSTRAINT chk_failed_unlock_attempts CHECK (failed_unlock_attempts >= 0),
     CONSTRAINT chk_access_count CHECK (current_access_count >= 0),
     CONSTRAINT chk_max_access_count CHECK (max_access_count IS NULL OR max_access_count > 0)
 );

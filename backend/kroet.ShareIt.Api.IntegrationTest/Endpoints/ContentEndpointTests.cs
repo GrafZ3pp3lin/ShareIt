@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
 using System.Text;
+using kroet.ShareIt.Api.Content;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 using kroet.ShareIt.Api.Services.Metrics;
@@ -72,10 +73,11 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
-        var package = await ReadJsonAsync<ContentPackageResponse>(response);
+        var package = await ReadJsonAsync<ContentPackageOwnerResponse>(response);
         Assert.AreEqual(packageId, package.Id);
         Assert.AreEqual(0, package.ItemCount);
         Assert.AreEqual(1, package.MaxAccessCount);
+        Assert.IsNull(package.ShortCode);
 
         // Nothing names a package: neither title/description nor owner id are
         // part of the response anymore.
@@ -119,16 +121,40 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
 
         var first = await SendCreatePackageAsync(packageId: packageId, userId: ownerId, maxAccessCount: 3);
         Assert.AreEqual(HttpStatusCode.Created, first.StatusCode);
+        var firstPackage = await ReadJsonAsync<ContentPackageOwnerResponse>(first);
 
         var retry = await SendCreatePackageAsync(packageId: packageId, userId: ownerId, maxAccessCount: 3);
         var retryBody = await retry.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retry.StatusCode, retryBody);
-        Assert.AreEqual(packageId, (await ReadJsonAsync<ContentPackageResponse>(retry)).Id);
+        var retriedPackage = await ReadJsonAsync<ContentPackageOwnerResponse>(retry);
+        Assert.AreEqual(packageId, retriedPackage.Id);
+        Assert.IsNull(firstPackage.ShortCode);
+        Assert.IsNull(retriedPackage.ShortCode);
 
         var conflict = await SendCreatePackageAsync(packageId: packageId, userId: otherId, maxAccessCount: 3);
         Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
         var problem = await ReadProblemAsync(conflict);
         Assert.AreEqual("Package id already in use", problem.Title);
+    }
+
+    [TestMethod]
+    public async Task CreatePackage_ConcurrentSameId_IsIdempotent()
+    {
+        var guestId = Guid.NewGuid();
+        var packageId = Guid.NewGuid();
+
+        var responses = await Task.WhenAll(
+            SendCreatePackageAsync(packageId: packageId, guestId: guestId),
+            SendCreatePackageAsync(packageId: packageId, guestId: guestId));
+
+        var statuses = responses.Select(response => response.StatusCode).ToArray();
+        Assert.IsTrue(statuses.All(status => status is HttpStatusCode.Created or HttpStatusCode.OK));
+        Assert.AreEqual(1, statuses.Count(status => status == HttpStatusCode.Created));
+
+        foreach (var response in responses)
+        {
+            Assert.AreEqual(packageId, (await ReadJsonAsync<ContentPackageOwnerResponse>(response)).Id);
+        }
     }
 
     [TestMethod]
@@ -151,6 +177,129 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Invalid unlock verifier", problem.Title);
+    }
+
+    // ---------------------------------------------------------------
+    // Short-code resolution
+    // ---------------------------------------------------------------
+
+    [TestMethod]
+    public async Task ResolveShortCode_ReturnsTheCanonicalPackageIdWithoutClaimingAnAccess()
+    {
+        var guestId = Guid.NewGuid();
+        var created = await CreateShortCodePackageAsync(guestId: guestId);
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+
+        var response = await ResolveShortCodeAsync(created.ShortCode!.ToLowerInvariant());
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
+        Assert.AreEqual("no-store", response.Headers.CacheControl?.ToString());
+
+        var resolved = await ReadJsonAsync<ResolveShortCodeResponse>(response);
+        Assert.AreEqual(created.Id, resolved.PackageId);
+
+        // Resolution is only an alias lookup and must not consume the package's
+        // single access; the open with the correct proof does.
+        var details = await GetPackageDetailsAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        Assert.AreEqual(1, details.Package.CurrentAccessCount);
+    }
+
+    [TestMethod]
+    public async Task GetPackage_DoesNotExposeTheOwnerShortCode()
+    {
+        var guestId = Guid.NewGuid();
+        var created = await CreateShortCodePackageAsync(guestId: guestId);
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+
+        var response = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
+        Assert.IsFalse(body.Contains("ShortCode", StringComparison.Ordinal), body);
+    }
+
+    [TestMethod]
+    public async Task ResolveShortCode_NormalizesHyphensAndCase()
+    {
+        var created = await CreateShortCodePackageAsync(guestId: Guid.NewGuid());
+        var code = created.ShortCode!;
+        var formatted = $" {char.ToLowerInvariant(code[0])}-{char.ToLowerInvariant(code[1])}-{char.ToLowerInvariant(code[2])} ";
+
+        var response = await ResolveShortCodeAsync(formatted);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
+        Assert.AreEqual(created.Id, (await ReadJsonAsync<ResolveShortCodeResponse>(response)).PackageId);
+    }
+
+    [TestMethod]
+    [DataRow("AB")]
+    [DataRow("ABCD")]
+    [DataRow("AB1")]
+    [DataRow("NOTACODE")]
+    public async Task ResolveShortCode_InvalidOrUnknown_Returns404(string code)
+    {
+        var response = await ResolveShortCodeAsync(code);
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+        var problem = await ReadProblemAsync(response);
+        Assert.AreEqual("Short code not found", problem.Title);
+    }
+
+    [TestMethod]
+    public async Task ResolveShortCode_ExpiredPackage_Returns404AndOpenReturns410()
+    {
+        var guestId = Guid.NewGuid();
+        var created = await CreateShortCodePackageAsync(guestId: guestId);
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+        TimeProvider.Advance(ShortCode.PackageLifetime + TimeSpan.FromSeconds(1));
+
+        var response = await ResolveShortCodeAsync(created.ShortCode!);
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+
+        var open = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        Assert.AreEqual(HttpStatusCode.Gone, open.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task ResolveShortCode_ExhaustedPackage_Returns404ButSessionStillWorks()
+    {
+        var guestId = Guid.NewGuid();
+        var created = await CreateShortCodePackageAsync(guestId: guestId);
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+
+        var firstOpen = await GetPackageDetailsAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        Assert.AreEqual(1, firstOpen.Package.CurrentAccessCount);
+
+        var resolved = await ResolveShortCodeAsync(created.ShortCode!);
+        Assert.AreEqual(HttpStatusCode.NotFound, resolved.StatusCode);
+
+        var reOpen = await GetPackageAsync(
+            created.Id,
+            guestId: guestId,
+            unlockProof: Verifier(),
+            accessSession: firstOpen.AccessSession.Token);
+        Assert.AreEqual(HttpStatusCode.OK, reOpen.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task GetPackage_AfterFiveFailedUnlockProofs_BurnsTheShortCodePackage()
+    {
+        var guestId = Guid.NewGuid();
+        var created = await CreateShortCodePackageAsync(guestId: guestId);
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+
+        for (var attempt = 1; attempt <= ShortCode.MaxFailedUnlockAttempts; attempt++)
+        {
+            var failed = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier(9));
+            Assert.AreEqual(HttpStatusCode.Unauthorized, failed.StatusCode, $"Attempt {attempt}");
+        }
+
+        // The fifth miss expires the package atomically: the locator can no
+        // longer be resolved and even the correct proof gets 410.
+        var resolved = await ResolveShortCodeAsync(created.ShortCode!);
+        Assert.AreEqual(HttpStatusCode.NotFound, resolved.StatusCode);
+
+        var open = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        Assert.AreEqual(HttpStatusCode.Gone, open.StatusCode);
     }
 
     // ---------------------------------------------------------------
@@ -210,7 +359,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var retry = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
         var retryBody = await retry.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retry.StatusCode, retryBody);
-        Assert.AreEqual(1, (await ReadJsonAsync<ContentPackageResponse>(retry)).ItemCount);
+        Assert.AreEqual(1, (await ReadJsonAsync<ContentPackageOwnerResponse>(retry)).ItemCount);
 
         var (_, contentCount) = await GetDatabaseCountsAsync();
         Assert.AreEqual(1, contentCount);

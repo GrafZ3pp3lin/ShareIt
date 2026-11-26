@@ -7,6 +7,7 @@ using System.Security.Claims;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Models;
+using kroet.ShareIt.Api.Services;
 using kroet.ShareIt.Api.Services.Metrics;
 using kroet.ShareIt.Api.Services.Observability;
 using kroet.ShareIt.Api.Services.Storage;
@@ -51,19 +52,21 @@ public static class ContentEndpoints
 
         // Package creation: metadata only. Content is added one item per
         // request through PUT /package/{id}/content/{contentId}, which is the
-        // single content write path.
+        // single content write path. Code-mode packages get their server-side
+        // locator here; the client secret is never part of the request.
         packageGroup
             .MapPost("", CreatePackageAsync)
             .RequireRateLimiting(RateLimitPolicies.Upload)
             .Accepts<CreatePackageRequest>("application/json")
-            .Produces<ContentPackageResponse>(StatusCodes.Status201Created)
-            .Produces<ContentPackageResponse>(StatusCodes.Status200OK)
+            .Produces<ContentPackageOwnerResponse>(StatusCodes.Status201Created)
+            .Produces<ContentPackageOwnerResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status410Gone)
             .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)
             .WithName("CreatePackage")
             .WithTags("Content", "Package");
 
@@ -74,7 +77,7 @@ public static class ContentEndpoints
         packageGroup
             .MapPut("/{packageId:guid}/content/{contentId:guid}", UploadContentToPackageAsync)
             .RequireRateLimiting(RateLimitPolicies.Upload)
-            .Produces<ContentPackageResponse>()
+            .Produces<ContentPackageOwnerResponse>()
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
@@ -86,6 +89,22 @@ public static class ContentEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
             .WithName("UploadContent")
+            .WithTags("Content", "Package");
+
+        // The short code locator is only a lookup alias. It does not claim an
+        // access and it does not check the unlock proof; the client then opens
+        // the package through the canonical id. The locator travels in the body
+        // so it never lands in access logs or browser history.
+        packageGroup
+            .MapPost("/code/resolve", ResolveShortCodeAsync)
+            .RequireRateLimiting(RateLimitPolicies.ShortCodeLookup)
+            .Accepts<ResolveShortCodeRequest>("application/json")
+            .Produces<ResolveShortCodeResponse>()
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status429TooManyRequests)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
+            .WithName("ResolveShortCode")
             .WithTags("Content", "Package");
 
         packageGroup
@@ -122,19 +141,111 @@ public static class ContentEndpoints
     }
 
     /// <summary>
+    /// Resolves a three-character short-code locator to the canonical package
+    /// id. This endpoint never claims an access, checks a passphrase or loads
+    /// content; the client then opens the package through the normal id-based
+    /// flow with the three-character client secret it kept locally.
+    /// </summary>
+    private static async Task<Results<Ok<ResolveShortCodeResponse>, ProblemHttpResult>> ResolveShortCodeAsync(
+        [FromBody] ResolveShortCodeRequest request,
+        [FromServices] IContentStorageHandler contentStorageHandler,
+        [FromServices] TimeProvider timeProvider,
+        [FromServices] ShareItMetrics metrics,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        using var activity = ShareItActivitySource.Instance.StartActivity("package.resolve_code");
+        httpContext.Response.Headers.CacheControl = "no-store";
+
+        var normalized = ShortCode.Normalize(request.Code);
+        if (normalized is null)
+        {
+            metrics.ShortCodeLookup("invalid");
+            activity?.SetTag("shareit.short_code.result", "invalid");
+            return ShortCodeNotFoundProblem();
+        }
+
+        var package = await contentStorageHandler.GetPackageShellByShortCodeAsync(normalized, cancellationToken);
+        if (package is null
+            || package.IsExpired(timeProvider.GetUtcNow())
+            || package.IsAccessLimitReached)
+        {
+            metrics.ShortCodeLookup("not_found");
+            activity?.SetTag("shareit.short_code.result", "not_found");
+            return ShortCodeNotFoundProblem();
+        }
+
+        metrics.ShortCodeLookup("found");
+        activity?.SetTag("shareit.short_code.result", "found");
+        return TypedResults.Ok(new ResolveShortCodeResponse { PackageId = package.Id });
+    }
+
+    private static ProblemHttpResult ShortCodeNotFoundProblem()
+        => TypedResults.Problem(new ProblemDetails
+        {
+            Title = "Short code not found",
+            Detail = "No package has this short code.",
+            Status = StatusCodes.Status404NotFound
+        });
+
+    private static ProblemHttpResult ShortCodeUnavailableProblem()
+        => TypedResults.Problem(new ProblemDetails
+        {
+            Title = "Short code unavailable",
+            Detail = "A short code could not be allocated. Please retry the request.",
+            Status = StatusCodes.Status503ServiceUnavailable
+        });
+
+    private static ProblemHttpResult PackageIdConflictProblem(string detail)
+        => TypedResults.Problem(new ProblemDetails
+        {
+            Title = "Package id already in use",
+            Detail = detail,
+            Status = StatusCodes.Status409Conflict
+        });
+
+    /// <summary>
+    /// A regular package retry keeps the historical idempotency behavior. A
+    /// code-mode retry must match the mode and the verifier the package was
+    /// created with; otherwise the client would receive a locator that does
+    /// not unlock the stored verifier.
+    /// </summary>
+    private static bool IsIdempotentRetry(ContentPackage existing, CreatePackageRequest request)
+    {
+        if (request.UseShortCode != (existing.ShortCode is not null))
+        {
+            return false;
+        }
+
+        if (!request.UseShortCode)
+        {
+            return true;
+        }
+
+        return existing.UnlockVerifier is not null
+               && UnlockProof.Matches(existing.UnlockVerifier, request.UnlockVerifier);
+    }
+
+    /// <summary>
     /// Creates a new (empty) content package. The client supplies the id
     /// because the salt and verifier derive from it; repeating the request
-    /// with the same id is idempotent for its owner.
+    /// with the same id and mode is idempotent for its owner. Code-mode retries
+    /// must also match the verifier, and they require the client to prove it
+    /// knows the passphrase before the server allocates the three-character
+    /// locator.
     /// </summary>
-    private static async Task<Results<Created<ContentPackageResponse>, Ok<ContentPackageResponse>, ProblemHttpResult>>
+    private static async Task<Results<Created<ContentPackageOwnerResponse>, Ok<ContentPackageOwnerResponse>, ProblemHttpResult>>
         CreatePackageAsync(
             [FromBody] CreatePackageRequest request,
             [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
+            [FromHeader(Name = "X-Unlock-Proof")] string? unlockProof,
             [FromServices] IContentStorageHandler contentStorageHandler,
+            [FromServices] IShortCodeGenerator shortCodeGenerator,
             [FromServices] TimeProvider timeProvider,
             [FromServices] LinkGenerator linkGenerator,
             [FromServices] IOptions<UploadSettings> uploadOptions,
             [FromServices] ShareItMetrics metrics,
+            [FromServices] ILogger<LogCategory> logger,
             ClaimsPrincipal claimsPrincipal,
             HttpContext httpContext,
             CancellationToken cancellationToken)
@@ -165,17 +276,53 @@ public static class ContentEndpoints
                 $"UnlockVerifier must be base64url of exactly {UnlockProof.VerifierLength} bytes.");
         }
 
-        var settings = uploadOptions.Value;
-        var lifetimeProblem = ValidateLifetime(userIdentity, settings, request.TimeToLiveHours);
-        if (lifetimeProblem is not null)
+        // Code-mode packages are always protected: the browser derives the key
+        // from the client-held secret and proves knowledge before creation.
+        if (request.UseShortCode)
         {
-            return lifetimeProblem;
+            if (request.UnlockVerifier is null)
+            {
+                return BadRequestProblem(
+                    "Unlock verifier required",
+                    "Code-mode packages must be encrypted and carry an UnlockVerifier.");
+            }
+
+            if (!UnlockProof.Matches(request.UnlockVerifier, unlockProof))
+            {
+                return BadRequestProblem(
+                    "Unlock proof required",
+                    "Code-mode packages require a matching X-Unlock-Proof header.");
+            }
         }
 
-        var accessCountProblem = ValidateMaxAccessCount(userIdentity, settings, request.MaxAccessCount);
-        if (accessCountProblem is not null)
+        var settings = uploadOptions.Value;
+        int? maxAccessCount;
+        DateTimeOffset expiresAt;
+        var now = timeProvider.GetUtcNow();
+
+        if (request.UseShortCode)
         {
-            return accessCountProblem;
+            // Fixed guardrails for guests and authenticated users alike: the
+            // requested lifetime and access count are ignored.
+            maxAccessCount = 1;
+            expiresAt = now.Add(ShortCode.PackageLifetime);
+        }
+        else
+        {
+            var lifetimeProblem = ValidateLifetime(userIdentity, settings, request.TimeToLiveHours);
+            if (lifetimeProblem is not null)
+            {
+                return lifetimeProblem;
+            }
+
+            var accessCountProblem = ValidateMaxAccessCount(userIdentity, settings, request.MaxAccessCount);
+            if (accessCountProblem is not null)
+            {
+                return accessCountProblem;
+            }
+
+            maxAccessCount = request.MaxAccessCount;
+            expiresAt = now.AddHours(request.TimeToLiveHours);
         }
 
         // Idempotent retry: the same owner repeating the create call gets the
@@ -185,15 +332,10 @@ public static class ContentEndpoints
         {
             if (existing.UserId != userIdentity.Id)
             {
-                return TypedResults.Problem(new ProblemDetails
-                {
-                    Title = "Package id already in use",
-                    Detail = "A package with this id already exists.",
-                    Status = StatusCodes.Status409Conflict
-                });
+                return PackageIdConflictProblem("A package with this id already exists.");
             }
 
-            if (existing.IsExpired(timeProvider.GetUtcNow()))
+            if (existing.IsExpired(now))
             {
                 return TypedResults.Problem(new ProblemDetails
                 {
@@ -203,29 +345,123 @@ public static class ContentEndpoints
                 });
             }
 
-            var existingWithContent = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+            if (!IsIdempotentRetry(existing, request))
+            {
+                return PackageIdConflictProblem(
+                    "This package id was already created with a different access mode or passphrase.");
+            }
+
+            if (request.UseShortCode)
+            {
+                metrics.ShortCodeAllocation("existing");
+                activity?.SetTag("shareit.short_code.result", "existing");
+            }
+
             activity?.SetTag("shareit.package.result", "existing");
-            return TypedResults.Ok(ContentPackageResponse.FromPackage(existingWithContent ?? existing));
+            return TypedResults.Ok(ContentPackageOwnerResponse.FromPackage(existing));
         }
 
-        var now = timeProvider.GetUtcNow();
         var package = new ContentPackage
         {
             Id = packageId,
             CreatedAt = now,
             UserId = userIdentity.Id,
-            MaxAccessCount = request.MaxAccessCount,
-            ExpiresAt = now.AddHours(request.TimeToLiveHours),
+            MaxAccessCount = maxAccessCount,
+            ExpiresAt = expiresAt,
             UnlockVerifier = request.UnlockVerifier
         };
 
-        await contentStorageHandler.StorePackageAsync(package, cancellationToken);
+        try
+        {
+            if (request.UseShortCode)
+            {
+                var stored = false;
+                for (var attempt = 1; attempt <= ShortCode.MaxGenerationAttempts; attempt++)
+                {
+                    var shortCode = ShortCode.Normalize(shortCodeGenerator.Next());
+                    if (shortCode is null)
+                    {
+                        metrics.ShortCodeAllocation("invalid_generator");
+                        logger.LogError("Short code generator returned an invalid locator");
+                        activity?.SetTag("shareit.short_code.result", "invalid_generator");
+                        activity?.SetStatus(ActivityStatusCode.Error, "short code allocation failed");
+                        return ShortCodeUnavailableProblem();
+                    }
+
+                    try
+                    {
+                        var candidate = package with { ShortCode = shortCode };
+                        await contentStorageHandler.StorePackageAsync(candidate, cancellationToken);
+                        // The creation response must carry the locator the
+                        // client appends its secret to.
+                        package = candidate;
+                        stored = true;
+                        break;
+                    }
+                    catch (ShortCodeConflictException)
+                    {
+                        // Another active package owns this locator; try a fresh one.
+                    }
+                }
+
+                if (!stored)
+                {
+                    metrics.ShortCodeAllocation("exhausted");
+                    logger.LogWarning("Short code allocation exhausted for package {PackageId}", packageId);
+                    activity?.SetStatus(ActivityStatusCode.Error, "short code allocation failed");
+                    return ShortCodeUnavailableProblem();
+                }
+
+                metrics.ShortCodeAllocation("created");
+                activity?.SetTag("shareit.short_code.result", "created");
+            }
+            else
+            {
+                await contentStorageHandler.StorePackageAsync(package, cancellationToken);
+            }
+        }
+        catch (PackageIdConflictException)
+        {
+            // Another request won the same-id insert race. Re-read and apply
+            // the same idempotency rules as the pre-check above.
+            var raced = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
+            if (raced is null || raced.UserId != userIdentity.Id)
+            {
+                return PackageIdConflictProblem("A package with this id already exists.");
+            }
+
+            if (raced.IsExpired(now))
+            {
+                return TypedResults.Problem(new ProblemDetails
+                {
+                    Title = "Package expired",
+                    Detail = "This package has expired and is no longer available",
+                    Status = StatusCodes.Status410Gone
+                });
+            }
+
+            if (!IsIdempotentRetry(raced, request))
+            {
+                return PackageIdConflictProblem(
+                    "This package id was already created with a different access mode or passphrase.");
+            }
+
+            if (request.UseShortCode)
+            {
+                metrics.ShortCodeAllocation("existing");
+                activity?.SetTag("shareit.short_code.result", "existing");
+            }
+
+            activity?.SetTag("shareit.package.result", "existing");
+            return TypedResults.Ok(ContentPackageOwnerResponse.FromPackage(raced));
+        }
+
         metrics.PackageCreated();
         activity?.SetTag("shareit.package.result", "created");
 
         var packageUrl = linkGenerator.GetUriByName(httpContext, "GetPackage", new { packageId = package.Id })!;
 
-        return TypedResults.Created(packageUrl, ContentPackageResponse.FromPackage(package));
+        return TypedResults.Created(packageUrl, ContentPackageOwnerResponse.FromPackage(package));
     }
 
     /// <summary>
@@ -244,7 +480,7 @@ public static class ContentEndpoints
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "The payload is disposed by the enclosing 'await using' declaration on every path.")]
-    private static async Task<Results<Ok<ContentPackageResponse>, ProblemHttpResult, EmptyHttpResult>>
+    private static async Task<Results<Ok<ContentPackageOwnerResponse>, ProblemHttpResult, EmptyHttpResult>>
         UploadContentToPackageAsync(
             [FromRoute] Guid packageId,
             [FromRoute] Guid contentId,
@@ -409,15 +645,13 @@ public static class ContentEndpoints
 
             await DrainRequestBodyAsync(httpContext.Request, itemSize.Value, cancellationToken);
 
-            var existingPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
             activity?.SetTag("shareit.package.result", "existing");
-            return TypedResults.Ok(ContentPackageResponse.FromPackage(existingPackage ?? package));
+            return TypedResults.Ok(ContentPackageOwnerResponse.FromPackage(package));
         }
 
         // The limit counts items, not bytes, and is checked after the
         // idempotency match so a retry never trips over it.
-        var withContent = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
-        if (withContent is not null && withContent.Contents is { } contents && contents.Count >= settings.MaxItemsPerPackage)
+        if (package.ItemCount >= settings.MaxItemsPerPackage)
         {
             return TypedResults.Problem(new ProblemDetails
             {
@@ -479,9 +713,9 @@ public static class ContentEndpoints
         metrics.ItemUploaded(contentType, itemSize.Value);
         activity?.SetTag("shareit.package.result", "uploaded");
 
-        var updatedPackage = await contentStorageHandler.GetPackageAsync(packageId, true, cancellationToken);
+        var updatedPackage = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
 
-        return TypedResults.Ok(ContentPackageResponse.FromPackage(updatedPackage ?? package));
+        return TypedResults.Ok(ContentPackageOwnerResponse.FromPackage(updatedPackage ?? package));
     }
 
     /// <summary>
@@ -545,11 +779,23 @@ public static class ContentEndpoints
         }
 
         // Proof before the access claim: a wrong passphrase costs nothing and
-        // reveals nothing. The header value is never logged.
+        // reveals nothing. The header value is never logged. A short-code
+        // package also counts the miss and burns itself after five attempts.
         if (package.UnlockVerifier is not null && !UnlockProof.Matches(package.UnlockVerifier, unlockProof))
         {
             logger.LogWarning("Failed unlock attempt for package {PackageId}", packageId);
             metrics.UnlockFailed();
+
+            if (package.ShortCode is not null
+                && await storageHandler.RegisterFailedUnlockAttemptAsync(
+                    packageId, ShortCode.MaxFailedUnlockAttempts, now, cancellationToken))
+            {
+                metrics.ShortCodeBurned();
+                logger.LogWarning(
+                    "Short-code package {PackageId} burned after {Attempts} failed unlock attempts",
+                    packageId, ShortCode.MaxFailedUnlockAttempts);
+            }
+
             return TypedResults.Problem(new ProblemDetails
             {
                 Title = "Unlock required",

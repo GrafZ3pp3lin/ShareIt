@@ -22,7 +22,8 @@ var postgresPassword = builder.AddParameter("postgres-password", PostgresPasswor
 var postgres = builder.AddPostgres("postgres")
     .WithImageTag("19-alpine")
     .WithPassword(postgresPassword)
-    .WithDataVolume("shareit-postgres-data");
+    // Bump this name when the schema changes incompatibly; there are no migrations.
+    .WithDataVolume("shareit-postgres-data-v2");
 var database = postgres.AddDatabase("shareit");
 
 // Mirrors the RustFS container used by the integration tests.

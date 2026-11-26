@@ -1,4 +1,4 @@
-﻿using kroet.ShareIt.Api.Models;
+using kroet.ShareIt.Api.Models;
 using ContentModel = kroet.ShareIt.Api.Models.Content;
 
 namespace kroet.ShareIt.Api.Storage;
@@ -13,8 +13,31 @@ public interface IContentStorageHandler
     /// </summary>
     /// <param name="package">The package to store.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="PackageIdConflictException">
+    /// Another request inserted the same package id first; no new row was written.
+    /// </exception>
+    /// <exception cref="ShortCodeConflictException">
+    /// The package's short code is already in use; no package row was written.
+    /// </exception>
     Task StorePackageAsync(ContentPackage package, CancellationToken cancellationToken = default);
-    
+
+    /// <summary>
+    /// Counts one rejected unlock proof. Only packages that have a short-code
+    /// locator are tracked. When the counter reaches <paramref name="burnAfter"/>,
+    /// the package is invalidated in the same update so it can no longer be
+    /// resolved or unlocked.
+    /// </summary>
+    /// <param name="packageId">The package identifier.</param>
+    /// <param name="burnAfter">Number of failed attempts that burns the package.</param>
+    /// <param name="now">Current time; used as the new expiry when burning.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when this attempt burned the package.</returns>
+    Task<bool> RegisterFailedUnlockAttemptAsync(
+        Guid packageId,
+        int burnAfter,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Stores content.
     /// </summary>
@@ -23,7 +46,8 @@ public interface IContentStorageHandler
     Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves a content package by ID.
+    /// Retrieves a content package by ID. <see cref="ContentPackage.ItemCount"/>
+    /// is always populated, even when <paramref name="includeContent"/> is false.
     /// </summary>
     /// <param name="packageId">The unique package identifier.</param>
     /// <param name="includeContent">Whether to include content data.</param>
@@ -32,13 +56,25 @@ public interface IContentStorageHandler
     Task<ContentPackage?> GetPackageAsync(Guid packageId, bool includeContent = true, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves only the package shell — no items, no blob reads. Used to
-    /// check the unlock proof before an access is claimed.
+    /// Retrieves only the package shell — no items, no blob reads. The item
+    /// count is populated so callers can build summaries without loading rows.
+    /// Used to check the unlock proof before an access is claimed.
     /// </summary>
     /// <param name="packageId">The unique package identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Package without contents, or null if not found.</returns>
     Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves a three-character short-code locator to its package shell. The
+    /// locator is only a lookup alias; the package id remains the cryptographic
+    /// identifier and the client secret is never stored. The item count is
+    /// populated so callers can build summaries without loading rows.
+    /// </summary>
+    /// <param name="shortCode">The normalized, uppercase locator.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Package without contents, or null when no package has the code.</returns>
+    Task<ContentPackage?> GetPackageShellByShortCodeAsync(string shortCode, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lists the packages owned by a user, newest first, with item count and
@@ -80,7 +116,7 @@ public interface IContentStorageHandler
     /// </summary>
     /// <returns>Number of sessions deleted.</returns>
     Task<long> DeleteExpiredAccessSessionsAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// Deletes multiple packages and their content, queueing their blobs in
     /// the same transaction.

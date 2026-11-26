@@ -27,10 +27,52 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
     {
         lock (_lock)
         {
+            if (_packages.Any(existing => existing.Id == package.Id))
+            {
+                throw new PackageIdConflictException();
+            }
+
+            if (package.ShortCode is not null
+                && _packages.Any(existing =>
+                    string.Equals(existing.ShortCode, package.ShortCode, StringComparison.Ordinal)))
+            {
+                throw new ShortCodeConflictException();
+            }
+
             _packages.Add(package);
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task<bool> RegisterFailedUnlockAttemptAsync(
+        Guid packageId,
+        int burnAfter,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            var index = _packages.FindIndex(package => package.Id == packageId);
+            if (index < 0 || _packages[index].ShortCode is null)
+            {
+                return Task.FromResult(false);
+            }
+
+            var package = _packages[index];
+            var attempts = package.FailedUnlockAttempts + 1;
+            var burned = attempts >= burnAfter;
+
+            _packages[index] = package with
+            {
+                FailedUnlockAttempts = attempts,
+                // Expire just before "now" so the same instant already sees
+                // the package as gone, matching the SQL clock precision.
+                ExpiresAt = burned ? now.AddTicks(-TimeSpan.TicksPerMicrosecond) : package.ExpiresAt
+            };
+
+            return Task.FromResult(burned);
+        }
     }
 
     public Task StoreContentAsync(ContentModel content, CancellationToken cancellationToken = default)
@@ -56,16 +98,35 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
             if (includeContent)
             {
                 var contents = _contents.Where(c => c.PackageId == packageId).ToList();
-                var packageWithContent = package with { Contents = contents };
+                var packageWithContent = package with { Contents = contents, ItemCount = contents.Count };
                 return Task.FromResult<ContentPackage?>(packageWithContent);
             }
 
-            return Task.FromResult<ContentPackage?>(package);
+            var itemCount = _contents.Count(c => c.PackageId == packageId);
+            return Task.FromResult<ContentPackage?>(package with { ItemCount = itemCount });
         }
     }
 
     public Task<ContentPackage?> GetPackageShellAsync(Guid packageId, CancellationToken cancellationToken = default)
         => GetPackageAsync(packageId, includeContent: false, cancellationToken);
+
+    public Task<ContentPackage?> GetPackageShellByShortCodeAsync(
+        string shortCode,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            var package = _packages.FirstOrDefault(candidate =>
+                string.Equals(candidate.ShortCode, shortCode, StringComparison.Ordinal));
+            if (package is null)
+            {
+                return Task.FromResult<ContentPackage?>(null);
+            }
+
+            var itemCount = _contents.Count(content => content.PackageId == package.Id);
+            return Task.FromResult<ContentPackage?>(package with { Contents = null, ItemCount = itemCount });
+        }
+    }
 
     public Task<PackageListPage> ListPackagesAsync(
         Guid userId,
@@ -99,6 +160,7 @@ public class InMemoryContentStorageHandler : IContentStorageHandler
                 return new ContentPackageSummary
                 {
                     Id = package.Id,
+                    HasShortCode = package.ShortCode is not null,
                     CreatedAt = package.CreatedAt,
                     ExpiresAt = package.ExpiresAt,
                     ItemCount = contents.Count,
