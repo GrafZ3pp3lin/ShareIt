@@ -113,7 +113,10 @@ export class FakeXhr {
     if (this.#aborted) {
       return;
     }
-    const next = FakeXhr.responses.shift() ?? { status: 200, body: { Id: 'fake-package' } };
+    const next = FakeXhr.responses.shift() ?? {
+      status: 200,
+      body: { Id: 'fake-package', ShortCode: 'ABC' }
+    };
     this.status = next.status;
     this.response = next.body;
     if (next.networkError) {

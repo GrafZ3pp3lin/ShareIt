@@ -3,6 +3,7 @@ import { Show } from 'solid-js';
 import { useAuth } from '../features/auth/auth-context.tsx';
 import { useI18n } from '../i18n/i18n.tsx';
 import { useTheme } from '../shared/theme/theme-context.tsx';
+import IconLock from '~icons/lucide/lock';
 import IconMoon from '~icons/lucide/moon';
 import IconSun from '~icons/lucide/sun';
 
@@ -75,8 +76,16 @@ export function AppLayout(props: AppLayoutProps) {
         </div>
       </header>
       <main class="mx-auto w-full max-w-275 flex-1 px-4 py-6 sm:px-8 sm:py-10">{props.children}</main>
-      <footer class="mx-auto hidden w-full max-w-275 px-4 pb-6 text-xs text-muted min-[620px]:block sm:px-8 sm:pb-8">
-        {t('app.footer')}
+      <footer class="mt-auto border-t border-border-soft/80 bg-panel/70">
+        <div class="mx-auto flex w-full max-w-275 items-center gap-2.5 px-4 py-3.5 sm:px-8 sm:py-4">
+          <span
+            class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border-soft bg-panel text-brand"
+            aria-hidden="true"
+          >
+            <IconLock class="h-3.5 w-3.5" />
+          </span>
+          <p class="font-mono text-[11px] leading-relaxed tracking-[0.02em] text-ink">{t('app.footer')}</p>
+        </div>
       </footer>
     </div>
   );

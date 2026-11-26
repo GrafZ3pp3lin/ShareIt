@@ -6,6 +6,7 @@ const NOW = Date.parse('2026-11-04T12:00:00Z');
 
 const makePackage = (overrides: Partial<PackageSummary> = {}): PackageSummary => ({
   Id: '0192f3ab-7cde-7def-8abc-0123456789ab',
+  HasShortCode: true,
   CreatedAt: '2026-11-01T12:00:00Z',
   ExpiresAt: '2026-11-10T12:00:00Z',
   ItemCount: 3,

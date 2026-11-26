@@ -58,16 +58,6 @@ export function SharedDocument(props: SharedDocumentProps) {
     return t('share.expiresIn', { value: t(days === 1 ? 'share.day' : 'share.days', { count: days }) });
   });
 
-  const accessesLabel = createMemo(() => {
-    const remaining = props.package.RemainingAccesses;
-    if (remaining == null) {
-      return t('share.unlimitedDownloads');
-    }
-
-    const count = Number(remaining);
-    return t(count === 1 ? 'share.downloadLeft' : 'share.downloadsLeft', { count });
-  });
-
   const accessNote = createMemo(() => {
     const expires = Date.parse(props.accessSessionExpiresAt);
     if (Number.isNaN(expires)) {
@@ -94,7 +84,6 @@ export function SharedDocument(props: SharedDocumentProps) {
     if (expiry) {
       parts.push(expiry);
     }
-    parts.push(accessesLabel());
 
     return parts.join(' · ');
   });

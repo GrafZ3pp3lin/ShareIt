@@ -137,7 +137,7 @@ describe('createShare', () => {
     await vi.waitFor(() => expect(state.status()).toBe('invalid'));
     expect(state.gateMessage()).toEqual({
       title: 'This link needs a passphrase.',
-      body: 'Enter the passphrase the sender shared with you. Nothing was loaded and no access was used.'
+      body: 'Enter the passphrase the sender shared with you.'
     });
   });
 

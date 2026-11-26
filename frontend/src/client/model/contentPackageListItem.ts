@@ -7,6 +7,7 @@
 
 export interface ContentPackageListItem {
   Id: string;
+  HasShortCode: boolean;
   CreatedAt: string;
   ExpiresAt: string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */

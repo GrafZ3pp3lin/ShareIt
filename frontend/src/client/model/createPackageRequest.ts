@@ -10,6 +10,7 @@ export interface CreatePackageRequest {
   Id?: string | null;
   /** @nullable */
   UnlockVerifier?: string | null;
+  UseShortCode?: boolean;
   /**
    * @nullable
    * @pattern ^-?(?:0|[1-9]\d*)$

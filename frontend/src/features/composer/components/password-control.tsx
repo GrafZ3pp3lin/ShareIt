@@ -17,13 +17,16 @@ type PasswordControlProps = {
   onRegenerate: () => void;
 };
 
-const MODES: PasswordMode[] = ['off', 'generate', 'custom'];
+const MODES: PasswordMode[] = ['off', 'generate', 'custom', 'code'];
 
 const modeLabelKey = (mode: PasswordMode) => {
   if (mode === 'generate') {
     return 'options.password.mode.generate';
   }
-  return mode === 'custom' ? 'options.password.mode.custom' : 'options.password.mode.off';
+  if (mode === 'custom') {
+    return 'options.password.mode.custom';
+  }
+  return mode === 'code' ? 'options.password.mode.code' : 'options.password.mode.off';
 };
 
 export function PasswordControl(props: PasswordControlProps) {
@@ -71,7 +74,7 @@ export function PasswordControl(props: PasswordControlProps) {
               type={revealed() ? 'text' : 'password'}
               class="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none"
               value={props.customPassphrase}
-              aria-label={t('options.password.custom')}
+              aria-label={t('options.password.mode.custom')}
               autocomplete="new-password"
               onInput={(event) => props.onCustomInput(event.currentTarget.value)}
             />

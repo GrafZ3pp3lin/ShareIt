@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { toBase64Url } from './base64url.ts';
-import { idBytes, normalizeId } from './ids.ts';
+import { idBytes, isValidId, normalizeId } from './ids.ts';
 import { deriveKeyBits, frameAad, metaKey, itemKey, packageSalt, unlockProof } from './keys.ts';
 
 const PACKAGE_ID = '0192f3a0-1111-7000-8000-000000000000';
@@ -20,6 +20,15 @@ describe('normalizeId', () => {
 
   it('rejects values that are not UUIDs', () => {
     expect(() => normalizeId('package-1')).toThrow('Invalid UUID');
+  });
+});
+
+describe('isValidId', () => {
+  it('accepts the same spellings as normalizeId', () => {
+    expect(isValidId(PACKAGE_ID)).toBe(true);
+    expect(isValidId(PACKAGE_ID.replace(/-/g, '').toUpperCase())).toBe(true);
+    expect(isValidId('package-1')).toBe(false);
+    expect(isValidId('')).toBe(false);
   });
 });
 

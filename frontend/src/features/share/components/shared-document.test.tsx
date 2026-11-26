@@ -74,17 +74,18 @@ describe('<SharedDocument />', () => {
     expect(await screen.findByText('hello')).toBeInTheDocument();
     expect(screen.getByText('report.pdf')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'download' })).toBeInTheDocument();
-    expect(screen.getByText('1 text · 1 file · 1.0 KB · expires in 6 days · unlimited accesses')).toBeInTheDocument();
+    expect(screen.getByText('1 text · 1 file · 1.0 KB · expires in 6 days')).toBeInTheDocument();
     expect(screen.getByText(/This access is valid until \d{1,2}:\d{2}/)).toBeInTheDocument();
     expect(api.downloadContent).toHaveBeenCalledWith(PACKAGE_ID, textItem.Id, 'session-1');
   });
 
-  it('uses the singular access label and a relative expiry', () => {
+  it('shows a relative expiry without exposing remaining accesses', () => {
     renderDocument([], {
       ExpiresAt: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
       RemainingAccesses: 1
     });
 
-    expect(screen.getByText('expires in 2 h · 1 access left')).toBeInTheDocument();
+    expect(screen.getByText('expires in 2 h')).toBeInTheDocument();
+    expect(screen.queryByText(/access left/)).not.toBeInTheDocument();
   });
 });

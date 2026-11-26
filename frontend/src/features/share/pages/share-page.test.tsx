@@ -19,9 +19,11 @@ const api = vi.hoisted(() => ({
 vi.mock('../../../shared/api/content.ts', () => api);
 
 const params = vi.hoisted(() => ({ packageId: '' }));
+const routerState = vi.hoisted(() => ({ secret: undefined as string | undefined }));
 
 vi.mock('@solidjs/router', () => ({
-  useParams: () => ({ packageId: params.packageId })
+  useParams: () => ({ packageId: params.packageId }),
+  useLocation: () => ({ state: routerState.secret === undefined ? null : { secret: routerState.secret } })
 }));
 
 const PACKAGE_ID = '0192f3ab-7cde-7def-8abc-0123456789ab';
@@ -124,6 +126,7 @@ const submitPassphrase = async (value: string) => {
 describe('<SharePage />', () => {
   beforeEach(() => {
     params.packageId = PACKAGE_ID;
+    routerState.secret = undefined;
     window.history.replaceState(null, '', `/s/${PACKAGE_ID}`);
     window.sessionStorage.clear();
     api.getPackageDetails.mockReset();
@@ -163,6 +166,17 @@ describe('<SharePage />', () => {
     expect(api.downloadContent).toHaveBeenCalledWith(PACKAGE_ID, TEXT_ID, 'session-1');
   });
 
+  it('rejects a code path because share links are UUID-only', () => {
+    params.packageId = 'ABC234';
+    window.history.replaceState(null, '', '/s/ABC234');
+
+    renderPage();
+    flush();
+
+    expect(screen.getByText('This link is not valid')).toBeInTheDocument();
+    expect(api.getPackageDetails).not.toHaveBeenCalled();
+  });
+
   it('opens sealed metadata and content with the package key', async () => {
     const passphrase = 'correct horse battery';
     const details = await protectedPackageDetails(passphrase);
@@ -179,6 +193,33 @@ describe('<SharePage />', () => {
 
     await screen.findByText('sealed hello');
     expect(screen.getByText('secret.pdf')).toBeInTheDocument();
+  });
+
+  it('unlocks immediately when the code entry hands over the client secret', async () => {
+    const secret = '234';
+    const details = await protectedPackageDetails(secret);
+    api.getPackageDetails.mockResolvedValueOnce({ status: 200, data: details });
+
+    const key = await deriveKeyBits(secret, await packageSalt(PACKAGE_ID));
+    mockDownloads({
+      [TEXT_ID]: await seal(
+        await itemKey(key, TEXT_ID),
+        utf8('sealed hello'),
+        frameAad(PACKAGE_ID, TEXT_ID, 'item', 0, true)
+      )
+    });
+
+    routerState.secret = secret;
+    renderPage();
+
+    // No gate flash: the router state starts the unlock in the unlocking state.
+    expect(screen.queryByText('This link is protected')).not.toBeInTheDocument();
+
+    await screen.findByText('sealed hello');
+    expect(screen.getByText('secret.pdf')).toBeInTheDocument();
+    expect(api.getPackageDetails).toHaveBeenCalledTimes(1);
+    expect(api.getPackageDetails.mock.calls[0][0]).toBe(PACKAGE_ID);
+    expect(api.getPackageDetails.mock.calls[0][1]).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 
   it('opens an unprotected package when the gate is submitted empty', async () => {
@@ -201,7 +242,6 @@ describe('<SharePage />', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("That passphrase doesn't work.");
-    expect(alert).toHaveTextContent('no access was used');
     expect(screen.queryByText('Shared content')).not.toBeInTheDocument();
   });
 

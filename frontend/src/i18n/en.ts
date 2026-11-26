@@ -18,11 +18,11 @@ export const dict = {
       light: 'light',
       toggleLabel: 'Toggle theme'
     },
-    footer: 'Share it once. Access it anywhere.'
+    footer: 'Encrypted in your browser, shared by link.'
   },
   composer: {
     headline: 'Paste it or drop it. One link.',
-    subline: 'Text and files together. Expires when you say, encrypted if you want.',
+    subline: 'Encrypted in your browser by default.',
     placeholder: 'paste or type your text',
     hint: 'drop files anywhere in this box · or browse',
     drop: 'drop to add files',
@@ -35,6 +35,17 @@ export const dict = {
     },
     limit: 'limit {{ limit }}/file',
     guestListNote: "Sign in to keep links in your list. Guest links can't be listed later — copy it when it's ready.",
+    haveCode: 'Have a code?',
+    codePlaceholder: 'ABC-234',
+    codeSubmit: 'open',
+    codeOpening: 'opening…',
+    codeInvalid: 'Enter a 6-character code.',
+    codeNotFound: 'No package has this code.',
+    codeRateLimited: 'Too many attempts. Try again in {{ wait }}.',
+    codeRateLimitedUnknown: 'Too many attempts. Please try again later.',
+    codeRetryWaitSeconds: '{{ count }}s',
+    codeRetryWaitMinutes: '{{ count }} min',
+    codeFailed: 'Could not open this code. Check your connection and try again.',
     submit: 'Create link',
     submitting: 'Creating link…',
     cancel: 'Cancel',
@@ -52,27 +63,27 @@ export const dict = {
     },
     how: {
       title: 'how it works',
-      one: 'Paste text, drop files — or both at once.',
-      two: 'Pick how long it lives and who can open it.',
-      three: 'Copy the link. It stops working when it should.',
-      note: 'No account needed. With a password, everything is encrypted in your browser first.'
+      one: 'Paste text, drop files, or both.',
+      two: 'Set the expiry and access limit.',
+      three: 'Copy the link and send it.'
     }
   },
   options: {
-    summary: 'expires {{ expiry }} · {{ downloads }} · password {{ password }}',
+    summary: 'expires in {{ expiry }} · {{ downloads }} · {{ password }}',
     expiry: {
       label: 'expires',
       sixHours: '6 hours',
       oneDay: '1 day',
       sevenDays: '7 days',
-      thirtyDays: '30 days'
+      thirtyDays: '30 days',
+      tenMinutes: '10 minutes'
     },
     downloads: {
       label: 'accesses allowed',
       hint: 'one person, one access',
-      once: 'once',
+      once: 'one access',
       count: '{{ count }} accesses',
-      unlimited: 'unlimited'
+      unlimited: 'unlimited accesses'
     },
     password: {
       label: 'password',
@@ -80,11 +91,13 @@ export const dict = {
       mode: {
         off: 'off',
         generate: 'generate',
-        custom: 'custom'
+        custom: 'custom',
+        code: 'code'
       },
-      off: 'off',
-      generated: 'generated',
-      custom: 'custom',
+      off: 'no password',
+      generated: 'use generated password',
+      custom: 'use custom password',
+      code: 'use a code',
       regenerate: 'regenerate',
       show: 'show',
       hide: 'hide',
@@ -100,11 +113,20 @@ export const dict = {
         strong: 'strong'
       }
     },
+    code: {
+      guardrails:
+        'Code mode generates a 6-character code • single use • valid for 10 minutes. It is less secure and meant for devices where you cannot share a link.'
+    },
     guestNote: 'Expiry and accesses are fixed for links created without an account. Sign in to choose them.'
   },
   result: {
     ready: 'link ready',
-    summary: 'expires {{ expiry }} · {{ downloads }} · password {{ password }}',
+    summary: 'expires in {{ expiry }} · {{ downloads }} · {{ password }}',
+    code: 'code',
+    codeNote: 'Single use, valid for 10 minutes. Enter it on the home page to open the package.',
+    codeSelfOpenTitle: "Don't enter this code yourself.",
+    codeSelfOpenBody:
+      'It can only be opened once. Test your uploads with a copy you are prepared to lose, or share the code directly with the recipient.',
     link: 'link',
     passphrase: 'passphrase',
     combined: 'link + passphrase — both included',
@@ -119,6 +141,7 @@ export const dict = {
   },
   errors: {
     createPackage: 'Failed to create the link.',
+    createCode: 'Could not create an access code.',
     upload: 'Failed to upload {{ fileName }}.',
     encrypt: 'Unable to encrypt {{ fileName }}.',
     canceled: 'Upload canceled.',
@@ -137,7 +160,7 @@ export const dict = {
     loadMoreFailed: 'Could not load more links.',
     filterEmpty: 'No links in this filter.',
     copyNote:
-      "Only the plain link can be copied here — the passphrase was shown once and isn't stored. Send it from the same place you saved it.",
+      'Links can always be copied. A code can be copied only in the tab that created it, until it expires; the passphrase is never stored.',
     table: {
       created: 'created',
       status: 'status'
@@ -156,6 +179,7 @@ export const dict = {
     },
     protected: 'protected',
     unprotected: 'no passphrase',
+    code: 'code',
     itemCount: '{{ count }} item',
     itemCountPlural: '{{ count }} items',
     minutes: '{{ count }} min',
@@ -170,6 +194,7 @@ export const dict = {
     usedUpNote: '{{ current }} of {{ max }} accesses used · cleanup removes it',
     actions: {
       copyLink: 'copy link',
+      copyCode: 'copy code',
       delete: 'delete'
     },
     delete: {
@@ -194,20 +219,18 @@ export const dict = {
   },
   gate: {
     title: 'This link is protected',
-    subtitle:
-      "Enter the passphrase the sender shared with you. If there isn't one, leave the field empty. Nothing is loaded before you unlock.",
+    subtitle: "Enter the passphrase the sender shared with you. If there isn't one, leave the field empty.",
     passphraseLabel: 'passphrase',
     passphrasePlaceholder: 'passphrase',
     unlock: 'Unlock',
     tryAgain: 'Try again',
     note: 'Decrypted in your browser. The passphrase is never sent anywhere.',
     invalidTitle: "That passphrase doesn't work.",
-    invalidBody: 'Check for stray spaces. Nothing was loaded and no access was used.',
+    invalidBody: 'Check for stray spaces.',
     missingTitle: 'This link needs a passphrase.',
-    missingBody: 'Enter the passphrase the sender shared with you. Nothing was loaded and no access was used.',
+    missingBody: 'Enter the passphrase the sender shared with you.',
     goneTitle: 'This link is no longer available',
-    goneBody:
-      'It expired, its accesses were used up, or the sender deleted it. Content is removed by the cleanup job, not archived — ask the sender for a new link.',
+    goneBody: 'It expired, its accesses were used up, or the sender deleted it. Ask the sender for a new link.',
     home: 'What is ShareIt?',
     rateLimitedTitle: 'Too many attempts.',
     rateLimitedBody: 'Wait a few minutes and try again. No access was used.',
@@ -219,6 +242,8 @@ export const dict = {
   },
   share: {
     title: 'Shared content',
+    invalidLinkTitle: 'This link is not valid',
+    invalidLinkBody: 'Check the link, or enter the six-character code on the home page.',
     loading: 'Loading content...',
     textLabel: 'text',
     filesLabel: 'files',
@@ -232,9 +257,6 @@ export const dict = {
     day: '{{ count }} day',
     days: '{{ count }} days',
     expiresNow: 'expires now',
-    unlimitedDownloads: 'unlimited accesses',
-    downloadLeft: '{{ count }} access left',
-    downloadsLeft: '{{ count }} accesses left',
     accessNote: 'This access is valid until {{ time }}.',
     fileFallback: 'item-{{ index }}',
     download: 'download',

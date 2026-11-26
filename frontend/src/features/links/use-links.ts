@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal } from 'solid-js';
 import { useI18n } from '../../i18n/i18n.tsx';
 import { deletePackage, listPackages, type PackageSummary } from '../../shared/api/content.ts';
 import { getErrorMessage } from '../../shared/api/error-message.ts';
+import { clearShortCode } from '../../shared/short-code-store.ts';
 import { useAuth } from '../auth/auth-context.tsx';
 import { isDead, linkStatus, matchesFilter, type LinkFilter, type LinkStatus } from './link-status.ts';
 
@@ -162,6 +163,7 @@ export function createLinks() {
       const outcome = await deletePackage(target.Id);
       // A 404 means cleanup already removed it; the row is gone either way.
       if (outcome.data || outcome.status === 404) {
+        clearShortCode(target.Id);
         return;
       }
 

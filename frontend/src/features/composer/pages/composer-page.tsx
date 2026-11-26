@@ -1,6 +1,7 @@
 import { Show } from 'solid-js';
 import { useI18n } from '../../../i18n/i18n.tsx';
 import { CommitBar } from '../components/commit-bar.tsx';
+import { CodeEntry } from '../components/code-entry.tsx';
 import { Composer } from '../components/composer.tsx';
 import { OptionsPanel } from '../components/options-panel.tsx';
 import { ResultPanel } from '../components/result-panel.tsx';
@@ -19,7 +20,7 @@ export function ComposerPage() {
         </Show>
       }
     >
-      <div class="mx-auto grid w-full max-w-190 gap-4">
+      <div class="grid w-full gap-4">
         <div class="grid gap-1.5">
           <h1 class="text-2xl font-semibold tracking-tight text-ink">{t('composer.headline')}</h1>
           <p class="max-w-[62ch] text-sm text-muted">{t('composer.subline')}</p>
@@ -103,16 +104,30 @@ export function ComposerPage() {
             )}
           </Show>
 
-          <div class="grid gap-2 pt-3">
+          <div class="grid gap-3 border-t border-border-soft pt-4">
             <div class="tiny-label">{t('composer.how.title')}</div>
-            <div class="grid gap-2 sm:grid-cols-3">
-              <p class="text-xs text-muted">{t('composer.how.one')}</p>
-              <p class="text-xs text-muted">{t('composer.how.two')}</p>
-              <p class="text-xs text-muted">{t('composer.how.three')}</p>
-            </div>
-            <p class="text-xs text-muted/90">{t('composer.how.note')}</p>
+            <ol class="grid list-none gap-3 p-0 sm:grid-cols-3">
+              <li class="flex gap-2.5">
+                <span class="mt-px font-mono text-[10px] font-semibold text-brand">01</span>
+                <span class="text-xs leading-relaxed text-muted">{t('composer.how.one')}</span>
+              </li>
+              <li class="flex gap-2.5">
+                <span class="mt-px font-mono text-[10px] font-semibold text-brand">02</span>
+                <span class="text-xs leading-relaxed text-muted">{t('composer.how.two')}</span>
+              </li>
+              <li class="flex gap-2.5">
+                <span class="mt-px font-mono text-[10px] font-semibold text-brand">03</span>
+                <span class="text-xs leading-relaxed text-muted">{t('composer.how.three')}</span>
+              </li>
+            </ol>
           </div>
         </form>
+
+        <div class="border-t border-border-soft pt-4">
+          <div class="max-w-sm">
+            <CodeEntry />
+          </div>
+        </div>
       </div>
     </Show>
   );

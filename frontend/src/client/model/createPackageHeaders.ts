@@ -7,4 +7,5 @@
 
 export type CreatePackageHeaders = {
   'X-Guest-ID'?: string;
+  'X-Unlock-Proof'?: string;
 };

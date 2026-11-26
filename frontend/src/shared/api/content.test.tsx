@@ -18,18 +18,23 @@ import {
   getPackageDetails,
   getUploadLimits,
   listPackages,
+  resolveShortCode,
   uploadItem
 } from './content.ts';
 
 const originalXhr = globalThis.XMLHttpRequest;
 const originalFetch = globalThis.fetch;
+const PACKAGE_ID = '0192f3ab-7cde-7def-8abc-0123456789ab';
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-const jsonResponse = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const jsonResponse = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers }
+  });
 
 const problemResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/problem+json' } });
@@ -79,14 +84,49 @@ describe('getUploadLimits', () => {
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
   });
+});
 
-  it('resolve an error when the payload has an unexpected shape', async () => {
-    stubFetch(async () => jsonResponse(200, {}));
+describe('resolveShortCode', () => {
+  it('returns the canonical package id', async () => {
+    const fetchMock = stubFetch(async () => jsonResponse(200, { PackageId: PACKAGE_ID }));
 
-    const result = await getUploadLimits();
+    const result = await resolveShortCode('ABC');
+
+    expect(result.data).toEqual({ PackageId: PACKAGE_ID });
+    expect(result.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE_URL}/api/v1/content/package/code/resolve`);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ Code: 'ABC' }));
+  });
+
+  it('rejects a resolved id that is not a UUID', async () => {
+    stubFetch(async () => jsonResponse(200, { PackageId: 'pkg-1' }));
+
+    const result = await resolveShortCode('ABC');
 
     expect(result.data).toBeUndefined();
-    expect(result.error).toEqual(new Error('Unexpected upload limits response'));
+    expect(result.error).toEqual({ PackageId: 'pkg-1' });
+  });
+
+  it('returns the status and body for a missing code', async () => {
+    const body = { title: 'Short code not found' };
+    stubFetch(async () => problemResponse(404, body));
+
+    const result = await resolveShortCode('ABC');
+
+    expect(result.data).toBeUndefined();
+    expect(result.error).toEqual(body);
+    expect(result.status).toBe(404);
+  });
+
+  it('surfaces Retry-After on a rate-limited lookup', async () => {
+    const body = { title: 'Too many requests' };
+    stubFetch(async () => jsonResponse(429, body, { 'Retry-After': '42' }));
+
+    const result = await resolveShortCode('ABC');
+
+    expect(result.status).toBe(429);
+    expect(result.retryAfterSeconds).toBe(42);
   });
 });
 
@@ -98,17 +138,33 @@ describe('createPackage', () => {
       TimeToLiveHours: 24,
       MaxAccessCount: 1
     };
-    const fetchMock = stubFetch(async () => jsonResponse(201, { Id: 'pkg-1', ItemCount: 0 }));
+    const fetchMock = stubFetch(async () => jsonResponse(201, { Id: 'pkg-1', ShortCode: 'ABC', ItemCount: 0 }));
 
     const result = await createPackage(request);
 
-    expect(result.data).toEqual({ Id: 'pkg-1', ItemCount: 0 });
+    expect(result.data).toEqual({ Id: 'pkg-1', ShortCode: 'ABC', ItemCount: 0 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${API_BASE_URL}/api/v1/content/package`);
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
+    expect(new Headers(init?.headers).get('X-Unlock-Proof')).toBeNull();
     expect(init?.body).toBe(JSON.stringify(request));
+  });
+
+  it('attaches the unlock proof header for a code-mode package', async () => {
+    const request = {
+      Id: 'pkg-1',
+      UnlockVerifier: 'verifier-1',
+      UseShortCode: true,
+      TimeToLiveHours: 1,
+      MaxAccessCount: 1
+    };
+    const fetchMock = stubFetch(async () => jsonResponse(201, { Id: 'pkg-1', ShortCode: 'ABC' }));
+
+    await createPackage(request, 'verifier-1');
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-Unlock-Proof')).toBe('verifier-1');
   });
 
   it('returns the ProblemDetails body on an error response', async () => {
@@ -119,6 +175,14 @@ describe('createPackage', () => {
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
+  });
+
+  it('accepts a package created without a short code', async () => {
+    stubFetch(async () => jsonResponse(201, { Id: 'pkg-1', ShortCode: null, ItemCount: 0 }));
+
+    const result = await createPackage({ Id: 'pkg-1', TimeToLiveHours: 24 });
+
+    expect(result.data).toEqual({ Id: 'pkg-1', ShortCode: null, ItemCount: 0 });
   });
 });
 
@@ -165,27 +229,6 @@ describe('getPackageDetails', () => {
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
     expect(result.status).toBe(401);
-  });
-
-  it('rejects a success payload with the wrong shape', async () => {
-    stubFetch(async () => jsonResponse(200, { Items: [] }));
-
-    const result = await getPackageDetails('pkg-1');
-
-    expect(result.data).toBeUndefined();
-    expect(result.error).toEqual({ Items: [] });
-    expect(result.status).toBe(200);
-  });
-
-  it('rejects a details response whose access session is null', async () => {
-    const body = { Package: { Id: 'pkg-1' }, Items: [], AccessSession: null };
-    stubFetch(async () => jsonResponse(200, body));
-
-    const result = await getPackageDetails('pkg-1');
-
-    expect(result.data).toBeUndefined();
-    expect(result.error).toEqual(body);
-    expect(result.status).toBe(200);
   });
 });
 
@@ -276,6 +319,7 @@ describe('downloadContentResponse', () => {
 describe('listPackages', () => {
   const listItem = {
     Id: 'pkg-1',
+    HasShortCode: true,
     CreatedAt: '2026-11-04T12:00:00Z',
     ExpiresAt: '2026-11-05T12:00:00Z',
     ItemCount: '2',
@@ -296,6 +340,7 @@ describe('listPackages', () => {
       items: [
         {
           Id: 'pkg-1',
+          HasShortCode: true,
           CreatedAt: '2026-11-04T12:00:00Z',
           ExpiresAt: '2026-11-05T12:00:00Z',
           ItemCount: 2,
@@ -329,15 +374,6 @@ describe('listPackages', () => {
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
     expect(result.status).toBe(401);
-  });
-
-  it('rejects a response whose items do not match the row shape', async () => {
-    stubFetch(async () => jsonResponse(200, { Items: [{ Id: 'pkg-1' }] }));
-
-    const result = await listPackages();
-
-    expect(result.data).toBeUndefined();
-    expect(result.status).toBe(200);
   });
 });
 

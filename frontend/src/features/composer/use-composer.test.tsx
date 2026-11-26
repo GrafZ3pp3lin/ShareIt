@@ -64,8 +64,15 @@ const decodedMeta = (meta: string) => JSON.parse(new TextDecoder().decode(fromBa
 describe('createComposer', () => {
   beforeEach(() => {
     authState.authenticated = false;
+    window.sessionStorage.clear();
     api.getUploadLimits.mockResolvedValue({ data: undefined });
-    api.createPackage.mockImplementation(async (request: { Id: string }) => ({ data: { Id: request.Id } }));
+    api.createPackage.mockImplementation(async (request: { Id: string; UseShortCode?: boolean }) => ({
+      data: {
+        Id: request.Id,
+        ShortCode: request.UseShortCode ? 'ABC' : null,
+        ExpiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+      }
+    }));
     api.uploadItem.mockResolvedValue({ data: { Id: 'package-1' } });
   });
 
@@ -75,6 +82,7 @@ describe('createComposer', () => {
 
   it('creates the package with a client id and uploads text and files without encryption', async () => {
     const composer = renderComposer();
+    composer.setPasswordMode('off');
     composer.setText('hello world');
     composer.addFiles([makeFile()]);
     flush();
@@ -98,8 +106,17 @@ describe('createComposer', () => {
 
     expect(request.UnlockVerifier).toBeNull();
     expect(composer.result()?.link).toBe(`${window.location.origin}/s/${request.Id}`);
+    expect(composer.result()?.code).toBeUndefined();
     expect(composer.result()?.passphrase).toBeUndefined();
     expect(composer.result()?.linkWithPassphrase).toBeUndefined();
+  });
+
+  it('starts with encryption enabled using a generated passphrase', () => {
+    const composer = renderComposer();
+
+    expect(composer.passwordMode()).toBe('generate');
+    expect(composer.generatedPassphrase()).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(composer.passwordLabel()).toBe('use generated password');
   });
 
   it('derives the verifier and seals content and metadata when generating a passphrase', async () => {
@@ -127,6 +144,60 @@ describe('createComposer', () => {
     );
   });
 
+  it('derives the key from a browser secret and requests a single-use code package', async () => {
+    const composer = renderComposer();
+    composer.setText('code protected text');
+    composer.setPasswordMode('code');
+    flush();
+
+    expect(composer.expiryLabel()).toBe('10 minutes');
+    expect(composer.accessesLabel()).toBe('one access');
+    expect(composer.passwordLabel()).toBe('use a code');
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+
+    const request = api.createPackage.mock.calls[0][0];
+    expect(request.UseShortCode).toBe(true);
+    expect(request.MaxAccessCount).toBe(1);
+    expect(request.TimeToLiveHours).toBe(1);
+    expect(fromBase64Url(request.UnlockVerifier)).toHaveLength(32);
+    expect(api.createPackage.mock.calls[0][1]).toBe(request.UnlockVerifier);
+
+    // The server locator plus a three-character client secret the server
+    // never sees.
+    const code = composer.result()?.code;
+    expect(code).toMatch(/^ABC[2-9A-HJ-KM-NP-Z]{3}$/);
+    const rawStoredCode = window.sessionStorage.getItem(`shareit-short-code:${request.Id}`);
+    expect(rawStoredCode).not.toBeNull();
+    expect(JSON.parse(rawStoredCode ?? 'null')).toMatchObject({ Code: code });
+    expect(composer.result()?.passphrase).toBeUndefined();
+    expect(composer.result()?.linkWithPassphrase).toBeUndefined();
+
+    const item = addedItem(0);
+    expect(isFramed(fromBase64Url(item.Meta))).toBe(true);
+    expect(isFramed(new Uint8Array(await item.File.arrayBuffer()))).toBe(true);
+  });
+
+  it('keeps the same package and code when retrying a failed code-mode upload', async () => {
+    api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
+
+    const composer = renderComposer();
+    composer.setText('hello');
+    composer.setPasswordMode('code');
+    flush();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.error()).toContain('storage unreachable'));
+    expect(composer.partial()).not.toBeNull();
+
+    composer.handleSubmit();
+    await vi.waitFor(() => expect(composer.stage()).toBe('result'));
+
+    expect(api.createPackage).toHaveBeenCalledTimes(1);
+    expect(composer.result()?.code).toMatch(/^ABC[2-9A-HJ-KM-NP-Z]{3}$/);
+  });
+
   it('keeps the package and item ids stable when retrying a failed upload', async () => {
     api.uploadItem.mockResolvedValueOnce({ error: { title: 'storage unreachable' } });
 
@@ -148,6 +219,8 @@ describe('createComposer', () => {
 
     // No second package: the retry resumes the existing one with the same ids.
     expect(api.createPackage).toHaveBeenCalledTimes(1);
+    expect(composer.result()?.code).toBeUndefined();
+    expect(composer.result()?.link).toBe(`${window.location.origin}/s/${firstRequest.Id}`);
     const retriedItem = api.uploadItem.mock.calls[api.uploadItem.mock.calls.length - 2];
     expect(retriedItem[0]).toBe(firstRequest.Id);
     expect(retriedItem[1].Id).toBe(firstItemId);
@@ -291,7 +364,7 @@ describe('createComposer', () => {
     const composer = renderComposer();
 
     expect(composer.isAuthenticated()).toBe(true);
-    expect(composer.accessesLabel()).toBe('once');
+    expect(composer.accessesLabel()).toBe('one access');
     expect(composer.expiryLabel()).toBe('7 days');
   });
 
@@ -348,6 +421,7 @@ describe('createComposer', () => {
 
   it('hands the original file to the upload without copying it when unencrypted', async () => {
     const composer = renderComposer();
+    composer.setPasswordMode('off');
     const file = makeFile();
     composer.addFiles([file]);
     flush();
@@ -458,7 +532,7 @@ describe('createComposer', () => {
     expect(composer.stage()).toBe('form');
     expect(composer.text()).toBe('');
     expect(composer.files()).toEqual([]);
-    expect(composer.passwordMode()).toBe('off');
+    expect(composer.passwordMode()).toBe('generate');
     expect(composer.customPassphrase()).toBe('');
     expect(composer.error()).toBeNull();
     expect(composer.progress()).toBeNull();
@@ -474,7 +548,7 @@ describe('createComposer', () => {
     flush();
 
     expect(composer.expiryLabel()).toBe('30 days');
-    expect(composer.accessesLabel()).toBe('unlimited');
+    expect(composer.accessesLabel()).toBe('unlimited accesses');
 
     composer.handleSubmit();
     await vi.waitFor(() => expect(composer.stage()).toBe('result'));
@@ -483,7 +557,7 @@ describe('createComposer', () => {
     expect(request.TimeToLiveHours).toBe(720);
     expect(request.MaxAccessCount).toBeNull();
     expect(composer.result()?.expiryLabel).toBe('30 days');
-    expect(composer.result()?.accessesLabel).toBe('unlimited');
+    expect(composer.result()?.accessesLabel).toBe('unlimited accesses');
   });
 
   it('reports upload progress from the XHR callback', async () => {

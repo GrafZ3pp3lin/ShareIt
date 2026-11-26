@@ -15,6 +15,8 @@ import {
 } from '../../shared/crypto/keys.ts';
 import { encodeMeta, type ItemMeta } from '../../shared/crypto/meta.ts';
 import { generatePassphrase, validatePassphrase } from '../../shared/crypto/passphrase.ts';
+import { generateCodeSecret } from '../../shared/short-code.ts';
+import { saveShortCode } from '../../shared/short-code-store.ts';
 import { useI18n } from '../../i18n/i18n.tsx';
 import { useAuth } from '../auth/auth-context.tsx';
 import {
@@ -26,16 +28,20 @@ import {
   EXPIRY_OPTIONS
 } from './composer-options.ts';
 
-export type PasswordMode = 'off' | 'generate' | 'custom';
+export type PasswordMode = 'off' | 'generate' | 'custom' | 'code';
+
+// Packages are encrypted by default; the password can be switched off explicitly.
+const DEFAULT_PASSWORD_MODE: PasswordMode = 'generate';
 
 export type ComposerResult = {
   link: string;
+  /** Combined six-character access code, when the package is in code mode. */
+  code?: string;
   linkWithPassphrase?: string;
   passphrase?: string;
   expiryLabel: string;
   accessesLabel: string;
   passwordLabel: string;
-  encrypted: boolean;
 };
 
 export type ComposerProgress = {
@@ -56,10 +62,11 @@ type PartialPackage = {
   items: ComposerItem[];
   nextIndex: number;
   passphrase: string | undefined;
+  /** Combined six-character code, once the server returned the locator. */
+  code?: string;
   expiryLabel: string;
   accessesLabel: string;
   passwordLabel: string;
-  encrypted: boolean;
 };
 
 const formatMb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
@@ -81,7 +88,7 @@ export function createComposer() {
   const [text, setTextBase] = createSignal('');
   const [files, setFiles] = createSignal<File[]>([]);
   const [optionsOpen, setOptionsOpen] = createSignal(false);
-  const [passwordMode, setPasswordModeBase] = createSignal<PasswordMode>('off');
+  const [passwordMode, setPasswordModeBase] = createSignal<PasswordMode>(DEFAULT_PASSWORD_MODE);
   const [customPassphrase, setCustomPassphraseBase] = createSignal('');
   const [generatedPassphrase, setGeneratedPassphrase] = createSignal(generatePassphrase());
   const [expiryIndex, setExpiryIndex] = createSignal(DEFAULT_EXPIRY_INDEX);
@@ -99,14 +106,19 @@ export function createComposer() {
   const hasFiles = createMemo(() => files().length > 0);
   const hasContent = createMemo(() => hasText() || hasFiles());
 
+  const codeMode = createMemo(() => passwordMode() === 'code');
+
   // Guests have no pickers: they always get the shortest lifetime and one access.
   const expiry = createMemo(() => EXPIRY_OPTIONS[isAuthenticated() ? expiryIndex() : ANONYMOUS_EXPIRY_INDEX]);
   const accessCount = createMemo(() =>
     isAuthenticated() ? ACCESS_COUNT_OPTIONS[accessIndex()] : ANONYMOUS_ACCESS_COUNT
   );
 
-  const expiryLabel = createMemo(() => t(expiry().labelKey));
+  const expiryLabel = createMemo(() => (codeMode() ? t('options.expiry.tenMinutes') : t(expiry().labelKey)));
   const accessesLabel = createMemo(() => {
+    if (codeMode()) {
+      return t('options.downloads.once');
+    }
     const count = accessCount();
     if (count == null) {
       return t('options.downloads.unlimited');
@@ -118,7 +130,10 @@ export function createComposer() {
     if (mode === 'generate') {
       return t('options.password.generated');
     }
-    return mode === 'custom' ? t('options.password.custom') : t('options.password.off');
+    if (mode === 'custom') {
+      return t('options.password.custom');
+    }
+    return mode === 'code' ? t('options.password.code') : t('options.password.off');
   });
   const summary = createMemo(() =>
     t('options.summary', {
@@ -135,7 +150,6 @@ export function createComposer() {
     }
     return mode === 'custom' ? customPassphrase() : undefined;
   });
-
   const passphraseCheck = createMemo(() => validatePassphrase(customPassphrase()));
   const passphraseError = createMemo(() =>
     passwordMode() === 'custom' && !passphraseCheck().valid ? t('options.password.errors.tooShort') : null
@@ -322,16 +336,17 @@ export function createComposer() {
     items: ComposerItem[],
     nextIndex: number,
     currentPassphrase: string | undefined,
-    labels: { expiry: string; downloads: string; password: string }
+    labels: { expiry: string; downloads: string; password: string },
+    code?: string
   ): PartialPackage => ({
     packageId,
     items,
     nextIndex,
     passphrase: currentPassphrase,
+    code,
     expiryLabel: labels.expiry,
     accessesLabel: labels.downloads,
-    passwordLabel: labels.password,
-    encrypted: Boolean(currentPassphrase)
+    passwordLabel: labels.password
   });
 
   /**
@@ -382,7 +397,9 @@ export function createComposer() {
 
     try {
       const items = resume?.items ?? buildItems();
-      const currentPassphrase = resume ? resume.passphrase : passphrase();
+      const isCodeMode = resume ? resume.code !== undefined : codeMode();
+      const codeSecret = !resume && isCodeMode ? generateCodeSecret() : undefined;
+      const currentPassphrase = resume ? resume.passphrase : isCodeMode ? codeSecret : passphrase();
 
       const validationError = validateSubmit(items, resume?.nextIndex ?? 0);
       if (validationError) {
@@ -406,20 +423,40 @@ export function createComposer() {
         key = await deriveKeyBits(currentPassphrase, await packageSalt(packageId));
       }
 
+      let code = resume?.code;
+
       // Step 1: create the package unless we are resuming a failed attempt.
       if (!resume) {
         const verifier = key ? await unlockProof(key, packageId) : null;
-        const created = await createPackage({
-          Id: packageId,
-          UnlockVerifier: verifier,
-          TimeToLiveHours: expiry().hours,
-          MaxAccessCount: accessCount()
-        });
+        const created = await createPackage(
+          {
+            Id: packageId,
+            UnlockVerifier: verifier,
+            UseShortCode: isCodeMode,
+            TimeToLiveHours: isCodeMode ? 1 : expiry().hours,
+            MaxAccessCount: isCodeMode ? 1 : accessCount()
+          },
+          isCodeMode ? (verifier ?? undefined) : undefined
+        );
 
         if (!created.data) {
           setProgress(null);
           setError(getErrorMessage(created.error, t('errors.createPackage')));
           return;
+        }
+
+        if (isCodeMode) {
+          if (!created.data.ShortCode || !codeSecret) {
+            setProgress(null);
+            setError(t('errors.createCode'));
+            return;
+          }
+
+          // The server owns the locator; the browser keeps the secret.
+          code = `${created.data.ShortCode}${codeSecret}`;
+          // The creating tab keeps the full code so the owner links list can
+          // offer it until the ten-minute package lifetime ends.
+          saveShortCode(packageId, code, created.data.ExpiresAt);
         }
       }
 
@@ -467,7 +504,7 @@ export function createComposer() {
         } catch {
           setProgress(null);
           setError(t('errors.encrypt', { fileName }));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels));
+          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
           return;
         }
 
@@ -499,21 +536,21 @@ export function createComposer() {
         } catch (err) {
           setProgress(null);
           setError(getErrorMessage(err, t('errors.upload', { fileName })));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels));
+          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
           return;
         }
 
         if (outcome.canceled) {
           setProgress(null);
           setError(t('errors.canceled'));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels));
+          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
           return;
         }
 
         if (!outcome.data) {
           setProgress(null);
           setError(getErrorMessage(outcome.error, t('errors.upload', { fileName })));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels));
+          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
           return;
         }
       }
@@ -524,12 +561,13 @@ export function createComposer() {
       const link = `${window.location.origin}/s/${packageId}`;
       setResult({
         link,
-        linkWithPassphrase: currentPassphrase ? `${link}#s=${encodeURIComponent(currentPassphrase)}` : undefined,
-        passphrase: currentPassphrase,
+        code,
+        linkWithPassphrase:
+          currentPassphrase && !isCodeMode ? `${link}#s=${encodeURIComponent(currentPassphrase)}` : undefined,
+        passphrase: isCodeMode ? undefined : currentPassphrase,
         expiryLabel: labels.expiry,
         accessesLabel: labels.downloads,
-        passwordLabel: labels.password,
-        encrypted: Boolean(currentPassphrase)
+        passwordLabel: labels.password
       });
       setStage('result');
     } catch (err) {
@@ -562,7 +600,7 @@ export function createComposer() {
     setTextBase('');
     setFiles([]);
     setOptionsOpen(false);
-    setPasswordModeBase('off');
+    setPasswordModeBase(DEFAULT_PASSWORD_MODE);
     setCustomPassphraseBase('');
     setGeneratedPassphrase(generatePassphrase());
     setExpiryIndex(DEFAULT_EXPIRY_INDEX);

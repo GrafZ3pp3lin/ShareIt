@@ -31,6 +31,7 @@ let setAuthenticated: Setter<boolean>;
 
 const makePackage = (id: string, overrides: Partial<PackageSummary> = {}): PackageSummary => ({
   Id: id,
+  HasShortCode: true,
   CreatedAt: '2026-11-04T12:00:00Z',
   ExpiresAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString(),
   ItemCount: 1,

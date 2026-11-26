@@ -39,6 +39,7 @@ const hoursFromNow = (hours: number) => new Date(Date.now() + hours * 60 * 60 * 
 
 const makePackage = (overrides: Partial<PackageSummary>): PackageSummary => ({
   Id: IDS.active,
+  HasShortCode: true,
   CreatedAt: '2026-11-04T14:32:00Z',
   ExpiresAt: hoursFromNow(6 * 24),
   ItemCount: 3,
@@ -51,9 +52,10 @@ const makePackage = (overrides: Partial<PackageSummary>): PackageSummary => ({
   ...overrides
 });
 
-const active = makePackage({ Id: IDS.active });
+const active = makePackage({ Id: IDS.active, HasShortCode: true });
 const usedUp = makePackage({
   Id: IDS.usedUp,
+  HasShortCode: false,
   CreatedAt: '2026-11-02T11:05:00Z',
   ItemCount: 1,
   TotalSize: 62 * 1024,
@@ -63,6 +65,7 @@ const usedUp = makePackage({
 });
 const expiring = makePackage({
   Id: IDS.expiring,
+  HasShortCode: true,
   CreatedAt: '2026-11-03T18:47:00Z',
   ExpiresAt: hoursFromNow(12),
   ItemCount: 2,
@@ -82,6 +85,7 @@ describe('<LinksPage />', () => {
     authState.authenticated = true;
     authState.loading = false;
     authState.enabled = true;
+    window.sessionStorage.clear();
     api.listPackages.mockResolvedValue({ status: 200, data: { items: [active, usedUp, expiring], nextCursor: null } });
     api.deletePackage.mockResolvedValue({ status: 204, data: true });
   });
@@ -97,6 +101,7 @@ describe('<LinksPage />', () => {
     expect(api.listPackages).toHaveBeenCalledTimes(1);
 
     expect(screen.getByText(shortPackageId(IDS.active))).toBeInTheDocument();
+    expect(screen.getAllByText('code')).toHaveLength(2);
     expect(screen.getAllByText('active').length).toBeGreaterThan(0);
     expect(screen.getAllByText('expiring').length).toBeGreaterThan(0);
     expect(screen.getByText('used up')).toBeInTheDocument();
@@ -108,6 +113,32 @@ describe('<LinksPage />', () => {
     expect(copyButtons[0]).toBeEnabled();
     expect(copyButtons[1]).toBeDisabled();
     expect(copyButtons[2]).toBeEnabled();
+  });
+
+  it('copies the UUID link', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    renderPage();
+    await screen.findByText('Your links');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'copy link' })[0]);
+
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/s/${IDS.active}`));
+  });
+
+  it('copies the stored code for a code-mode row', async () => {
+    window.sessionStorage.setItem(
+      `shareit-short-code:${IDS.active}`,
+      JSON.stringify({ Code: 'ABC234', ExpiresAt: hoursFromNow(1) })
+    );
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    renderPage();
+    await screen.findByText('Your links');
+
+    fireEvent.click(screen.getByRole('button', { name: 'copy code' }));
+
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('ABC-234'));
   });
 
   it('filters client-side, including used-up links in the expired bucket', async () => {

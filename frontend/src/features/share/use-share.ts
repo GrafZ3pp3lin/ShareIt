@@ -51,22 +51,24 @@ const dropFragment = () => {
 };
 
 /**
- * Owns the share-page state machine. A link without `#s=` starts locked and
- * makes no request until the visitor submits the gate; a link with `#s=`
- * derives the proof and fetches immediately, then removes the fragment.
+ * Owns the share-page state machine. A link without `#s=` and without a code
+ * secret starts locked and makes no request until the visitor submits the
+ * gate; a combined link or a code entry derives the proof and fetches
+ * immediately, then removes the fragment.
  */
-export function createShare(packageId: () => string) {
+export function createShare(packageId: () => string, initialSecret: () => string | undefined = () => undefined) {
   const { t } = useI18n();
 
-  // A combined link starts in the unlocking state so the gate never flashes
-  // between the first render and the effect that starts the fragment attempt.
-  const initialFragment = fragmentPassphrase();
-  const [status, setStatus] = createSignal<ShareStatus>(initialFragment !== undefined ? 'unlocking' : 'locked');
+  // A combined link or a code entry starts in the unlocking state so the gate
+  // never flashes between the first render and the effect that starts the
+  // fragment/code attempt.
+  const initialPassphrase = initialSecret() ?? fragmentPassphrase();
+  const [status, setStatus] = createSignal<ShareStatus>(initialPassphrase !== undefined ? 'unlocking' : 'locked');
   const [details, setDetails] = createSignal<ContentPackageDetailsResponse | null>(null);
   const [items, setItems] = createSignal<ShareItem[]>([]);
   const [packageKey, setPackageKey] = createSignal<PackageKey | undefined>(undefined);
   const [accessSessionToken, setAccessSessionToken] = createSignal<string | undefined>(undefined);
-  const [passphrase, setPassphrase] = createSignal(initialFragment ?? '');
+  const [passphrase, setPassphrase] = createSignal(initialPassphrase ?? '');
   const [gateMessage, setGateMessage] = createSignal<GateMessage | null>(null);
 
   let attempt = 0;
@@ -245,6 +247,13 @@ export function createShare(packageId: () => string) {
     setGateMessage(null);
     setPassphrase('');
 
+    const secret = initialSecret();
+    if (secret !== undefined) {
+      setPassphrase(secret);
+      void unlockWith(secret);
+      return;
+    }
+
     const fragment = fragmentPassphrase();
     if (fragment !== undefined) {
       setPassphrase(fragment);
@@ -255,7 +264,7 @@ export function createShare(packageId: () => string) {
     setStatus('locked');
   };
 
-  createEffect(() => packageId(), start);
+  createEffect(() => `${packageId()}\u0000${initialSecret() ?? ''}`, start);
 
   const unlock = () => {
     void unlockWith(passphrase());

@@ -1,12 +1,22 @@
 const HEX_PATTERN = /^[0-9a-f]{32}$/;
 
+const normalizedHex = (id: string): string | null => {
+  const hex = id.replace(/-/g, '').toLowerCase();
+  return HEX_PATTERN.test(hex) ? hex : null;
+};
+
+/**
+ * Whether the value is a UUID accepted by `normalizeId`.
+ */
+export const isValidId = (id: string): boolean => normalizedHex(id) !== null;
+
 /**
  * The only place ids are formatted. Key derivation, AAD and the key schedule
  * all use this form, so differently formatted UUIDs produce identical keys.
  */
 export const normalizeId = (id: string): string => {
-  const hex = id.replace(/-/g, '').toLowerCase();
-  if (!HEX_PATTERN.test(hex)) {
+  const hex = normalizedHex(id);
+  if (hex === null) {
     throw new Error(`Invalid UUID: ${id}`);
   }
 
