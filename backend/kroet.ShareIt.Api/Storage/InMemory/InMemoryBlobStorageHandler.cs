@@ -1,4 +1,4 @@
-﻿namespace kroet.ShareIt.Api.Storage.InMemory;
+namespace kroet.ShareIt.Api.Storage.InMemory;
 
 internal sealed record InMemoryContentBlob
 {
@@ -24,9 +24,9 @@ public class InMemoryBlobStorageHandler : IBlobStorageHandler
             ContentType = contentType,
             FileName = fileName
         };
-        
+
         _blobs.Add(blob.Id, blob);
-        
+
         return blob.Id.ToString();
     }
 

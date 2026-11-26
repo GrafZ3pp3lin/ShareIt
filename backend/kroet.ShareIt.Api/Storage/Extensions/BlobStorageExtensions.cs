@@ -1,4 +1,4 @@
-﻿using kroet.ShareIt.Api.Configuration;
+using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Storage.InMemory;
 using kroet.ShareIt.Api.Storage.S3;
 
@@ -47,7 +47,7 @@ public static class BlobStorageExtensions
         {
             // In-memory blob storage for testing or development
             services.AddSingleton<IBlobStorageHandler, InMemoryBlobStorageHandler>();
-            
+
             return services;
         }
     }

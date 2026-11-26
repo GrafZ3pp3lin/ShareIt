@@ -23,7 +23,7 @@ public enum ContentType
 /// </summary>
 public record Content
 {
-    public Content() {}
+    public Content() { }
 
     [SetsRequiredMembers]
     public Content(Guid id, Guid packageId, ContentType contentType, DateTimeOffset createdAt, long size, Guid? userId, string? meta)

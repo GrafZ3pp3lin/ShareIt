@@ -1,4 +1,4 @@
-﻿using FluentValidation;
+using FluentValidation;
 
 namespace kroet.ShareIt.Api.Services.Cleanup;
 

@@ -1,4 +1,4 @@
-﻿using FluentValidation;
+using FluentValidation;
 using Microsoft.Extensions.Options;
 
 namespace kroet.ShareIt.Api.Configuration;
@@ -28,9 +28,9 @@ public class FluentValidateOptions<TOptions> : IValidateOptions<TOptions> where 
         {
             return ValidateOptionsResult.Fail($"No validator found for {name}");
         }
-        
+
         var result = validator.Validate(options);
-        
+
         if (result.IsValid) return ValidateOptionsResult.Success;
 
         var errors = result.Errors.Select(e => e.ToString());

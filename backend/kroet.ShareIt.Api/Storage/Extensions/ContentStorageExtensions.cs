@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Storage.InMemory;
 using kroet.ShareIt.Api.Storage.Postgres;
@@ -50,7 +50,7 @@ public static class ContentStorageExtensions
 
             return services;
         }
-        
+
         private IServiceCollection AddInMemoryContentStorage()
         {
             services.AddSingleton<IContentStorageHandler, InMemoryContentStorageHandler>();
@@ -71,7 +71,7 @@ public static class ContentStorageExtensions
             {
                 return app.InitializePostgresPackageStorageAsync();
             }
-            
+
             return Task.CompletedTask;
         }
 
@@ -87,7 +87,7 @@ public static class ContentStorageExtensions
             {
                 return;
             }
-        
+
             try
             {
                 await InitializeDatabaseAsync(settings.ConnectionString, app.Lifetime.ApplicationStopping);

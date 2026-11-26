@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using kroet.ShareIt.Api.Services.Metrics;
 using kroet.ShareIt.Api.Services.Observability;
 using kroet.ShareIt.Api.Services.Storage;
@@ -42,9 +42,9 @@ public class CleanupService : BackgroundService
         _logger.LogInformation(
             "Content cleanup service started. Running every {Interval} minutes",
             _settings.CleanupIntervalMinutes);
-        
+
         using var periodicTimer = new PeriodicTimer(TimeSpan.FromMinutes(_settings.CleanupIntervalMinutes));
-        
+
         try
         {
             while (await periodicTimer.WaitForNextTickAsync(stoppingToken))

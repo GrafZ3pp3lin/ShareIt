@@ -1,4 +1,4 @@
-﻿using kroet.ShareIt.Api.Configuration;
+using kroet.ShareIt.Api.Configuration;
 
 namespace kroet.ShareIt.Api.Storage.InMemory;
 

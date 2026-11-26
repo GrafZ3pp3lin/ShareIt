@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 
 namespace kroet.ShareIt.Api.User;
 
@@ -19,7 +19,7 @@ public static class UserExtensions
                 Id = userId,
             };
         }
-        
+
         public bool TryGetUserIdentity(Guid? guestId, out UserIdentity userIdentity)
         {
             var identity = claimsPrincipal.ToOptionalUserIdentity();

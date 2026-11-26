@@ -1,4 +1,4 @@
-﻿namespace kroet.ShareIt.Api.Services.Storage;
+namespace kroet.ShareIt.Api.Services.Storage;
 
 /// <summary>
 /// High-level storage handler that coordinates content metadata and blob

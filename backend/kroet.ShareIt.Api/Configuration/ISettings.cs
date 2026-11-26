@@ -1,4 +1,4 @@
-﻿namespace kroet.ShareIt.Api.Configuration;
+namespace kroet.ShareIt.Api.Configuration;
 
 public interface ISettings
 {

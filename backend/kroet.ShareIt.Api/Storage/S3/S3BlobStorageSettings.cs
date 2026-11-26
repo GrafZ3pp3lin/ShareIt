@@ -1,4 +1,4 @@
-﻿using FluentValidation;
+using FluentValidation;
 using kroet.ShareIt.Api.Configuration;
 
 namespace kroet.ShareIt.Api.Storage.S3;
@@ -16,17 +16,17 @@ public class S3BlobStorageSettings : ISettings
     /// AWS Access Key ID for authentication.
     /// </summary>
     public string AccessKeyId { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// AWS Secret Access Key for authentication.
     /// </summary>
     public string SecretAccessKey { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Service URL for S3-compatible storage (e.g., MinIO, Wasabi).
     /// </summary>
     public string ServiceUrl { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Name of the S3 bucket to store files.
     /// Default: "content-files"

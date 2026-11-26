@@ -115,19 +115,19 @@ internal sealed class TokenFactory(RealmModel realm, SigningKey key, TwinUrls ur
 
     private Dictionary<string, object?> RefreshClaims(
         UserGrant grant, IReadOnlyList<string> scopes, DateTimeOffset now, DateTimeOffset expiresAt) => new()
-    {
-        ["exp"] = expiresAt.ToUnixTimeSeconds(),
-        ["iat"] = now.ToUnixTimeSeconds(),
-        ["jti"] = Guid.NewGuid().ToString(),
-        ["iss"] = urls.Issuer,
-        ["aud"] = urls.Issuer,
-        ["sub"] = grant.User.Id,
-        ["typ"] = "Refresh",
-        ["azp"] = grant.Client.ClientId,
-        ["sid"] = grant.Session.Id,
-        ["cnf"] = Confirmation(grant.Jkt),
-        ["scope"] = string.Join(' ', scopes),
-    };
+        {
+            ["exp"] = expiresAt.ToUnixTimeSeconds(),
+            ["iat"] = now.ToUnixTimeSeconds(),
+            ["jti"] = Guid.NewGuid().ToString(),
+            ["iss"] = urls.Issuer,
+            ["aud"] = urls.Issuer,
+            ["sub"] = grant.User.Id,
+            ["typ"] = "Refresh",
+            ["azp"] = grant.Client.ClientId,
+            ["sid"] = grant.Session.Id,
+            ["cnf"] = Confirmation(grant.Jkt),
+            ["scope"] = string.Join(' ', scopes),
+        };
 
     private static void AddUserClaims(Dictionary<string, object?> claims, TwinUser user, IReadOnlyList<string> scopes)
     {

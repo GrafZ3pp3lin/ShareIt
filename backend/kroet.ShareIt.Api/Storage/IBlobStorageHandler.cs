@@ -1,4 +1,4 @@
-﻿namespace kroet.ShareIt.Api.Storage;
+namespace kroet.ShareIt.Api.Storage;
 
 /// <summary>
 /// Interface for blob storage operations.

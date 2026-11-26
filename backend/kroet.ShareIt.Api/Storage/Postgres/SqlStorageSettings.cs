@@ -1,4 +1,4 @@
-﻿using FluentValidation;
+using FluentValidation;
 using kroet.ShareIt.Api.Configuration;
 
 namespace kroet.ShareIt.Api.Storage.Postgres;
