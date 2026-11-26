@@ -24,6 +24,27 @@ plain     …/s/{packageId}
 combined  …/s/{packageId}#s={passphrase}
 ```
 
+An access code is not a link. The six characters the sender sees (`ABC-234`) are split into the
+server locator (`ABC`) and the client secret (`234`). Only the locator is stored and resolved to the
+package id; the secret never leaves the browser. It is used directly as the passphrase in the
+existing schedule, so the salt still comes from the 128-bit package id and an attacker who resolves
+the public locator learns nothing about the key.
+
+```
+user code   ABC-234
+locator     ABC        → POST /package/code/resolve → packageId
+secret      234        → deriveKeyBits("234", salt(packageId))
+passphrase  same as the secret; never sent to the server
+```
+
+Because the salt is the globally unique package id, the three-character secret has the same secret
+entropy as it would inside the full code. Every guess must be tested online against the package's
+`X-Unlock-Proof`, and the server burns a code-mode package after five failures. Resolution returns
+only the package id; no ciphertext or metadata is exposed before a valid proof. The browser replaces
+the URL with `…/s/{packageId}` and passes the secret in router state, never in the URL. `normalizeId`
+remains the only place that formats the canonical id. See [upload-download.md](upload-download.md)
+for the code-mode guardrails (10-minute TTL, single use).
+
 The fragment keeps the passphrase out of server logs and `Referer` headers. The salt is derived
 from the package id, so the plain link contains everything needed to derive the key when the
 passphrase is known. After a successful unlock the client removes `#s=` with

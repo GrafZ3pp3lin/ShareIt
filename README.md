@@ -1,17 +1,27 @@
 # ShareIt
 
 Share text and files together behind one short link. No account is required to create a link;
-each package can expire on its own, allow a limited number of opens, and optionally be encrypted
-in the browser before anything leaves the device.
+each package can expire on its own, allow a limited number of opens, and be encrypted
+in the browser by default (the passphrase can be switched off).
+
+This is a personal hobby project: one instance, one maintainer. The API, the database schema and the
+storage format carry no compatibility guarantees — breaking changes land in place, updating every
+caller in the same change rather than keeping a migration or deprecation path around. See
+[`AGENTS.md`](AGENTS.md#project-constraints).
 
 ## What it does
 
 - **One link for text and files.** Paste text, drop files, or both, and get a single share link.
+- **Optional access codes.** Pick code mode and get a six-character code such as `ABC-234`, made of
+  a three-character server locator and a three-character secret generated in the browser. It is
+  single-use, expires after ten minutes, and never becomes a link; only the locator reaches the
+  API.
 - **Guest or signed in.** Guests get a client-generated identity and can create links. Signing in
   (OIDC) additionally lets owners list and delete their links.
 - **Expiry and access limits.** Every package has a lifetime and a maximum number of opens, with
   larger limits for authenticated users.
-- **Optional client-side encryption.** One passphrase per package. Content, filenames and MIME types
+- **Client-side encryption by default.** One generated passphrase per package (switch it off for a
+  plain link). Content, filenames and MIME types
   are sealed with WebCrypto (AES-256-GCM, PBKDF2-derived key); the API only ever stores and serves
   opaque bytes and an unlock verifier.
 - **Expiring access sessions.** Opening a package returns a short-lived, package-wide session used
@@ -80,8 +90,11 @@ cd frontend && pnpm verify
 ## Configuration
 
 - **API:** `backend/kroet.ShareIt.Api/appsettings.json` (upload limits, rate limits, access session
-  lifetime, auth, CORS, cleanup) plus standard environment variable overrides. OpenTelemetry is
+  lifetime, auth, cleanup) plus standard environment variable overrides. OpenTelemetry is
   configured through the usual `OTEL_EXPORTER_OTLP_*` variables.
+- **CORS:** Production fails closed when no origins are configured. Set `Cors:AllowedOrigins`
+  (for example `Cors__AllowedOrigins__0=https://app.example`) in any deployment where the SPA and
+  API are not served from the same origin.
 - **Frontend:** runtime configuration through `/env.js`, resolved as `window.env` → `VITE_*` →
   defaults. The Docker image substitutes container environment variables at startup, so one build
   serves every environment.

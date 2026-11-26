@@ -12,7 +12,8 @@ All paths are under `/api/v1/content`.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/package/limits` | Per-identity upload and package limits |
-| `POST` | `/package` | Create an empty package |
+| `POST` | `/package` | Create an empty package, optionally in code mode |
+| `POST` | `/package/code/resolve` | Resolve the three-character locator of an access code to the canonical package id |
 | `PUT` | `/package/{packageId}/content/{contentId}` | Upload one item as a raw binary body |
 | `GET` | `/package/{packageId}` | Open a package: metadata, items and an access session |
 | `GET` | `/package/{packageId}/content/{contentId}/download` | Download one item with the access session |
@@ -39,13 +40,15 @@ Downloads must present both the session and the same identity.
 
 The composer builds one text item when the trimmed text is non-empty and one item per file. It
 generates the package UUID and one UUID per item before any network call. A passphrase is optional;
-when one is set, the client derives the package key and unlock verifier from the package id.
+when one is set, or when code mode is selected, the client derives the package key and unlock
+verifier from the package id.
 
 ```json
 POST /api/v1/content/package
 {
   "Id": "0192f3a0-1111-7000-8000-000000000000",
   "UnlockVerifier": "base64url HMAC or null",
+  "UseShortCode": false,
   "TimeToLiveHours": 168,
   "MaxAccessCount": 3
 }
@@ -53,11 +56,80 @@ POST /api/v1/content/package
 
 - `Id` is required and non-empty.
 - `UnlockVerifier` is base64url of exactly 32 bytes when the package is protected, otherwise `null`.
+- `UseShortCode` opts the package into access by code (see below).
 - `TimeToLiveHours` is required and must be within the identity's maximum lifetime.
 - `MaxAccessCount` must be positive and within the identity's maximum; guests must set it.
 - Repeating the create call with the same id and the same owner returns the existing package with
-  `200`; a new package returns `201`. Another client using the id gets `409`. An expired package
-  returns `410`.
+  `200`; a new package returns `201`. A code-mode retry must also use the same `UseShortCode` value
+  and `UnlockVerifier`, otherwise the API returns `409`. Another client using the id gets `409`. An
+  expired package returns `410`.
+- The response is a `ContentPackageOwnerResponse`. In code mode its `ShortCode` is the
+  three-character server locator; for a regular package it is `null`. The open-package response
+  never exposes it.
+
+### Access by code
+
+A code is an opt-in, single-use alternative for devices where a link or a passphrase cannot be
+transferred. The six characters the sender sees (`ABC-234`) are split in two:
+
+- `ABC` — the server locator. In code mode it is generated at package creation, stored in
+  `content_packages.short_code` and resolved to the package UUID.
+- `234` — the client secret. It is generated in the sender's browser, never sent to or stored by the
+  server, and is the passphrase of the package key schedule.
+
+`POST /package` with `UseShortCode: true` requires a matching `X-Unlock-Proof` header because the
+client already knows the secret before creation. The server:
+
+- requires `UnlockVerifier`, so a code-mode package is always encrypted;
+- clamps `MaxAccessCount` to `1` and the lifetime to 10 minutes, for guests and authenticated users
+  alike;
+- allocates a unique three-character locator from the unambiguous 31-character alphabet
+  `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, retrying collisions up to ten times and returning `503` when
+  allocation is exhausted;
+- returns the locator as `ShortCode`. Uploads then proceed through the normal pipeline; the locator
+  never enters the key schedule, frame AAD, access sessions or download paths.
+
+Resolution takes only the three-character locator, in the body:
+
+```http
+POST /api/v1/content/package/code/resolve
+Content-Type: application/json
+
+{ "Code": "ABC" }
+```
+
+- The locator is case-insensitive; hyphens and whitespace are ignored.
+- `200` returns only `{ "PackageId": "…" }` and sets `Cache-Control: no-store`. Unknown, expired and
+  exhausted packages return `404`.
+- The lookup never claims an access. The client then opens the package through the canonical UUID,
+  with `X-Unlock-Proof` derived from the client secret.
+- A wrong `X-Unlock-Proof` on a code-mode package increments `failed_unlock_attempts`. The fifth
+  miss invalidates the package atomically, so it can no longer be resolved or opened.
+- Lookups are rate-limited per remote IP (IPv6 clients share a /64 budget); there is no
+  process-wide lookup budget. Tune the per-IP limit with
+  `RateLimitSettings:ShortCodeLookupPermitLimit` and
+  `RateLimitSettings:ShortCodeLookupWindowMinutes`.
+- The locator travels in the body, so it does not appear in access logs, browser history or
+  referrers.
+- Lookup and allocation outcomes are emitted as bounded metrics; sustained `not_found` values are
+  the alerting signal for enumeration.
+
+Locators are recycled after cleanup deletes a package: three characters leave a small space, so a
+code is unique among active packages, not forever. The owner list only carries `HasShortCode`,
+because the server cannot reconstruct the full code without the client secret. The creating tab
+keeps the full code in `sessionStorage` until it expires, so that tab's links list can offer
+"copy code"; other tabs or devices only see `HasShortCode`.
+
+Final decisions for code access:
+
+- Resolution is `POST /package/code/resolve` with the locator in the body, never in the URL.
+- The share route is UUID-only; codes never become links.
+- Only the per-IP lookup limit exists; there is no process-wide budget.
+- Locators are recycled after package deletion.
+
+The share link is always `…/s/{uuid}`. A code is entered manually on the home page, the browser
+resolves the locator, and the client secret is handed to the UUID route in router state (never in
+the URL) so the share page derives the key and opens the package without a password gate.
 
 ### Per-item upload
 
@@ -102,8 +174,10 @@ the newly uploaded blob is deleted.
 
 Sealing is deterministic and ids are stable, so retrying the same item with the same kind, size and
 metadata is idempotent. The composer keeps the package and item ids in its partial state, and the
-result screen is shown only after every item succeeds. It displays the plain `/s/{packageId}` link
-and, for a protected package, the `#s=` link together with the passphrase.
+result screen is shown only after every item succeeds. For a regular package it displays the
+canonical `/s/{packageId}` link and, when protected, the `#s=` link together with the passphrase.
+A code-mode package shows only the six-character code (`ABC-234`), never a link or a separate
+passphrase.
 
 ```mermaid
 sequenceDiagram
@@ -116,9 +190,9 @@ sequenceDiagram
     B->>API: GET /package/limits
     API-->>B: identity limits
     B->>B: create package id and item ids<br/>derive key and verifier when protected
-    B->>API: POST /package
-    API->>DB: insert content_packages
-    API-->>B: package
+    B->>API: POST /package<br/>UseShortCode + X-Unlock-Proof in code mode
+    API->>DB: insert content_packages (with the 3-char locator in code mode)
+    API-->>B: package (ShortCode = server locator in code mode)
     loop one request per item
         B->>B: seal content and metadata, or use raw bytes
         B->>API: PUT /package/{id}/content/{itemId}<br/>octet-stream, kind, meta, Content-Length
@@ -127,7 +201,7 @@ sequenceDiagram
         API->>DB: insert contents row
         API-->>B: updated package
     end
-    B->>B: show /s/{packageId} and optional #s=passphrase
+    B->>B: show /s/{packageId} + optional #s=passphrase<br/>or the combined ABC-234 code
 ```
 
 ## Open
@@ -139,7 +213,7 @@ The share page is a small state machine built in `frontend/src/features/share/us
 ```mermaid
 stateDiagram-v2
     [*] --> locked: plain link
-    [*] --> unlocking: #s= link
+    [*] --> unlocking: #s= link or code secret
     locked --> unlocking: gate submit
     invalid --> unlocking: retry passphrase
     unlocking --> unlocked: 200
@@ -152,6 +226,9 @@ stateDiagram-v2
 
 - A link with `#s=` derives the key and verifier and fetches immediately; the page shows a
   skeleton, not the gate.
+- The home-page code form normalizes the six characters, resolves the locator, and navigates to
+  `/s/{packageId}` with the client secret in router state. The share page takes the same immediate
+  unlock path; the secret never appears in the URL or in `sessionStorage`.
 - A plain link shows the gate and makes no request until the visitor submits. Because protection
   is not discoverable from the link, an empty submission fetches without a proof. Unprotected
   packages open; protected packages answer `401` and ask for the passphrase.
@@ -176,7 +253,9 @@ The API processes the open in this order:
 
 1. Load the package shell: id, verifier, expiry and counters. No items and no blob reads.
 2. Missing package: `404`. Expired package: `410`.
-3. Protected package with a missing or wrong proof: `401`, no item data and no access claim.
+3. Protected package with a missing or wrong proof: `401`, no item data and no access claim. On a
+   code-mode package each miss increments `failed_unlock_attempts`; the fifth miss sets the
+   package's expiry to now, so it resolves and opens as gone from then on.
 4. Load item metadata. An empty package returns `410` without claiming an access.
 5. Validate `X-Access-Session` when present. A valid session skips the claim and is returned again.
 6. If no valid session exists and the access limit is reached, return `410`.
@@ -198,7 +277,7 @@ sequenceDiagram
     participant API as ShareIt API
     participant DB as PostgreSQL
 
-    alt #s= fragment present
+    alt #s= fragment or code secret present
         V->>V: derive key and verifier, fetch immediately
     else plain link
         V->>V: show gate, make no request

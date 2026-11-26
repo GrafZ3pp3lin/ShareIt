@@ -88,7 +88,10 @@ The application instruments are emitted from the `ShareIt` meter.
 | `shareit_access_sessions_reused_total` | counter | Package reads that reused a valid access session instead of claiming another access |
 | `shareit_bytes_authorized_total` | counter | Logical content bytes whose download was authorized by an access session |
 | `shareit_unlock_failures_total` | counter | Failed unlock attempts |
-| `shareit_rate_limited_total` | counter | Requests rejected by the package-read, download or upload rate limiter |
+| `shareit_rate_limited_total` | counter | Requests rejected by the package-read, short-code lookup, download or upload rate limiter |
+| `shareit_short_code_lookups_total{result}` | counter | Short-code locator lookup results: `found`, `not_found` or `invalid` |
+| `shareit_short_code_allocations_total{result}` | counter | Locator allocation results: `created`, `existing`, `exhausted` or `invalid_generator` |
+| `shareit_short_code_burns_total` | counter | Code-mode packages invalidated after five failed unlock proofs |
 | `shareit_packages{state}` | gauge | Package counts: `total`, `active`, `expired`, `exhausted`, `protected`, `empty` |
 | `shareit_items` | gauge | Stored content items |
 | `shareit_storage_bytes` | gauge | Logical size of stored content |
@@ -105,6 +108,10 @@ window has elapsed; an exhausted package that is still inside that window
 counts as active. `shareit_cleanup_pending` is `total - active`: packages
 eligible for cleanup at snapshot time, not the blob-deletion queue depth.
 The queue depth has its own gauge: `shareit_blob_deletion_queue_depth`.
+
+Alert on sustained `shareit_short_code_lookups_total{result="not_found"}`: it indicates
+short-code enumeration rather than normal manual entry. Lookup rate limiting is per remote IP; there
+is no process-wide budget.
 
 Important distinctions:
 
@@ -145,7 +152,8 @@ activity source:
 
 | Span | Meaning |
 |---|---|
-| `package.create` | Create a package |
+| `package.create` | Create a package (and allocate its locator in code mode) |
+| `package.resolve_code` | Resolve a three-character locator to the canonical package id |
 | `package.upload` | Upload one content item |
 | `package.open` | Open a package, reuse or claim an access session, and prepare items |
 | `package.download` | Validate an access session and open the content blob |
@@ -155,10 +163,12 @@ activity source:
 
 Spans carry counts and sizes such as `shareit.package.items`,
 `shareit.package.access_claimed`, `shareit.access.session_reused`,
-`shareit.content.kind`, `shareit.content.size_bytes` and
-`shareit.cleanup.*`. Package and content IDs are not added as separate
+`shareit.content.kind`, `shareit.content.size_bytes`, `shareit.short_code.result`
+and `shareit.cleanup.*`. Package and content IDs are not added as separate
 attributes; where relevant they are already in the request URL recorded by
-ASP.NET Core. The `package.download` span ends after the session is validated
+ASP.NET Core. Locators are opaque aliases and capabilities: they appear in the
+request body but are never metric labels and are not logged as a separate
+attribute. The `package.download` span ends after the session is validated
 and the blob is opened; streaming the response body is outside that span.
 
 Sampling is configured through the standard SDK environment variables. The

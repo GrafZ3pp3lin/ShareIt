@@ -3,6 +3,23 @@
 ## Scope
 - Repo has two major areas: `backend/` (.NET 11, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript). The root `apphost.cs` is the Aspire orchestration entry point.
 
+### Project constraints
+- This is a **personal hobby project**: one running instance, one maintainer, no paying users. It will
+  never need horizontal scaling, replication, multi-region failover, sharding, or a service-level SLO.
+  Do not add machinery for those — no read replicas, distributed caches or locks, queues, leader
+  election, HA topologies, or "might be multi-tenant one day" indirection. Keep it correct under
+  normal single-instance concurrency and stop there.
+- **No backwards compatibility.** The only client of `/api/v1/*` is the frontend in this repo, and the
+  client is regenerated from the OpenAPI document. Breaking changes are the default: replace the
+  behaviour and update every caller in the same change. Skip deprecation cycles, versioned endpoints,
+  compatibility branches, and feature flags for gradual rollout.
+- **State has no migration history.** The schema lives in `backend/kroet.ShareIt.Api/Resources/SqlSchema.sql`
+  and is applied as-is; change it in place and reset local databases instead of writing migration code.
+  The line that still holds: existing user content must not be silently corrupted or deleted — that is
+  data loss, not compatibility.
+- **Optimise for the next reader, which is future you.** Understandable a year later beats clever;
+  correctness, security, and the crypto/upload invariants below still apply at full strength.
+
 ### Run everything with Aspire
 - `dotnet run apphost.cs` from the repo root starts the AuthTwin, API, frontend
   (`pnpm dev`), PostgreSQL 19, and RustFS together. It requires the Aspire CLI
@@ -28,17 +45,25 @@
   (`~icons/lucide/*`) instead of text glyphs as icons.
 - Routes: `/` composer, `/links` owner links list (authenticated), `/s/:packageId` share gate +
   document, `*` not found. Route wiring lives in `src/shared/routes/route-tree.tsx`.
+- `/s/:packageId` is UUID-only. Access codes are a composer mode, not a link: the server generates,
+  stores and resolves only the three-character locator, while the three-character client secret is
+  generated in the browser and never sent. Code-mode packages are single-use, expire after ten
+  minutes, require an unlock proof at creation, and are burned after five failed proofs.
 - Guests can create links, but only authenticated users can list or delete them.
 - A successful open returns a short-lived, package-wide `X-Access-Session` bearer token (15 minutes)
   used for re-fetches and downloads; it is stored in `sessionStorage`, never in a URL, and is cleared on
   a download 401 or package-gone response. See `frontend/AGENTS.md`.
-- Optional client-side encryption uses one passphrase per package, a salt derived from the package id,
+- Client-side encryption is on by default: one generated passphrase per package, a salt derived from the package id,
   the `SIE3` frame container (4 MiB frames, deterministic per-item sealing) and per-item framed `meta`;
   the API only ever sees opaque bytes and the `X-Unlock-Proof` verifier. See `frontend/AGENTS.md`,
   `docs/crypto.md` and `docs/upload-download.md`.
 
 ### Backend (.NET)
 - NuGet versions for backend projects are centralized in `backend/Directory.Packages.props` (Central Package Management). Project files list packages without a `Version`; add or bump versions only there. Check for updates with `dotnet list kroet.ShareIt.slnx package --outdated` from `backend/`.
+- Short-code locator resolution is limited per remote IP (IPv6 by /64); there is no process-wide
+  lookup budget. Lookup and allocation outcomes are emitted as bounded metrics. Keep those labels
+  free of locators and package IDs. The server stores only the three-character locator; the client
+  secret of the six-character user code never reaches the API.
 - The AppHost's Aspire package versions live in the `#:package` directives at the top of `apphost.cs`; keep them in lockstep and check them with `dotnet list apphost.cs package --outdated` from the repo root.
 - `kroet.ShareIt.Api/Dockerfile` copies `Directory.Packages.props` before `dotnet restore`; add any new central build file to that restore layer too.
 - Endpoint integration tests boot the real API with `WebApplicationFactory<Program>` (`kroet.ShareIt.Api.IntegrationTest/Endpoints/`) against the real PostgreSQL and RustFS containers. They share those containers, reset the database per test, and use a unique S3 bucket per test; authentication is provided by the `X-Test-User` header (see `Infrastructure/ShareItApiTestBase.cs`).
@@ -53,6 +78,8 @@
   Only repository admins can bypass it.
 - Squash commits use the PR title as subject and the PR body as message (`PR_TITLE`/`PR_BODY`), so
   the PR title and description are what persists in history — write them accordingly.
+- PRs do not need a backwards-compatibility story for the API, the schema, or the storage format:
+  state the new behaviour plainly and change it in place.
 - Head branches are deleted automatically after merge.
 
 ## Code Style Guidelines
