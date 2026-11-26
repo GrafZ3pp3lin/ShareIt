@@ -76,6 +76,13 @@ describe('<AppLayout />', () => {
     expect(authState.logout).toHaveBeenCalledTimes(1);
   });
 
+  it('links to the privacy policy and imprint from the footer', () => {
+    renderLayout();
+
+    expect(screen.getByRole('link', { name: 'privacy' })).toHaveAttribute('href', '/privacy');
+    expect(screen.getByRole('link', { name: 'imprint' })).toHaveAttribute('href', '/imprint');
+  });
+
   it('hides auth controls when OIDC is not configured', () => {
     authState.enabled = false;
     renderLayout();

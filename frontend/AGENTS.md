@@ -43,7 +43,7 @@ Routing is code-based via `@solidjs/router` (`createRouter`), not file-based.
 
 - `src/index.tsx` → `src/app.tsx` → `src/app/providers.tsx` (`AppProviders`), which nests, in order: `ThemeProvider` → `I18nProvider` → `AuthProvider` → `Router` (the `createRouter` instance is the provider component).
 - `src/app/router.tsx` creates the router from `routeTree` (`src/shared/routes/route-tree.tsx`).
-- `src/shared/routes/route-tree.tsx` is the **single wiring point**: it declares the route tree (`defineRoutes`). The app shell uses `AppLayout` for `/` (composer), `/auth/callback` and `/links` (owner links list); the share shell uses `variant="share"` for UUID-only `/s/:packageId`; `*` renders `NotFoundPage` with the share shell. Features never self-register — this file is where a new route must be added.
+- `src/shared/routes/route-tree.tsx` is the **single wiring point**: it declares the route tree (`defineRoutes`). The app shell uses `AppLayout` for `/` (composer), `/auth/callback`, `/links` (owner links list), `/imprint` and `/privacy`; the share shell uses `variant="share"` for UUID-only `/s/:packageId`; `*` renders `NotFoundPage` with the share shell. Features never self-register — this file is where a new route must be added.
 - `src/app/layout.tsx` (`AppLayout`) is the shared chrome: header/nav + `{props.children}` + footer. The `upload`/`links` nav and auth controls only render for authenticated users in the app shell; the share variant hides both and keeps the brand + theme toggle.
 
 ### Feature module convention

@@ -43,8 +43,9 @@
 - Tailwind CSS is the primary styling system; prefer utility classes over custom CSS when possible.
 - Prefer native browser elements for UI primitives where possible; use the Lucide icon set
   (`~icons/lucide/*`) instead of text glyphs as icons.
-- Routes: `/` composer, `/links` owner links list (authenticated), `/s/:packageId` share gate +
-  document, `*` not found. Route wiring lives in `src/shared/routes/route-tree.tsx`.
+- Routes: `/` composer, `/links` owner links list (authenticated), `/imprint` and `/privacy`
+  legal pages, `/s/:packageId` share gate + document, `*` not found. Route wiring lives in
+  `src/shared/routes/route-tree.tsx`.
 - `/s/:packageId` is UUID-only. Access codes are a composer mode, not a link: the server generates,
   stores and resolves only the three-character locator, while the three-character client secret is
   generated in the browser and never sent. Code-mode packages are single-use, expire after ten

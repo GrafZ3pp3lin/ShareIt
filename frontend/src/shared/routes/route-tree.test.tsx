@@ -13,6 +13,14 @@ describe('routeTree', () => {
     expect(patternsFor('/links')).toContain('/links');
   });
 
+  it('matches the imprint page', () => {
+    expect(patternsFor('/imprint')).toContain('/imprint');
+  });
+
+  it('matches the privacy page', () => {
+    expect(patternsFor('/privacy')).toContain('/privacy');
+  });
+
   it('extracts the package id for share links', () => {
     const shareMatch = Router.match('/s/0192f3ab-7cde-7def-8abc-0123456789ab').find(
       (match) => match.pattern === '/s/:packageId'

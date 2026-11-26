@@ -268,6 +268,20 @@ export const dict = {
     downloadFailedTitle: 'Download failed.',
     downloadFailedBody: 'The access session may have expired. Reopen the link to try again.'
   },
+  privacy: {
+    link: 'privacy',
+    title: 'Privacy policy',
+    intro:
+      'ShareIt is built to process as little personal data as possible. This policy explains what is processed, why, and for how long.'
+  },
+  imprint: {
+    link: 'imprint',
+    title: 'Imprint',
+    intro: 'ShareIt is a private, non-commercial hobby project.',
+    providerLabel: 'Service provider',
+    contactLabel: 'Contact',
+    contactLink: 'GitHub issues'
+  },
   auth: {
     signIn: 'Sign in',
     oidcNotConfiguredLong: 'OIDC is not configured. Set VITE_OIDC_* variables to enable login.',

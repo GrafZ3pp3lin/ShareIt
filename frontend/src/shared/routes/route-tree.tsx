@@ -6,6 +6,8 @@ import { AuthCallbackPage } from '../../features/auth/pages/auth-callback-page.t
 import { NotFoundPage } from '../../features/not-found/pages/not-found-page.tsx';
 import { SharePage } from '../../features/share/pages/share-page.tsx';
 import { ComposerPage } from '../../features/composer/pages/composer-page.tsx';
+import { ImprintPage } from '../../features/imprint/pages/imprint-page.tsx';
+import { PrivacyPage } from '../../features/privacy/pages/privacy-page.tsx';
 
 const AppShell = (props: RouteSectionProps) => <AppLayout {...props} variant="app" />;
 
@@ -24,7 +26,9 @@ export const routeTree = defineRoutes([
     children: [
       { path: '/', component: ComposerPage },
       { path: '/auth/callback', component: AuthCallbackPage },
-      { path: '/links', component: LinksPage }
+      { path: '/links', component: LinksPage },
+      { path: '/imprint', component: ImprintPage },
+      { path: '/privacy', component: PrivacyPage }
     ]
   },
   {

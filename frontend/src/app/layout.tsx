@@ -77,14 +77,30 @@ export function AppLayout(props: AppLayoutProps) {
       </header>
       <main class="mx-auto w-full max-w-275 flex-1 px-4 py-6 sm:px-8 sm:py-10">{props.children}</main>
       <footer class="mt-auto border-t border-border-soft/80 bg-panel/70">
-        <div class="mx-auto flex w-full max-w-275 items-center gap-2.5 px-4 py-3.5 sm:px-8 sm:py-4">
-          <span
-            class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border-soft bg-panel text-brand"
-            aria-hidden="true"
-          >
-            <IconLock class="h-3.5 w-3.5" />
-          </span>
-          <p class="font-mono text-[11px] leading-relaxed tracking-[0.02em] text-ink">{t('app.footer')}</p>
+        <div class="mx-auto flex w-full max-w-275 flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-8 sm:py-4">
+          <div class="flex items-center gap-2.5">
+            <span
+              class="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-border-soft bg-panel text-brand"
+              aria-hidden="true"
+            >
+              <IconLock class="h-3.5 w-3.5" />
+            </span>
+            <p class="font-mono text-[11px] leading-relaxed tracking-[0.02em] text-ink">{t('app.footer')}</p>
+          </div>
+          <div class="flex items-center gap-4">
+            <a
+              class="inline-flex min-h-6 items-center font-mono text-[11px] text-muted transition hover:text-ink"
+              href="/privacy"
+            >
+              {t('privacy.link')}
+            </a>
+            <a
+              class="inline-flex min-h-6 items-center font-mono text-[11px] text-muted transition hover:text-ink"
+              href="/imprint"
+            >
+              {t('imprint.link')}
+            </a>
+          </div>
         </div>
       </footer>
     </div>
