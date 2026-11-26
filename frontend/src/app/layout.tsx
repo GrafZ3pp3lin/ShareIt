@@ -23,12 +23,7 @@ export function AppLayout(props: AppLayoutProps) {
         <div class="mx-auto flex w-full max-w-275 flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <div class="flex items-center gap-6">
             <a class="flex items-center gap-2 text-sm font-semibold text-ink" href="/">
-              <span
-                class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border-soft bg-panel text-[10px] font-semibold"
-                aria-hidden="true"
-              >
-                SI
-              </span>
+              <img class="h-7 w-7 shrink-0" src="/favicon.svg" alt="" width="28" height="28" />
               <span>{t('app.brand')}</span>
             </a>
             <Show when={!isShare() && auth.isAuthenticated()}>
