@@ -86,7 +86,7 @@ try
         options.AddPolicy(RateLimitPolicies.PackageRead, httpContext =>
         {
             var packageId = httpContext.GetRouteValue("packageId")?.ToString() ?? "unknown";
-            var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var remoteIp = RemoteIpKey.From(httpContext.Connection.RemoteIpAddress);
 
             return RateLimitPartition.GetFixedWindowLimiter(
                 $"{packageId}|{remoteIp}",
@@ -100,7 +100,7 @@ try
         });
         options.AddPolicy(RateLimitPolicies.Download, httpContext =>
         {
-            var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var remoteIp = RemoteIpKey.From(httpContext.Connection.RemoteIpAddress);
 
             return RateLimitPartition.GetFixedWindowLimiter(
                 remoteIp,
@@ -114,7 +114,7 @@ try
         });
         options.AddPolicy(RateLimitPolicies.Upload, httpContext =>
         {
-            var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var remoteIp = RemoteIpKey.From(httpContext.Connection.RemoteIpAddress);
 
             return RateLimitPartition.GetFixedWindowLimiter(
                 remoteIp,
