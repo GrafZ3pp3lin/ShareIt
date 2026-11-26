@@ -9,11 +9,11 @@ WORKDIR /app
 
 # Node 25+ no longer bundles corepack, so install pnpm directly.
 # Keep in sync with the "packageManager" field in package.json.
-RUN npm install --global pnpm@12.21.0
+RUN npm install --global pnpm@12.23.0
 
 # pnpm-workspace.yaml carries install-time settings (allowBuilds,
 # minimumReleaseAge, ...) that --frozen-lockfile verifies, so it must be present.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
