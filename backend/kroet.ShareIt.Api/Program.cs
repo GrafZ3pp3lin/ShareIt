@@ -128,6 +128,8 @@ try
         });
         options.OnRejected = async (context, cancellationToken) =>
         {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+
             if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
             {
                 context.HttpContext.Response.Headers.RetryAfter =
@@ -139,7 +141,7 @@ try
             await context.HttpContext.Response.WriteAsJsonAsync(new ProblemDetails
             {
                 Title = "Too many requests",
-                Detail = "Too many attempts for this link. Please try again later.",
+                Detail = "Too many attempts. Please try again later.",
                 Status = StatusCodes.Status429TooManyRequests
             }, cancellationToken);
         };
@@ -340,21 +342,27 @@ try
     app.UseForwardedHeaders();
 
     app.UseRequestLogging();
-    
+
     var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
     app.UseCors(policy =>
     {
         policy.AllowAnyHeader();
         policy.AllowAnyMethod();
+        policy.WithExposedHeaders("Retry-After");
         if (allowedOrigins.Length == 0)
         {
-            // No origins configured — stay permissive, but call it out in production.
+            // Development stays permissive for local tooling. Production only
+            // serves same-origin requests until explicit origins are configured,
+            // so a missing setting cannot silently expose the API to any site.
             if (app.Environment.IsProduction())
             {
-                app.Logger.LogWarning("No CORS origins configured (Cors:AllowedOrigins) — falling back to AllowAnyOrigin.");
+                app.Logger.LogWarning(
+                    "No CORS origins configured (Cors:AllowedOrigins) — cross-origin requests are disabled.");
             }
-
-            policy.AllowAnyOrigin();
+            else
+            {
+                policy.AllowAnyOrigin();
+            }
         }
         else
         {

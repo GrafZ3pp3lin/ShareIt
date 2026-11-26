@@ -35,6 +35,7 @@ public sealed class PackageReadRateLimitTests : ShareItApiTestBase
 
         Assert.AreEqual(HttpStatusCode.TooManyRequests, limited.StatusCode);
         Assert.IsNotNull(limited.Headers.RetryAfter);
+        Assert.AreEqual("no-store", limited.Headers.CacheControl?.ToString());
         var problem = await ReadProblemAsync(limited);
         Assert.AreEqual("Too many requests", problem.Title);
     }
