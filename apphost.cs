@@ -27,7 +27,7 @@ var postgres = builder.AddPostgres("postgres")
 var database = postgres.AddDatabase("shareit");
 
 // Mirrors the RustFS container used by the integration tests.
-var rustFs = builder.AddContainer("rustfs", "rustfs/rustfs", "1.0.6")
+var rustFs = builder.AddContainer("rustfs", "rustfs/rustfs", "1.0.7")
     .WithEnvironment("RUSTFS_ACCESS_KEY", RustFsAccessKey)
     .WithEnvironment("RUSTFS_SECRET_KEY", RustFsSecretKey)
     .WithEnvironment("RUSTFS_CONSOLE_ENABLE", "false")

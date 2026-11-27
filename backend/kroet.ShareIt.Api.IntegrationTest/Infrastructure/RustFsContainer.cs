@@ -31,7 +31,7 @@ internal sealed class RustFsContainer : IAsyncDisposable
     {
         Environment.SetEnvironmentVariable("TESTCONTAINERS_RYUK_DISABLED", "true");
 
-        var container = new ContainerBuilder("rustfs/rustfs:1.0.6")
+        var container = new ContainerBuilder("rustfs/rustfs:1.0.7")
             .WithEnvironment("RUSTFS_ACCESS_KEY", AccessKey)
             .WithEnvironment("RUSTFS_SECRET_KEY", SecretKey)
             .WithEnvironment("RUSTFS_CONSOLE_ENABLE", "false")
