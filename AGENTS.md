@@ -84,12 +84,8 @@
 
 ## Pull requests
 
-- Every PR lands on `main` via **squash merge**. Merge commits and rebase merging are disabled in
-  the repo settings, so `--merge`/`--rebase` fail; `gh pr merge` without a method flag squashes.
-- The `main` ruleset also requires a linear history and the `Test backend`/`Test frontend` checks.
+- The `main` ruleset requires a linear history and the `Test backend`/`Test frontend` checks.
   Only repository admins can bypass it.
-- Squash commits use the PR title as subject and the PR body as message (`PR_TITLE`/`PR_BODY`), so
-  the PR title and description are what persists in history — write them accordingly.
 - PRs do not need a backwards-compatibility story for the API, the schema, or the storage format:
   state the new behaviour plainly and change it in place.
 - Head branches are deleted automatically after merge.
