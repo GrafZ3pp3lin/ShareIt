@@ -22,11 +22,7 @@ export function createLinks() {
 
   let loadRequest = 0;
 
-  const load = async () => {
-    if (!auth.isAuthenticated()) {
-      return;
-    }
-
+  const fetchPackages = async () => {
     const current = ++loadRequest;
     setLoading(true);
     setError(null);
@@ -57,6 +53,15 @@ export function createLinks() {
     }
   };
 
+  // Retry entry point for the page; the effect below loads on sign-in.
+  const load = async () => {
+    if (!auth.isAuthenticated()) {
+      return;
+    }
+
+    await fetchPackages();
+  };
+
   const reset = () => {
     loadRequest += 1;
     setPackages([]);
@@ -74,7 +79,9 @@ export function createLinks() {
     () => auth.isAuthenticated(),
     (authenticated) => {
       if (authenticated) {
-        void load();
+        // The callback is not a tracking scope, so it uses the value the
+        // compute already tracked instead of reading the auth state again.
+        void fetchPackages();
       } else {
         reset();
       }
