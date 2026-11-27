@@ -103,6 +103,12 @@ The app is a static SPA that must be reconfigured without rebuilding per environ
 - `docker/env.template.js` + `docker/40-env.sh`: at container start, `40-env.sh` runs in nginx's `/docker-entrypoint.d/` and `envsubst`s real container env vars (`API_BASE_URL`, `AUTH_AUTHORITY`, `AUTH_CLIENT_ID`, `AUTH_REDIRECT_URI`, `AUTH_POST_LOGOUT_REDIRECT_URI`, `AUTH_SCOPE`) into `env.template.js` → `dist/env.js`. This is how one Docker image serves multiple environments.
 - Keep secrets out of `env.js`/`env.template.js` — it's public in the browser.
 
+### Security headers and CSP
+
+The image sets no security headers. They belong to the edge, including the `Content-Security-Policy`, so the policy is a single static string there.
+
+That only holds while the served HTML has **no inline `<script>` or `<style>`**: an inline block would pin a `sha256` hash into the edge config, which then has to be bumped by hand with the deploy and silently breaks the page when forgotten. Anything that must run before first paint goes in `public/` — see `public/theme.js`, loaded as a render-blocking classic script from `index.html`. Analytics is production-only: `index.html` carries the umami tag between `analytics:start`/`analytics:end` markers and `vite.config.ts` strips it for `pnpm dev`, because the first-party `/umami` proxy only exists in Traefik.
+
 ### Client-side crypto (`src/shared/crypto/`)
 
 One optional passphrase per package; one sealed format for text and files. The server stores opaque bytes only.

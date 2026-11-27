@@ -1,9 +1,11 @@
 # AGENTS.md
 
 ## Scope
+
 - Repo has two major areas: `backend/` (.NET 11, minimal APIs) and `frontend/` (SolidJS + Vite + TypeScript). The root `apphost.cs` is the Aspire orchestration entry point.
 
 ### Project constraints
+
 - This is a **personal hobby project**: one running instance, one maintainer, no paying users. It will
   never need horizontal scaling, replication, multi-region failover, sharding, or a service-level SLO.
   Do not add machinery for those — no read replicas, distributed caches or locks, queues, leader
@@ -21,6 +23,7 @@
   correctness, security, and the crypto/upload invariants below still apply at full strength.
 
 ### Run everything with Aspire
+
 - `dotnet run apphost.cs` from the repo root starts the AuthTwin, API, frontend
   (`pnpm dev`), PostgreSQL 19, and RustFS together. It requires the Aspire CLI
   (`dotnet tool install -g Aspire.Cli`), a running Docker daemon, and `pnpm`.
@@ -31,6 +34,7 @@
   `frontend/public/env.js`; change them in both places if you move a service.
 
 ### Auth twin
+
 - `backend/kroet.ShareIt.AuthTwin` is a local Keycloak stand-in for development. Start it with
   `dotnet run --project backend/kroet.ShareIt.AuthTwin`; it listens on `http://localhost:8190/realms/shareit`.
 - The API's `http` launch profile and `frontend/public/env.js` point at it by default. Use the API's
@@ -40,6 +44,7 @@
   configuration.
 
 ### Frontend (SolidJS + Vite)
+
 - Tailwind CSS is the primary styling system; prefer utility classes over custom CSS when possible.
 - Prefer native browser elements for UI primitives where possible; use the Lucide icon set
   (`~icons/lucide/*`) instead of text glyphs as icons.
@@ -58,8 +63,13 @@
   the `SIE3` frame container (4 MiB frames, deterministic per-item sealing) and per-item framed `meta`;
   the API only ever sees opaque bytes and the `X-Unlock-Proof` verifier. See `frontend/AGENTS.md`,
   `docs/crypto.md` and `docs/upload-download.md`.
+- Security headers, including the `Content-Security-Policy`, are set by Traefik
+  not by the image's nginx. Keep inline `<script>`/`<style>` out of `index.html` — anything that must run
+  before first paint goes in `public/` (see `public/theme.js`) — so the policy stays a static string.
+  See `frontend/AGENTS.md`.
 
 ### Backend (.NET)
+
 - NuGet versions for backend projects are centralized in `backend/Directory.Packages.props` (Central Package Management). Project files list packages without a `Version`; add or bump versions only there. Check for updates with `dotnet list kroet.ShareIt.slnx package --outdated` from `backend/`.
 - Short-code locator resolution is limited per remote IP (IPv6 by /64); there is no process-wide
   lookup budget. Lookup and allocation outcomes are emitted as bounded metrics. Keep those labels
@@ -73,6 +83,7 @@
 - When an OTLP endpoint is configured, the API pushes OpenTelemetry metrics, traces and logs via `OTEL_EXPORTER_OTLP_ENDPOINT` (see `docs/observability.md`). It exposes no metrics endpoint. Database-derived gauges come from the SQL store only and refresh only when metrics export is enabled. Metric labels are aggregate-only: never add package, user or content identifiers as labels. Traces and logs may contain opaque package/content IDs from request URLs, but never tokens, unlock proofs, user/guest IDs, filenames or content.
 
 ## Pull requests
+
 - Every PR lands on `main` via **squash merge**. Merge commits and rebase merging are disabled in
   the repo settings, so `--merge`/`--rebase` fail; `gh pr merge` without a method flag squashes.
 - The `main` ruleset also requires a linear history and the `Test backend`/`Test frontend` checks.
@@ -86,15 +97,18 @@
 ## Code Style Guidelines
 
 ### General
+
 - Follow existing patterns in each area (backend vs frontend).
 - Keep changes scoped and consistent with the surrounding file.
 - Prefer small, well-named helper methods over large methods when logic grows.
 
 ### Data and API boundaries
+
 - The backend exposes REST endpoints under `/api/v1/content`.
 - The frontend can generate an api client by calling `pnpm generate:open-api`
 
 ## What to do when uncertain
+
 - Read a nearby file and follow its patterns instead of inventing new ones.
 - Keep changes minimal and focused; avoid large refactors without request.
 - If new tooling is needed, add it explicitly and document it here.

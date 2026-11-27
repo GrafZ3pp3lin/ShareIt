@@ -2,6 +2,26 @@ import { defineConfig } from 'vitest/config';
 import solid from 'vite-plugin-solid';
 import tailwindcss from '@tailwindcss/vite';
 import Icons from 'unplugin-icons/vite';
+import type { Plugin } from 'vite';
+
+/**
+ * Analytics is production-only: the tracker is served first-party from
+ * /umami/script.js by Traefik (the shareit-umami router in ../server-config),
+ * which the dev server does not have — and dev pageviews should not reach umami
+ * either. The block in index.html is marked so this cannot silently rot: a
+ * missing marker fails the dev server instead of requesting a 404.
+ */
+const stripAnalyticsInDev: Plugin = {
+  name: 'strip-analytics-in-dev',
+  apply: 'serve',
+  transformIndexHtml(html) {
+    const stripped = html.replace(/\n[ \t]*<!-- analytics:start -->[\s\S]*?<!-- analytics:end -->/, '');
+    if (stripped === html) {
+      throw new Error('index.html: analytics:start/end markers not found');
+    }
+    return stripped;
+  }
+};
 
 export default defineConfig({
   // Plain http is deliberate: http://localhost is a "potentially trustworthy origin" per the
@@ -12,7 +32,7 @@ export default defineConfig({
     host: 'localhost',
     port: 3001
   },
-  plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' })],
+  plugins: [solid(), tailwindcss(), Icons({ compiler: 'solid' }), stripAnalyticsInDev],
   oxc: {
     jsx: {
       importSource: 'solid-js'

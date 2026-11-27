@@ -7,21 +7,21 @@
     <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" sizes="any" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Render-blocking on purpose: no dark-mode flash. A file, not inline, so
+         the edge CSP can stay a static string — see public/theme.js. -->
+    <script src="/theme.js"></script>
     <script src="/env.js"></script>
+    <!-- analytics:start -->
+    <!-- Production only: vite.config.ts strips this block in dev, and the
+         /umami proxy exists only at the edge (shareit-umami router). -->
     <script
       defer
-      src="https://umami.kroet.de/script.js"
+      src="/umami/script.js"
       data-website-id="b0f276ac-c6d0-4a4b-9f3e-d803528a95a4"
       data-exclude-hash="true"
       data-exclude-search="true"
     ></script>
-    <script>
-      (function () {
-        var stored = localStorage.getItem('shareit.theme');
-        var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
-        if (dark) document.documentElement.classList.add('dark');
-      })();
-    </script>
+    <!-- analytics:end -->
     <title>ShareIt</title>
   </head>
   <body>
