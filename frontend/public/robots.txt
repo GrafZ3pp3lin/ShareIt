@@ -1,0 +1,7 @@
+# This is an application, not a content site: the SPA shell carries
+# <meta name="robots" content="noindex">. /s/ is deliberately not disallowed, so
+# a leaked share link stays crawlable and the noindex is seen instead of the URL
+# being listed as "blocked by robots.txt".
+User-agent: *
+Disallow: /links
+Disallow: /auth/
