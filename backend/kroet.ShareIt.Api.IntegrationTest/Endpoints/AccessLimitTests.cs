@@ -16,7 +16,7 @@ public sealed class AccessLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestAboveAccessLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxAccessCount: 2);
+        var response = await SendCreatePackageAsync(maxAccessCount: 2);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -27,7 +27,7 @@ public sealed class AccessLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestAtAccessLimit_IsAccepted()
     {
-        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxAccessCount: 1);
+        var response = await SendCreatePackageAsync(maxAccessCount: 1);
 
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
     }
@@ -35,7 +35,7 @@ public sealed class AccessLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_GuestWithoutAccessLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxAccessCount: null);
+        var response = await SendCreatePackageAsync(maxAccessCount: null);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -45,7 +45,7 @@ public sealed class AccessLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_NonPositiveAccessLimit_Returns400()
     {
-        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid(), maxAccessCount: 0);
+        var response = await SendCreatePackageAsync(maxAccessCount: 0);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);

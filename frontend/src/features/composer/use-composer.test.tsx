@@ -70,6 +70,7 @@ describe('createComposer', () => {
       data: {
         Id: request.Id,
         ShortCode: request.UseShortCode ? 'ABC' : null,
+        UploadToken: 'upload-token-1',
         ExpiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
       }
     }));
@@ -98,6 +99,8 @@ describe('createComposer', () => {
     expect(request.MaxAccessCount).toBe(1);
 
     expect(api.uploadItem).toHaveBeenCalledTimes(2);
+    expect(api.uploadItem.mock.calls[0][2]).toBe('upload-token-1');
+    expect(api.uploadItem.mock.calls[1][2]).toBe('upload-token-1');
     expect(addedItem(0).Kind).toBe('text');
     expect(addedItem(1).Kind).toBe('file');
     expect(decodedMeta(addedItem(0).Meta)).toEqual({ name: null, mime: 'text/plain' });
@@ -224,6 +227,7 @@ describe('createComposer', () => {
     const retriedItem = api.uploadItem.mock.calls[api.uploadItem.mock.calls.length - 2];
     expect(retriedItem[0]).toBe(firstRequest.Id);
     expect(retriedItem[1].Id).toBe(firstItemId);
+    expect(retriedItem[2]).toBe('upload-token-1');
   });
 
   it('keeps a retryable partial when the upload call rejects', async () => {
@@ -494,7 +498,7 @@ describe('createComposer', () => {
 
   it('cancels an in-flight upload and keeps a retryable partial package', async () => {
     api.uploadItem.mockImplementation(
-      (_packageId, _item, _onProgress, signal: AbortSignal) =>
+      (_packageId, _item, _uploadToken, _onProgress, signal: AbortSignal) =>
         new Promise((resolve) => {
           signal.addEventListener('abort', () => resolve({ canceled: true }), { once: true });
         })
@@ -563,7 +567,7 @@ describe('createComposer', () => {
   it('reports upload progress from the XHR callback', async () => {
     let resolveUpload: ((result: { data: { Id: string } }) => void) | undefined;
     api.uploadItem.mockImplementation(
-      (_packageId, _item, onProgress: (sent: number, total: number) => void) =>
+      (_packageId, _item, _uploadToken, onProgress: (sent: number, total: number) => void) =>
         new Promise((resolve) => {
           onProgress(5, 10);
           resolveUpload = resolve;

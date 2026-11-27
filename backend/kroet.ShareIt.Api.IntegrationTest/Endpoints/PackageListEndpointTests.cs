@@ -22,7 +22,7 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task ListPackages_AsGuest_Returns401Challenge()
     {
-        var response = await ListPackagesAsync(guestId: Guid.NewGuid());
+        var response = await ListPackagesAsync();
 
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -64,9 +64,9 @@ public sealed class PackageListEndpointTests : ShareItApiTestBase
         var created = await CreateShortCodePackageAsync(userId: ownerId);
         var packageId = created.Id;
 
-        await SendUploadItemAsync(packageId, "file", new byte[10], guestId: null, userId: ownerId);
+        await SendUploadItemAsync(packageId, "file", new byte[10], userId: ownerId);
         TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddMinutes(1));
-        await SendUploadItemAsync(packageId, "text", new byte[20], guestId: null, userId: ownerId);
+        await SendUploadItemAsync(packageId, "text", new byte[20], userId: ownerId);
 
         var page = await ReadJsonAsync<ContentPackageListResponse>(await ListPackagesAsync(userId: ownerId));
 

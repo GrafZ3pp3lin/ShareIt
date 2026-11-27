@@ -23,15 +23,13 @@ public sealed class PackageReadRateLimitTests : ShareItApiTestBase
         var ownerId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
             userId: ownerId, maxAccessCount: null, timeToLiveHours: 24);
-
-        var guestId = Guid.NewGuid();
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            var response = await GetPackageAsync(packageId, guestId: guestId);
+            var response = await GetPackageAsync(packageId);
             Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, $"Attempt {attempt} should be allowed.");
         }
 
-        var limited = await GetPackageAsync(packageId, guestId: guestId);
+        var limited = await GetPackageAsync(packageId);
 
         Assert.AreEqual(HttpStatusCode.TooManyRequests, limited.StatusCode);
         Assert.IsNotNull(limited.Headers.RetryAfter);
@@ -43,17 +41,16 @@ public sealed class PackageReadRateLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_FailedUnlocksAlsoCountTowardsTheLimit()
     {
-        var guestId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: Verifier());
+            maxAccessCount: 1, unlockVerifier: Verifier());
 
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            var response = await GetPackageAsync(packageId, guestId: guestId, unlockProof: Verifier(9));
+            var response = await GetPackageAsync(packageId, unlockProof: Verifier(9));
             Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
-        var limited = await GetPackageAsync(packageId, guestId: guestId, unlockProof: Verifier(9));
+        var limited = await GetPackageAsync(packageId, unlockProof: Verifier(9));
 
         Assert.AreEqual(HttpStatusCode.TooManyRequests, limited.StatusCode);
         Assert.IsNotNull(limited.Headers.RetryAfter);

@@ -23,7 +23,8 @@ describe('<PrivacyPage />', () => {
     expect(screen.getByText('umami.kroet.de')).toBeInTheDocument();
 
     expect(screen.getByRole('heading', { name: 'Cookies and browser storage' })).toBeInTheDocument();
-    expect(screen.getAllByText('shareit-guest-id').length).toBeGreaterThan(0);
+    expect(screen.getByText('shareit.theme')).toBeInTheDocument();
+    expect(screen.queryByText('shareit-guest-id')).not.toBeInTheDocument();
     expect(screen.getByText('IndexedDB')).toBeInTheDocument();
 
     expect(screen.getByRole('heading', { name: 'Your rights' })).toBeInTheDocument();

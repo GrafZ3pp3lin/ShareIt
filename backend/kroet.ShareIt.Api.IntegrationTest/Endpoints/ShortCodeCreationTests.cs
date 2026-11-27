@@ -22,7 +22,7 @@ public sealed class ShortCodeCreationTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_WithoutCodeMode_HasNoLocator()
     {
-        var created = await CreatePackageOwnerAsync(guestId: Guid.NewGuid());
+        var created = await CreatePackageOwnerAsync();
 
         Assert.IsNull(created.ShortCode);
         Assert.IsNull(_generator.LastIssued);
@@ -31,12 +31,10 @@ public sealed class ShortCodeCreationTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_WithCodeMode_RetriesAConflictingLocator()
     {
-        var guestId = Guid.NewGuid();
-
-        var first = await CreateShortCodePackageAsync(guestId: guestId);
+        var first = await CreateShortCodePackageAsync();
         Assert.AreEqual("AAA", first.ShortCode);
 
-        var second = await CreateShortCodePackageAsync(guestId: guestId);
+        var second = await CreateShortCodePackageAsync();
         Assert.AreEqual("BBB", second.ShortCode);
 
         var resolved = await ResolveShortCodeAsync("BBB");
@@ -47,14 +45,16 @@ public sealed class ShortCodeCreationTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_WithCodeMode_IsIdempotentForTheOwner()
     {
-        var guestId = Guid.NewGuid();
         var packageId = Guid.NewGuid();
 
         var verifier = Verifier();
         var first = await CreateShortCodePackageAsync(
-            packageId: packageId, guestId: guestId, verifier: verifier);
+            packageId: packageId, verifier: verifier);
         var retry = await SendCreatePackageAsync(
-            packageId: packageId, guestId: guestId, unlockVerifier: verifier, useShortCode: true);
+            packageId: packageId,
+            unlockVerifier: verifier,
+            useShortCode: true,
+            uploadToken: first.UploadToken);
 
         var body = await retry.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retry.StatusCode, body);
@@ -67,16 +67,15 @@ public sealed class ShortCodeCreationTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_WithCodeMode_RetryWithADifferentVerifier_ReturnsConflict()
     {
-        var guestId = Guid.NewGuid();
         var packageId = Guid.NewGuid();
 
-        await CreateShortCodePackageAsync(packageId: packageId, guestId: guestId, verifier: Verifier(1));
+        var first = await CreateShortCodePackageAsync(packageId: packageId, verifier: Verifier(1));
 
         var response = await SendCreatePackageAsync(
             packageId: packageId,
-            guestId: guestId,
             unlockVerifier: Verifier(2),
-            useShortCode: true);
+            useShortCode: true,
+            uploadToken: first.UploadToken);
 
         Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -86,16 +85,15 @@ public sealed class ShortCodeCreationTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_WithCodeMode_RetryAgainstARegularPackage_ReturnsConflict()
     {
-        var guestId = Guid.NewGuid();
         var packageId = Guid.NewGuid();
 
-        await CreatePackageOwnerAsync(packageId: packageId, guestId: guestId);
+        var first = await CreatePackageOwnerAsync(packageId: packageId);
 
         var response = await SendCreatePackageAsync(
             packageId: packageId,
-            guestId: guestId,
             unlockVerifier: Verifier(),
-            useShortCode: true);
+            useShortCode: true,
+            uploadToken: first.UploadToken);
 
         Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -141,8 +139,7 @@ public sealed class ShortCodeCreationTests : ShareItApiTestBase
                 UseShortCode = true,
                 TimeToLiveHours = 1,
                 MaxAccessCount = 1
-            },
-            guestId: Guid.NewGuid());
+            });
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -161,8 +158,7 @@ public sealed class ShortCodeCreationTests : ShareItApiTestBase
                 UnlockVerifier = verifier,
                 TimeToLiveHours = 1,
                 MaxAccessCount = 1
-            },
-            guestId: Guid.NewGuid());
+            });
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);

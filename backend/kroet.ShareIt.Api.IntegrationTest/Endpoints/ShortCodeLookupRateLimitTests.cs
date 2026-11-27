@@ -19,7 +19,7 @@ public sealed class ShortCodeLookupRateLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task ResolveShortCode_AfterThePermitLimit_Returns429WithRetryAfter()
     {
-        var coded = await CreateShortCodePackageAsync(guestId: Guid.NewGuid());
+        var coded = await CreateShortCodePackageAsync();
 
         for (var attempt = 1; attempt <= 2; attempt++)
         {

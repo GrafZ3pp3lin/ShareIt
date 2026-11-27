@@ -19,26 +19,22 @@ public sealed class DownloadRateLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task Download_AfterThePermitLimit_Returns429WithRetryAfter()
     {
-        var guestId = Guid.NewGuid();
         var (packageId, contentId) = await CreatePackageWithItemAsync(
-            bytes: LargeItemBytes, guestId: guestId, maxAccessCount: 1);
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+            bytes: LargeItemBytes, maxAccessCount: 1);
+        var details = await GetPackageDetailsAsync(packageId);
         var downloadUrl = DownloadUrl(packageId, contentId);
 
         for (var attempt = 1; attempt <= 2; attempt++)
         {
             var response = await SendDownloadAsync(
                 downloadUrl,
-                details.AccessSession.Token,
-                guestId);
+                details.AccessSession.Token);
             Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, $"Attempt {attempt} should be allowed.");
         }
 
         var limited = await SendDownloadAsync(
             downloadUrl,
-            details.AccessSession.Token,
-            guestId);
-
+            details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.TooManyRequests, limited.StatusCode);
         Assert.IsNotNull(limited.Headers.RetryAfter);
         var problem = await ReadProblemAsync(limited);

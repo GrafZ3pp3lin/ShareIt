@@ -17,12 +17,11 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WithoutProof_Returns401AndKeepsTheAccessCount()
     {
-        var guestId = Guid.NewGuid();
         var verifier = Verifier();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: verifier);
+            maxAccessCount: 1, unlockVerifier: verifier);
 
-        var response = await GetPackageAsync(packageId, guestId: guestId);
+        var response = await GetPackageAsync(packageId);
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode, body);
@@ -41,11 +40,10 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WithWrongProof_Returns401AndKeepsTheAccessCount()
     {
-        var guestId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: Verifier(1));
+            maxAccessCount: 1, unlockVerifier: Verifier(1));
 
-        var response = await GetPackageAsync(packageId, guestId: guestId, unlockProof: Verifier(2));
+        var response = await GetPackageAsync(packageId, unlockProof: Verifier(2));
 
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.AreEqual(0, (await GetShellAsync(packageId)).CurrentAccessCount);
@@ -54,11 +52,10 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WithMalformedProof_Returns401()
     {
-        var guestId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: Verifier());
+            maxAccessCount: 1, unlockVerifier: Verifier());
 
-        var response = await GetPackageAsync(packageId, guestId: guestId, unlockProof: "not-base64url!");
+        var response = await GetPackageAsync(packageId, unlockProof: "not-base64url!");
 
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.AreEqual(0, (await GetShellAsync(packageId)).CurrentAccessCount);
@@ -67,12 +64,11 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WithCorrectProof_ReturnsContentAndConsumesOneAccess()
     {
-        var guestId = Guid.NewGuid();
         var verifier = Verifier();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: verifier);
+            maxAccessCount: 1, unlockVerifier: verifier);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId, unlockProof: verifier);
+        var details = await GetPackageDetailsAsync(packageId, unlockProof: verifier);
 
         Assert.HasCount(1, details.Items);
         Assert.AreEqual(1, details.Package.CurrentAccessCount);
@@ -82,33 +78,30 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_ReportsWhetherThePackageIsProtected()
     {
-        var guestId = Guid.NewGuid();
-        var (openPackageId, _) = await CreatePackageWithItemAsync(guestId: guestId);
+        var (openPackageId, _) = await CreatePackageWithItemAsync();
 
-        var open = await GetPackageDetailsAsync(openPackageId, guestId: guestId);
+        var open = await GetPackageDetailsAsync(openPackageId);
         Assert.IsFalse(open.Package.IsProtected);
 
         var verifier = Verifier();
         var (protectedPackageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, unlockVerifier: verifier);
+            unlockVerifier: verifier);
 
         var locked = await GetPackageDetailsAsync(
-            protectedPackageId, guestId: guestId, unlockProof: verifier);
+            protectedPackageId, unlockProof: verifier);
         Assert.IsTrue(locked.Package.IsProtected);
     }
 
     [TestMethod]
     public async Task GetPackage_WithSessionAndProof_ReusesTheAccess()
     {
-        var guestId = Guid.NewGuid();
         var verifier = Verifier();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: verifier);
+            maxAccessCount: 1, unlockVerifier: verifier);
 
-        var first = await GetPackageDetailsAsync(packageId, guestId: guestId, unlockProof: verifier);
+        var first = await GetPackageDetailsAsync(packageId, unlockProof: verifier);
         var second = await GetPackageDetailsAsync(
             packageId,
-            guestId: guestId,
             unlockProof: verifier,
             accessSession: first.AccessSession.Token);
 
@@ -119,16 +112,14 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WithSessionButWithoutProof_Returns401AndKeepsTheAccessCount()
     {
-        var guestId = Guid.NewGuid();
         var verifier = Verifier();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: verifier);
+            maxAccessCount: 1, unlockVerifier: verifier);
 
-        var first = await GetPackageDetailsAsync(packageId, guestId: guestId, unlockProof: verifier);
+        var first = await GetPackageDetailsAsync(packageId, unlockProof: verifier);
 
         var response = await GetPackageAsync(
             packageId,
-            guestId: guestId,
             accessSession: first.AccessSession.Token);
         var body = await response.Content.ReadAsStringAsync();
 
@@ -143,14 +134,13 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WithCorrectProofAtAccessLimit_Returns410OnSecondRead()
     {
-        var guestId = Guid.NewGuid();
         var verifier = Verifier();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: verifier);
+            maxAccessCount: 1, unlockVerifier: verifier);
 
-        await GetPackageDetailsAsync(packageId, guestId: guestId, unlockProof: verifier);
+        await GetPackageDetailsAsync(packageId, unlockProof: verifier);
 
-        var second = await GetPackageAsync(packageId, guestId: guestId, unlockProof: verifier);
+        var second = await GetPackageAsync(packageId, unlockProof: verifier);
         Assert.AreEqual(HttpStatusCode.Gone, second.StatusCode);
         var problem = await ReadProblemAsync(second);
         Assert.AreEqual("Package access limit reached", problem.Title);
@@ -161,11 +151,10 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     {
         // An open performs zero blob reads, so a missing object must not turn
         // a second, rejected read of an exhausted package into a 500.
-        var guestId = Guid.NewGuid();
         var (packageId, contentId) = await CreatePackageWithItemAsync(
-            bytes: SmallItemBytes, guestId: guestId, maxAccessCount: 1);
+            bytes: SmallItemBytes, maxAccessCount: 1);
 
-        await GetPackageDetailsAsync(packageId, guestId: guestId);
+        await GetPackageDetailsAsync(packageId);
 
         var content = await Services.GetRequiredService<IContentStorageHandler>()
             .GetContentAsync(contentId);
@@ -176,7 +165,7 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
             Key = content.Url
         });
 
-        var response = await GetPackageAsync(packageId, guestId: guestId);
+        var response = await GetPackageAsync(packageId);
 
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -186,13 +175,12 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WhenProtectedPackageIsExpired_Returns410WithoutProof()
     {
-        var guestId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            guestId: guestId, maxAccessCount: 1, unlockVerifier: Verifier());
+            maxAccessCount: 1, unlockVerifier: Verifier());
 
         TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
-        var response = await GetPackageAsync(packageId, guestId: guestId);
+        var response = await GetPackageAsync(packageId);
 
         // Expiry is not content, so 410 may be answered before the proof.
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
@@ -203,10 +191,9 @@ public sealed class PackageUnlockTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_ForUnprotectedPackage_NeedsNoProof()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, _) = await CreatePackageWithItemAsync(guestId: guestId);
+        var (packageId, _) = await CreatePackageWithItemAsync();
 
-        var response = await GetPackageAsync(packageId, guestId: guestId);
+        var response = await GetPackageAsync(packageId);
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
     }

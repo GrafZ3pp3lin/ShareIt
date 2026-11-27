@@ -57,13 +57,13 @@ public static class ContentManagementEndpoints
         ClaimsPrincipal claimsPrincipal,
         CancellationToken cancellationToken)
     {
-        if (!claimsPrincipal.TryGetUserIdentity(out var userIdentity))
+        if (!claimsPrincipal.TryGetUserId(out var userId))
         {
             return AuthenticationRequiredProblem();
         }
 
         var pageSize = Math.Clamp(take ?? 50, 1, 100);
-        var page = await contentStorageHandler.ListPackagesAsync(userIdentity.Id, cursor, pageSize, cancellationToken);
+        var page = await contentStorageHandler.ListPackagesAsync(userId, cursor, pageSize, cancellationToken);
         var now = timeProvider.GetUtcNow();
 
         return TypedResults.Ok(new ContentPackageListResponse
@@ -87,7 +87,7 @@ public static class ContentManagementEndpoints
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.delete");
 
-        if (!claimsPrincipal.TryGetUserIdentity(out var userIdentity))
+        if (!claimsPrincipal.TryGetUserId(out var userId))
         {
             return AuthenticationRequiredProblem();
         }
@@ -103,7 +103,7 @@ public static class ContentManagementEndpoints
             });
         }
 
-        if (package.UserId != userIdentity.Id)
+        if (package.UserId != userId)
         {
             return TypedResults.Problem(new ProblemDetails
             {

@@ -6,7 +6,6 @@
  */
 
 export type GetPackageHeaders = {
-  'X-Guest-ID'?: string;
   'X-Unlock-Proof'?: string;
   'X-Access-Session'?: string;
 };

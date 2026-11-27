@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using kroet.ShareIt.Api.Storage;
@@ -15,7 +13,8 @@ public class AccessSessionServiceTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture);
     private static readonly Guid PackageId = Guid.Parse("0192f3ab-7cde-7def-8abc-0123456789ab");
-    private static readonly Guid ClientId = Guid.Parse("0192f3ab-7cde-7def-8abc-0123456789ac");
+    private static readonly Guid UserId = Guid.Parse("0192f3ab-7cde-7def-8abc-0123456789ac");
+    private static readonly string Token = OpaqueToken.Create();
 
     private readonly IContentStorageHandler _storage = Substitute.For<IContentStorageHandler>();
     private readonly FakeTimeProvider _timeProvider = new(Now);
@@ -36,18 +35,17 @@ public class AccessSessionServiceTests
         _storage.CreateAccessSessionAsync(Arg.Do<AccessSession>(session => stored = session), Arg.Any<CancellationToken>())
             .Returns(new AccessSessionClaimResult(true, 1, 3));
 
-        var result = await _subject.CreateAsync(PackageId, ClientId, isGuest: true);
+        var result = await _subject.CreateAsync(PackageId, UserId);
 
         Assert.IsTrue(result.Success);
         Assert.IsNotNull(result.Ticket);
         Assert.IsNotNull(stored);
         Assert.AreNotEqual(result.Ticket.Token, stored.TokenHash);
-        Assert.AreEqual(Hash(result.Ticket.Token), stored.TokenHash);
+        Assert.AreEqual(OpaqueToken.Hash(result.Ticket.Token), stored.TokenHash);
         Assert.AreEqual(Now, stored.CreatedAt);
         Assert.AreEqual(Now.AddMinutes(15), stored.ExpiresAt);
         Assert.AreEqual(PackageId, stored.PackageId);
-        Assert.AreEqual(ClientId, stored.ClientId);
-        Assert.IsTrue(stored.IsGuest);
+        Assert.AreEqual(UserId, stored.UserId);
         Assert.AreEqual(1, result.NewAccessCount);
         Assert.AreEqual(3, result.MaxAccessCount);
     }
@@ -58,7 +56,7 @@ public class AccessSessionServiceTests
         _storage.CreateAccessSessionAsync(Arg.Any<AccessSession>(), Arg.Any<CancellationToken>())
             .Returns(new AccessSessionClaimResult(false, 0, null));
 
-        var result = await _subject.CreateAsync(PackageId, ClientId, isGuest: false);
+        var result = await _subject.CreateAsync(PackageId, userId: null);
 
         Assert.IsFalse(result.Success);
         Assert.IsNull(result.Ticket);
@@ -71,14 +69,28 @@ public class AccessSessionServiceTests
         _storage.GetAccessSessionByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(session);
 
-        var valid = await _subject.ValidateAsync("token", PackageId, ClientId, isGuest: true);
+        var valid = await _subject.ValidateAsync(Token, PackageId, UserId);
 
         Assert.IsNotNull(valid);
-        Assert.AreEqual("token", valid.Token);
+        Assert.AreEqual(Token, valid.Token);
         Assert.AreEqual(session.ExpiresAt, valid.ExpiresAt);
         await _storage.Received(1).GetAccessSessionByTokenHashAsync(
-            Hash("token"),
+            OpaqueToken.Hash(Token),
             Arg.Any<CancellationToken>());
+    }
+
+    [TestMethod]
+    public async Task ValidateAsync_RejectsMalformedTokenWithoutReadingTheStore()
+    {
+        Assert.IsNull(await _subject.ValidateAsync(string.Empty, PackageId, UserId));
+        Assert.IsNull(await _subject.ValidateAsync(" ", PackageId, UserId));
+        Assert.IsNull(await _subject.ValidateAsync("token", PackageId, UserId));
+        Assert.IsNull(await _subject.ValidateAsync(Token[..^1], PackageId, UserId));
+        Assert.IsNull(await _subject.ValidateAsync(Token + "A", PackageId, UserId));
+        Assert.IsNull(await _subject.ValidateAsync(Token[..^1] + "=", PackageId, UserId));
+
+        await _storage.DidNotReceiveWithAnyArgs()
+            .GetAccessSessionByTokenHashAsync(default!, default);
     }
 
     [TestMethod]
@@ -87,16 +99,16 @@ public class AccessSessionServiceTests
         _storage.GetAccessSessionByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(NewSession(Now.AddMinutes(15)));
 
-        Assert.IsNull(await _subject.ValidateAsync(" ", PackageId, ClientId, isGuest: true));
-        Assert.IsNull(await _subject.ValidateAsync("token", Guid.NewGuid(), ClientId, isGuest: true));
-        Assert.IsNull(await _subject.ValidateAsync("token", PackageId, Guid.NewGuid(), isGuest: true));
-        Assert.IsNull(await _subject.ValidateAsync("token", PackageId, ClientId, isGuest: false));
-        Assert.IsNotNull(await _subject.ValidateAsync("token", PackageId, ClientId, isGuest: true));
+        Assert.IsNull(await _subject.ValidateAsync(" ", PackageId, UserId));
+        Assert.IsNull(await _subject.ValidateAsync(Token, Guid.NewGuid(), UserId));
+        Assert.IsNull(await _subject.ValidateAsync(Token, PackageId, Guid.NewGuid()));
+        Assert.IsNull(await _subject.ValidateAsync(Token, PackageId, userId: null));
+        Assert.IsNotNull(await _subject.ValidateAsync(Token, PackageId, UserId));
 
         _storage.GetAccessSessionByTokenHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(NewSession(Now.AddSeconds(-1)));
 
-        Assert.IsNull(await _subject.ValidateAsync("token", PackageId, ClientId, isGuest: true));
+        Assert.IsNull(await _subject.ValidateAsync(Token, PackageId, UserId));
     }
 
     [TestMethod]
@@ -114,13 +126,9 @@ public class AccessSessionServiceTests
         {
             Id = Guid.NewGuid(),
             PackageId = PackageId,
-            ClientId = ClientId,
-            IsGuest = true,
-            TokenHash = Hash("token"),
+            UserId = UserId,
+            TokenHash = OpaqueToken.Hash(Token),
             CreatedAt = Now,
             ExpiresAt = expiresAt
         };
-
-    private static string Hash(string token)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 }

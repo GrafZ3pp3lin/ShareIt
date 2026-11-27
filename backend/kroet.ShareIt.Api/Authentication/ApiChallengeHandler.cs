@@ -6,10 +6,10 @@ namespace kroet.ShareIt.Api.Authentication;
 
 /// <summary>
 /// Fallback authentication scheme, used only to answer authorization challenges.
-/// The API authenticates via bearer tokens / the X-Guest-ID header rather than
-/// the ASP.NET authentication pipeline, so there is no interactive sign-in flow
-/// to redirect to. Denied anonymous requests are answered with a plain 401
-/// (challenge) or 403 (forbid) instead of throwing "no DefaultChallengeScheme".
+/// The API authenticates via bearer tokens rather than the ASP.NET
+/// authentication pipeline, so there is no interactive sign-in flow to redirect
+/// to. Denied anonymous requests are answered with a plain 401 (challenge) or
+/// 403 (forbid) instead of throwing "no DefaultChallengeScheme".
 /// </summary>
 public sealed class ApiChallengeHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,

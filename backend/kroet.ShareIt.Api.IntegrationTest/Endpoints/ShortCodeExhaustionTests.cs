@@ -18,12 +18,11 @@ public sealed class ShortCodeExhaustionTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_WithCodeMode_WhenNoLocatorCanBeAllocated_Returns503()
     {
-        var first = await CreateShortCodePackageAsync(guestId: Guid.NewGuid());
+        var first = await CreateShortCodePackageAsync();
         Assert.AreEqual("AAA", first.ShortCode);
 
         var response = await SendCreatePackageAsync(
             PackageRequest(useShortCode: true, unlockVerifier: Verifier()),
-            guestId: Guid.NewGuid(),
             unlockProof: Verifier());
 
         Assert.AreEqual(HttpStatusCode.ServiceUnavailable, response.StatusCode);

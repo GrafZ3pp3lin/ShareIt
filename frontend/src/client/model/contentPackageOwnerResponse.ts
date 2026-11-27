@@ -9,6 +9,8 @@ export interface ContentPackageOwnerResponse {
   Id: string;
   /** @nullable */
   ShortCode?: string | null;
+  /** @nullable */
+  UploadToken?: string | null;
   CreatedAt: string;
   /** @pattern ^-?(?:0|[1-9]\d*)$ */
   ItemCount: number | string;

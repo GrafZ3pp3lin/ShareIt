@@ -17,15 +17,13 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_WithDeclaredSizeLargerThanPayload_Returns400AndStoresNothing()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         var response = await SendUploadItemAsync(
             packageId,
             "file",
             SmallItemBytes,
-            declaredSize: SmallItemBytes.Length + 1,
-            guestId: guestId);
+            declaredSize: SmallItemBytes.Length + 1);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -38,15 +36,13 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_WithDeclaredSizeSmallerThanPayload_Returns400AndStoresNothing()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         var response = await SendUploadItemAsync(
             packageId,
             "file",
             SmallItemBytes,
-            declaredSize: SmallItemBytes.Length - 1,
-            guestId: guestId);
+            declaredSize: SmallItemBytes.Length - 1);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -57,10 +53,33 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     }
 
     [TestMethod]
+    public async Task Upload_WithoutUploadTokenHeader_Returns400()
+    {
+        var packageId = await CreatePackageAsync();
+
+        using var content = new ByteArrayContent(SmallItemBytes);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/v1/content/package/{packageId}/content/{Guid.NewGuid()}")
+        {
+            Content = content
+        };
+        request.Headers.Add("X-Content-Kind", "file");
+        request.Headers.Add("X-Content-Meta", "bWV0YQ");
+
+        var response = await Client.SendAsync(request);
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ReadProblemAsync(response);
+        Assert.AreEqual("Missing upload token", problem.Title);
+        Assert.AreEqual(0, (await GetDatabaseCountsAsync()).ContentCount);
+    }
+
+    [TestMethod]
     public async Task Upload_WithoutContentLength_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         // A non-seekable body forces chunked transfer encoding: no
         // Content-Length header reaches the endpoint.
@@ -76,7 +95,8 @@ public sealed class UploadTransportTests : ShareItApiTestBase
         request.Headers.TransferEncodingChunked = true;
         request.Headers.Add("X-Content-Kind", "file");
         request.Headers.Add("X-Content-Meta", "bWV0YQ");
-        AddIdentity(request, guestId, null);
+        AddIdentity(request, null);
+        AddUploadToken(request, packageId);
 
         var response = await Client.SendAsync(request);
 
@@ -88,13 +108,12 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_WithNonOctetStreamContentType_Returns415()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         using var content = new ByteArrayContent(SmallItemBytes);
         content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
         var response = await SendRawUploadAsync(
-            packageId, Guid.NewGuid(), "file", "bWV0YQ", content, guestId);
+            packageId, Guid.NewGuid(), "file", "bWV0YQ", content);
 
         Assert.AreEqual(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -104,13 +123,12 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_WithoutKindHeader_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         using var content = new ByteArrayContent(SmallItemBytes);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         var response = await SendRawUploadAsync(
-            packageId, Guid.NewGuid(), kind: null, "bWV0YQ", content, guestId);
+            packageId, Guid.NewGuid(), kind: null, "bWV0YQ", content);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -120,13 +138,12 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_WithoutMetaHeader_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         using var content = new ByteArrayContent(SmallItemBytes);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         var response = await SendRawUploadAsync(
-            packageId, Guid.NewGuid(), "file", meta: null, content, guestId);
+            packageId, Guid.NewGuid(), "file", meta: null, content);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -136,15 +153,13 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_WithTinyDeclaredSizeAndLargePayload_Returns400AndStoresNothing()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         var response = await SendUploadItemAsync(
             packageId,
             "file",
             new byte[(9 * 1024 * 1024) + 1],
-            declaredSize: 1,
-            guestId: guestId);
+            declaredSize: 1);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -156,19 +171,17 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_ReusingItemIdWithDifferentSize_Returns409()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
         var contentId = Guid.NewGuid();
 
-        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId);
         Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
 
         var conflict = await SendUploadItemAsync(
             packageId,
             "file",
             new byte[SmallItemBytes.Length + 1],
-            contentId: contentId,
-            guestId: guestId);
+            contentId: contentId);
 
         Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
         var problem = await ReadProblemAsync(conflict);
@@ -181,8 +194,7 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_ReusingItemIdWithDifferentMeta_Returns409()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
         var contentId = Guid.NewGuid();
 
         var first = await SendUploadItemAsync(
@@ -190,8 +202,7 @@ public sealed class UploadTransportTests : ShareItApiTestBase
             "file",
             SmallItemBytes,
             meta: MetaFor("first.bin", "application/octet-stream"),
-            contentId: contentId,
-            guestId: guestId);
+            contentId: contentId);
         Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
 
         var conflict = await SendUploadItemAsync(
@@ -199,8 +210,7 @@ public sealed class UploadTransportTests : ShareItApiTestBase
             "file",
             SmallItemBytes,
             meta: MetaFor("second.bin", "application/octet-stream"),
-            contentId: contentId,
-            guestId: guestId);
+            contentId: contentId);
 
         Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
         var problem = await ReadProblemAsync(conflict);
@@ -210,14 +220,13 @@ public sealed class UploadTransportTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_ReusingItemIdWithDifferentKind_Returns409()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
         var contentId = Guid.NewGuid();
 
-        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId);
         Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
 
-        var conflict = await SendUploadItemAsync(packageId, "text", SmallItemBytes, contentId: contentId, guestId: guestId);
+        var conflict = await SendUploadItemAsync(packageId, "text", SmallItemBytes, contentId: contentId);
 
         Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
         var problem = await ReadProblemAsync(conflict);

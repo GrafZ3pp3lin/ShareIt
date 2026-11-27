@@ -130,6 +130,7 @@ public class PostgresStorageIntegrationTests
         Assert.IsNotNull(storedPackage);
         Assert.AreEqual(package.Id, storedPackage.Id);
         Assert.AreEqual(package.UnlockVerifier, storedPackage.UnlockVerifier);
+        Assert.AreEqual(package.UploadTokenHash, storedPackage.UploadTokenHash);
         Assert.AreEqual(package.MaxAccessCount, storedPackage.MaxAccessCount);
         Assert.AreEqual(package.FailedUnlockAttempts, storedPackage.FailedUnlockAttempts);
         Assert.AreEqual(1, storedPackage.ItemCount);
@@ -208,8 +209,7 @@ public class PostgresStorageIntegrationTests
         Assert.IsTrue(result.Success);
         Assert.IsNotNull(stored);
         Assert.AreEqual(package.Id, stored.PackageId);
-        Assert.AreEqual(session.ClientId, stored.ClientId);
-        Assert.AreEqual(session.IsGuest, stored.IsGuest);
+        Assert.AreEqual(session.UserId, stored.UserId);
 
         Assert.IsTrue(await _contentStorageHandler.DeletePackageAsync(package.Id));
         Assert.IsNull(await _contentStorageHandler.GetAccessSessionByTokenHashAsync(session.TokenHash));
@@ -387,15 +387,13 @@ public class PostgresStorageIntegrationTests
 
     private AccessSession NewSession(
         Guid packageId,
-        Guid? clientId = null,
-        bool isGuest = false,
+        Guid? userId = null,
         DateTimeOffset? expiresAt = null)
         => new()
         {
             Id = Guid.NewGuid(),
             PackageId = packageId,
-            ClientId = clientId ?? Guid.NewGuid(),
-            IsGuest = isGuest,
+            UserId = userId,
             TokenHash = Guid.NewGuid().ToString("N"),
             CreatedAt = _timeProvider.GetUtcNow(),
             ExpiresAt = expiresAt ?? _timeProvider.GetUtcNow().AddMinutes(_downloadSettings.AccessSessionLifetimeMinutes)
@@ -414,6 +412,7 @@ public class PostgresStorageIntegrationTests
             UnlockVerifier = "verifier",
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             UserId = userId ?? Guid.NewGuid(),
+            UploadTokenHash = "upload-token-hash",
             MaxAccessCount = maxAccessCount,
             ExpiresAt = expiresAt ?? DateTimeOffset.UtcNow.AddDays(1)
         };

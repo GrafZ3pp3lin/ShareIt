@@ -28,8 +28,7 @@ public interface IAccessSessionService
     /// </summary>
     Task<AccessSessionCreationResult> CreateAsync(
         Guid packageId,
-        Guid clientId,
-        bool isGuest,
+        Guid? userId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -40,8 +39,7 @@ public interface IAccessSessionService
     Task<AccessSessionTicket?> ValidateAsync(
         string token,
         Guid packageId,
-        Guid clientId,
-        bool isGuest,
+        Guid? userId,
         CancellationToken cancellationToken = default);
 
     /// <summary>

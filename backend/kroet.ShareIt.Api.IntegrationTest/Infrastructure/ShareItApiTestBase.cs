@@ -9,6 +9,7 @@ using Amazon.S3.Model;
 using Dapper;
 using kroet.ShareIt.Api.Content.Dtos;
 using kroet.ShareIt.Api.Services.Cleanup;
+using kroet.ShareIt.Api.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
@@ -35,6 +36,7 @@ public abstract class ShareItApiTestBase
 
     private ShareItApiFactory _factory = null!;
     private AmazonS3Client _s3Client = null!;
+    private readonly Dictionary<Guid, string> _uploadTokens = [];
 
     protected HttpClient Client { get; private set; } = null!;
 
@@ -123,31 +125,35 @@ public abstract class ShareItApiTestBase
     protected Task<HttpResponseMessage> SendCreatePackageAsync(
         Guid? packageId = null,
         int? maxAccessCount = 1,
-        Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null,
-        bool useShortCode = false)
+        bool useShortCode = false,
+        string? uploadToken = null)
         => SendCreatePackageAsync(
             PackageRequest(packageId, maxAccessCount, timeToLiveHours ?? 0, unlockVerifier, useShortCode),
-            guestId,
             userId,
-            unlockVerifier);
+            unlockVerifier,
+            uploadToken);
 
     protected async Task<HttpResponseMessage> SendCreatePackageAsync(
         CreatePackageRequest request,
-        Guid? guestId = null,
         Guid? userId = null,
-        string? unlockProof = null)
+        string? unlockProof = null,
+        string? uploadToken = null)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/content/package")
         {
             Content = JsonContent.Create(request, options: JsonOptions)
         };
-        AddIdentity(message, guestId, userId);
+        AddIdentity(message, userId);
         if (unlockProof is not null)
         {
             message.Headers.Add("X-Unlock-Proof", unlockProof);
+        }
+        if (uploadToken is not null)
+        {
+            message.Headers.Add("X-Upload-Token", uploadToken);
         }
 
         return await Client.SendAsync(message);
@@ -160,31 +166,32 @@ public abstract class ShareItApiTestBase
     protected async Task<Guid> CreatePackageAsync(
         Guid? packageId = null,
         int? maxAccessCount = 1,
-        Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
         => (await CreatePackageOwnerAsync(
-            packageId, maxAccessCount, guestId, userId, timeToLiveHours, unlockVerifier)).Id;
+            packageId, maxAccessCount, userId, timeToLiveHours, unlockVerifier)).Id;
 
     /// <summary>
     /// Creates a package and returns the owner response. The package starts
-    /// without a short code because code access is opt-in.
+    /// without a short code because code access is opt-in. The returned upload
+    /// token is remembered for later item uploads.
     /// </summary>
     protected async Task<ContentPackageOwnerResponse> CreatePackageOwnerAsync(
         Guid? packageId = null,
         int? maxAccessCount = 1,
-        Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
     {
         var response = await SendCreatePackageAsync(
-            packageId, maxAccessCount, guestId, userId, timeToLiveHours, unlockVerifier);
+            packageId, maxAccessCount, userId, timeToLiveHours, unlockVerifier);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
-        return await ReadJsonAsync<ContentPackageOwnerResponse>(response);
+        var owner = await ReadJsonAsync<ContentPackageOwnerResponse>(response);
+        RememberUploadToken(owner);
+        return owner;
     }
 
     /// <summary>
@@ -197,17 +204,16 @@ public abstract class ShareItApiTestBase
         Guid? packageId = null,
         Guid? contentId = null,
         int? maxAccessCount = 1,
-        Guid? guestId = null,
         Guid? userId = null,
         int? timeToLiveHours = 1,
         string? unlockVerifier = null)
     {
         var createdPackageId = await CreatePackageAsync(
-            packageId, maxAccessCount, guestId, userId, timeToLiveHours, unlockVerifier);
+            packageId, maxAccessCount, userId, timeToLiveHours, unlockVerifier);
 
         var createdContentId = contentId ?? Guid.NewGuid();
         var response = await SendUploadItemAsync(
-            createdPackageId, kind, bytes ?? SmallItemBytes, meta, createdContentId, guestId, userId);
+            createdPackageId, kind, bytes ?? SmallItemBytes, meta, createdContentId, userId);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
@@ -230,9 +236,9 @@ public abstract class ShareItApiTestBase
         byte[] bytes,
         string meta = "bWV0YQ",
         Guid? contentId = null,
-        Guid? guestId = null,
         Guid? userId = null,
-        long? declaredSize = null)
+        long? declaredSize = null,
+        string? uploadToken = null)
     {
         var content = new ByteArrayContent(bytes)
         {
@@ -247,7 +253,7 @@ public abstract class ShareItApiTestBase
         }
 
         return await SendRawUploadAsync(
-            packageId, contentId ?? Guid.NewGuid(), kind, meta, content, guestId, userId);
+            packageId, contentId ?? Guid.NewGuid(), kind, meta, content, userId, uploadToken);
     }
 
     /// <summary>
@@ -260,8 +266,8 @@ public abstract class ShareItApiTestBase
         string? kind,
         string? meta,
         HttpContent content,
-        Guid? guestId = null,
-        Guid? userId = null)
+        Guid? userId = null,
+        string? uploadToken = null)
     {
         using var request = new HttpRequestMessage(
             HttpMethod.Put,
@@ -277,20 +283,20 @@ public abstract class ShareItApiTestBase
         {
             request.Headers.Add("X-Content-Meta", meta);
         }
-        AddIdentity(request, guestId, userId);
+        AddIdentity(request, userId);
+        request.Headers.Add("X-Upload-Token", ResolveUploadToken(packageId, uploadToken));
 
         return await Client.SendAsync(request);
     }
 
     protected async Task<HttpResponseMessage> GetPackageAsync(
         Guid packageId,
-        Guid? guestId = null,
         Guid? userId = null,
         string? unlockProof = null,
         string? accessSession = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/content/package/{packageId}");
-        AddIdentity(request, guestId, userId);
+        AddIdentity(request, userId);
         if (unlockProof is not null)
         {
             request.Headers.Add("X-Unlock-Proof", unlockProof);
@@ -310,20 +316,20 @@ public abstract class ShareItApiTestBase
     /// </summary>
     protected async Task<ContentPackageOwnerResponse> CreateShortCodePackageAsync(
         Guid? packageId = null,
-        Guid? guestId = null,
         Guid? userId = null,
         string? verifier = null)
     {
         var proof = verifier ?? Verifier();
         var response = await SendCreatePackageAsync(
             PackageRequest(packageId, useShortCode: true, unlockVerifier: proof),
-            guestId,
             userId,
             proof);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
-        return await ReadJsonAsync<ContentPackageOwnerResponse>(response);
+        var owner = await ReadJsonAsync<ContentPackageOwnerResponse>(response);
+        RememberUploadToken(owner);
+        return owner;
     }
 
     /// <summary>
@@ -350,12 +356,11 @@ public abstract class ShareItApiTestBase
     /// </summary>
     protected async Task<ContentPackageDetailsResponse> GetPackageDetailsAsync(
         Guid packageId,
-        Guid? guestId = null,
         Guid? userId = null,
         string? unlockProof = null,
         string? accessSession = null)
     {
-        var response = await GetPackageAsync(packageId, guestId, userId, unlockProof, accessSession);
+        var response = await GetPackageAsync(packageId, userId, unlockProof, accessSession);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
@@ -366,7 +371,6 @@ public abstract class ShareItApiTestBase
     /// Sends GET /packages with an optional page size and cursor.
     /// </summary>
     protected async Task<HttpResponseMessage> ListPackagesAsync(
-        Guid? guestId = null,
         Guid? userId = null,
         int? take = null,
         string? cursor = null)
@@ -384,7 +388,7 @@ public abstract class ShareItApiTestBase
 
         var url = "/api/v1/content/packages" + (query.Count > 0 ? "?" + string.Join("&", query) : string.Empty);
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        AddIdentity(request, guestId, userId);
+        AddIdentity(request, userId);
         return await Client.SendAsync(request);
     }
 
@@ -397,7 +401,6 @@ public abstract class ShareItApiTestBase
     protected async Task<HttpResponseMessage> SendDownloadAsync(
         string downloadUrl,
         string? accessSession,
-        Guid? guestId,
         Guid? userId = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
@@ -405,21 +408,14 @@ public abstract class ShareItApiTestBase
         {
             request.Headers.Add("X-Access-Session", accessSession);
         }
-        if (guestId.HasValue)
-        {
-            request.Headers.Add("X-Guest-ID", guestId.Value.ToString());
-        }
-        if (userId.HasValue)
-        {
-            request.Headers.Add(TestAuthHandler.UserIdHeader, userId.Value.ToString());
-        }
+        AddIdentity(request, userId);
         return await Client.SendAsync(request);
     }
 
-    protected async Task<HttpResponseMessage> DeletePackageAsync(Guid packageId, Guid? guestId = null, Guid? userId = null)
+    protected async Task<HttpResponseMessage> DeletePackageAsync(Guid packageId, Guid? userId = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/content/packages/{packageId}");
-        AddIdentity(request, guestId, userId);
+        AddIdentity(request, userId);
         return await Client.SendAsync(request);
     }
 
@@ -468,17 +464,40 @@ public abstract class ShareItApiTestBase
         return (packageCount, contentCount);
     }
 
-    protected static void AddIdentity(HttpRequestMessage request, Guid? guestId, Guid? userId)
+    protected static void AddIdentity(HttpRequestMessage request, Guid? userId)
     {
         if (userId.HasValue)
         {
             request.Headers.Add(TestAuthHandler.UserIdHeader, userId.Value.ToString());
         }
-        if (guestId.HasValue)
+    }
+
+    private void RememberUploadToken(ContentPackageOwnerResponse owner)
+    {
+        if (!string.IsNullOrEmpty(owner.UploadToken))
         {
-            request.Headers.Add("X-Guest-ID", guestId.Value.ToString());
+            _uploadTokens[owner.Id] = owner.UploadToken;
         }
     }
+
+    protected string? UploadTokenFor(Guid packageId)
+        => _uploadTokens.GetValueOrDefault(packageId);
+
+    /// <summary>
+    /// Adds the upload token for a package to a hand-built request.
+    /// </summary>
+    protected void AddUploadToken(HttpRequestMessage request, Guid packageId)
+        => request.Headers.Add("X-Upload-Token", ResolveUploadToken(packageId, explicitToken: null));
+
+    /// <summary>
+    /// Placeholder presented when a test uploads without a token it created.
+    /// It must be well-formed so the request reaches the owner check instead
+    /// of failing the shape check first; it never matches any stored hash.
+    /// </summary>
+    private static readonly string UnregisteredUploadToken = OpaqueToken.Create();
+
+    private string ResolveUploadToken(Guid packageId, string? explicitToken)
+        => explicitToken ?? UploadTokenFor(packageId) ?? UnregisteredUploadToken;
 
     protected static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
     {

@@ -49,19 +49,16 @@ public sealed class GlobalExceptionHandlingTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WithFailingBlobRead_ReturnsProblemDetails500()
     {
-        var guestId = Guid.NewGuid();
-
-        var packageId = await CreatePackageAsync(guestId: guestId);
-        var upload = await SendUploadItemAsync(packageId, "text", "some text"u8.ToArray(), guestId: guestId);
+        var packageId = await CreatePackageAsync();
+        var upload = await SendUploadItemAsync(packageId, "text", "some text"u8.ToArray());
         Assert.AreEqual(HttpStatusCode.OK, upload.StatusCode);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
         var item = details.Items.Single();
 
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, item.Id),
-            details.AccessSession.Token,
-            guestId);
+            details.AccessSession.Token);
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.AreEqual(HttpStatusCode.InternalServerError, response.StatusCode, body);

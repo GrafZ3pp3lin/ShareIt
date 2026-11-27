@@ -20,10 +20,9 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_WithEmptyBody_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", [], guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", []);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -31,21 +30,21 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task UploadContent_WithoutIdentity_Returns400()
+    public async Task UploadContent_WithoutUploadToken_Returns400()
     {
-        var packageId = await CreatePackageAsync(guestId: Guid.NewGuid());
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
+        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, uploadToken: " ");
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("User ID required", problem.Title);
+        Assert.AreEqual("Missing upload token", problem.Title);
     }
 
     [TestMethod]
     public async Task UploadContent_ForUnknownPackage_Returns404()
     {
-        var response = await SendUploadItemAsync(Guid.NewGuid(), "file", SmallItemBytes, guestId: Guid.NewGuid());
+        var response = await SendUploadItemAsync(Guid.NewGuid(), "file", SmallItemBytes);
 
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -55,12 +54,11 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_ToExpiredPackage_Returns410()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
+        var packageId = await CreatePackageAsync(timeToLiveHours: 1);
 
         TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
-        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
 
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -71,12 +69,14 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_RetryAfterExpiry_Returns410()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
+        var created = await CreatePackageOwnerAsync(timeToLiveHours: 1);
 
         TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
-        var response = await SendCreatePackageAsync(packageId, guestId: guestId, timeToLiveHours: 1);
+        var response = await SendCreatePackageAsync(
+            packageId: created.Id,
+            timeToLiveHours: 1,
+            uploadToken: created.UploadToken);
 
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -86,10 +86,9 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_WithInvalidKind_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "video", SmallItemBytes, guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "video", SmallItemBytes);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -99,10 +98,9 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_WithInvalidMeta_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, meta: "not base64url!!", guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, meta: "not base64url!!");
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -112,11 +110,10 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_WithOversizedMeta_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
         var oversizedMeta = Base64Url.EncodeToString(new byte[4097]);
 
-        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, meta: oversizedMeta, guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, meta: oversizedMeta);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -126,13 +123,12 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_StoresItemInPostgresAndRustFsWithOpaqueMetadata()
     {
-        var guestId = Guid.NewGuid();
         var contentId = Guid.NewGuid();
         var meta = MetaFor("secret-name.txt", "application/pdf");
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         var response = await SendUploadItemAsync(
-            packageId, "file", SmallItemBytes, meta, contentId, guestId);
+            packageId, "file", SmallItemBytes, meta, contentId);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
@@ -157,20 +153,18 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         Assert.AreEqual("application/octet-stream", metadata.ContentType);
         Assert.AreEqual(contentId.ToString(), metadata.Metadata["x-amz-meta-original-filename"]);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
         Assert.AreEqual(meta, details.Items.Single().Meta);
     }
 
     [TestMethod]
     public async Task GetPackage_MetaIsReturnedVerbatimAndNeverParsed()
     {
-        var guestId = Guid.NewGuid();
-
         // Deliberately not JSON: the server must not inspect the blob.
         var meta = Base64Url.EncodeToString("this is not json"u8.ToArray());
-        var (packageId, _) = await CreatePackageWithItemAsync(meta: meta, guestId: guestId);
+        var (packageId, _) = await CreatePackageWithItemAsync(meta: meta);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
 
         Assert.AreEqual(meta, details.Items.Single().Meta);
     }
@@ -178,10 +172,9 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WithBlankSession_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var response = await SendDownloadAsync(DownloadUrl(packageId, contentId), accessSession: " ", guestId);
+        var response = await SendDownloadAsync(DownloadUrl(packageId, contentId), accessSession: " ");
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -189,37 +182,50 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task DownloadContent_WithoutIdentity_Returns400()
+    public async Task DownloadContent_WithoutAuthentication_IsAllowedForGuestSessions()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
+        var details = await GetPackageDetailsAsync(packageId);
 
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, contentId),
-            details.AccessSession.Token,
-            guestId: null);
+            details.AccessSession.Token);
 
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.AreSequenceEqual(LargeItemBytes, await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [TestMethod]
+    public async Task DownloadContent_WithGuestCallerForAnAuthenticatedSession_Returns401()
+    {
+        var ownerId = Guid.NewGuid();
+        var (packageId, contentId) = await CreatePackageWithItemAsync(
+            bytes: LargeItemBytes, userId: ownerId, maxAccessCount: 10, timeToLiveHours: 24);
+        var details = await GetPackageDetailsAsync(packageId, userId: ownerId);
+
+        // The session is bound to the authenticated owner; an unauthenticated
+        // (guest) caller must not be able to use it.
+        var response = await SendDownloadAsync(
+            DownloadUrl(packageId, contentId),
+            details.AccessSession.Token);
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("User ID required", problem.Title);
+        Assert.AreEqual("Invalid access session", problem.Title);
     }
 
     [TestMethod]
     public async Task DownloadContent_WithSessionForDifferentPackage_Returns401()
     {
-        var guestId = Guid.NewGuid();
-        var (firstPackageId, _) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
-        var (secondPackageId, _) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (firstPackageId, _) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
+        var (secondPackageId, _) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var firstDetails = await GetPackageDetailsAsync(firstPackageId, guestId: guestId);
-        var secondDetails = await GetPackageDetailsAsync(secondPackageId, guestId: guestId);
+        var firstDetails = await GetPackageDetailsAsync(firstPackageId);
+        var secondDetails = await GetPackageDetailsAsync(secondPackageId);
 
         var response = await SendDownloadAsync(
             DownloadUrl(secondPackageId, secondDetails.Items.Single().Id),
-            firstDetails.AccessSession.Token,
-            guestId);
-
+            firstDetails.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Invalid access session", problem.Title);
@@ -228,20 +234,17 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WithContentFromDifferentPackage_Returns404()
     {
-        var guestId = Guid.NewGuid();
-        var (_, firstContentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
-        var secondPackageId = await CreatePackageAsync(guestId: guestId);
+        var (_, firstContentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
+        var secondPackageId = await CreatePackageAsync();
         var secondUpload = await SendUploadItemAsync(
-            secondPackageId, "file", LargeItemBytes, guestId: guestId);
+            secondPackageId, "file", LargeItemBytes);
         Assert.AreEqual(HttpStatusCode.OK, secondUpload.StatusCode);
 
-        var secondDetails = await GetPackageDetailsAsync(secondPackageId, guestId: guestId);
+        var secondDetails = await GetPackageDetailsAsync(secondPackageId);
 
         var response = await SendDownloadAsync(
             DownloadUrl(secondPackageId, firstContentId),
-            secondDetails.AccessSession.Token,
-            guestId);
-
+            secondDetails.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Content not in package", problem.Title);
@@ -254,9 +257,8 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WhenBlobIsMissing_Returns404()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
+        var details = await GetPackageDetailsAsync(packageId);
 
         var content = await Services.GetRequiredService<IContentStorageHandler>()
             .GetContentAsync(contentId);
@@ -270,9 +272,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
 
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, contentId),
-            details.AccessSession.Token,
-            guestId);
-
+            details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Content not found", problem.Title);
@@ -285,17 +285,14 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WhenSessionHasExpired_Returns401()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
+        var details = await GetPackageDetailsAsync(packageId);
 
         TimeProvider.SetUtcNow(details.AccessSession.ExpiresAt.AddSeconds(1));
 
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, contentId),
-            details.AccessSession.Token,
-            guestId);
-
+            details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Invalid access session", problem.Title);
@@ -315,7 +312,6 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, contentId),
             details.AccessSession.Token,
-            guestId: null,
             userId: ownerId);
 
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
@@ -327,9 +323,8 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WhenPackageHasExpired_Returns410()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
+        var details = await GetPackageDetailsAsync(packageId);
 
         // Expire the package while keeping its session valid: expiry is a hard
         // boundary even for an already-authorized download.
@@ -343,9 +338,7 @@ public sealed class ContentEndpointValidationTests : ShareItApiTestBase
 
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, contentId),
-            details.AccessSession.Token,
-            guestId);
-
+            details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("Package expired", problem.Title);

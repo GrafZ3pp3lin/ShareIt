@@ -1,9 +1,8 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-const { getAuthTokenMock, getDpopAuthHeadersMock, getGuestIdMock } = vi.hoisted(() => ({
+const { getAuthTokenMock, getDpopAuthHeadersMock } = vi.hoisted(() => ({
   getAuthTokenMock: vi.fn<() => Promise<string | undefined>>(),
-  getDpopAuthHeadersMock: vi.fn<() => Promise<Record<string, string>>>(),
-  getGuestIdMock: vi.fn<() => string | undefined>()
+  getDpopAuthHeadersMock: vi.fn<() => Promise<Record<string, string>>>()
 }));
 
 vi.mock('../config/runtime-config.ts', () => ({
@@ -13,10 +12,6 @@ vi.mock('../config/runtime-config.ts', () => ({
 vi.mock('../auth/oidc.ts', () => ({
   getAuthToken: getAuthTokenMock,
   getDpopAuthHeaders: getDpopAuthHeadersMock
-}));
-
-vi.mock('./guest.ts', () => ({
-  getGuestId: getGuestIdMock
 }));
 
 import { absoluteApiUrl, customFetch, getAuthHeaders } from './fetch-client.ts';
@@ -43,7 +38,6 @@ describe('getAuthHeaders', () => {
   beforeEach(() => {
     getAuthTokenMock.mockReset();
     getDpopAuthHeadersMock.mockReset();
-    getGuestIdMock.mockReset();
   });
 
   it('prefers DPoP headers when a proof is available', async () => {
@@ -75,20 +69,9 @@ describe('getAuthHeaders', () => {
     expect(getDpopAuthHeadersMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to the persisted guest id when no token exists', async () => {
+  it('returns no identity headers when there is no token', async () => {
     getDpopAuthHeadersMock.mockResolvedValue({});
     getAuthTokenMock.mockResolvedValue(undefined);
-    getGuestIdMock.mockReturnValue('guest-1');
-
-    const headers = await getAuthHeaders('https://api.example.test/api/v1/content', 'GET');
-
-    expect(headers).toEqual({ 'X-Guest-ID': 'guest-1' });
-  });
-
-  it('returns no identity headers when there is no user and no guest id', async () => {
-    getDpopAuthHeadersMock.mockResolvedValue({});
-    getAuthTokenMock.mockResolvedValue(undefined);
-    getGuestIdMock.mockReturnValue(undefined);
 
     const headers = await getAuthHeaders('https://api.example.test/api/v1/content', 'GET');
 
@@ -100,13 +83,11 @@ describe('customFetch', () => {
   beforeEach(() => {
     getAuthTokenMock.mockReset();
     getDpopAuthHeadersMock.mockReset();
-    getGuestIdMock.mockReset();
     getDpopAuthHeadersMock.mockResolvedValue({});
     getAuthTokenMock.mockResolvedValue(undefined);
-    getGuestIdMock.mockReturnValue('guest-1');
   });
 
-  it('prefixes the runtime API base URL and adds identity headers', async () => {
+  it('prefixes the runtime API base URL and sends no identity headers for a guest', async () => {
     const fetchMock = vi.fn<typeof fetch>(
       async () =>
         new Response(JSON.stringify({ ok: true }), {
@@ -126,7 +107,7 @@ describe('customFetch', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://api.example.test/api/v1/content/package');
     expect(init?.method).toBe('POST');
-    expect(new Headers(init?.headers).get('X-Guest-ID')).toBe('guest-1');
+    expect(new Headers(init?.headers).get('Authorization')).toBeNull();
   });
 
   it('keeps caller-supplied identity headers', async () => {
@@ -139,7 +120,6 @@ describe('customFetch', () => {
 
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Custom token');
     expect(getAuthTokenMock).not.toHaveBeenCalled();
-    expect(getGuestIdMock).not.toHaveBeenCalled();
   });
 
   it('parses text responses', async () => {

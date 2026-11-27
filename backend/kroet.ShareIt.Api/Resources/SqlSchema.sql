@@ -11,7 +11,12 @@ CREATE TABLE IF NOT EXISTS content_packages (
     -- client secret the server never receives.
     short_code VARCHAR(3),
     created_at TIMESTAMPTZ NOT NULL,
+    -- Owner: the verified OIDC `sub` claim, or NULL for a guest package.
     user_id UUID,
+    -- SHA-256 hash (hex) of the upload token returned once at creation. The
+    -- token authorizes adding items to this package; it is bound to
+    -- (package_id, user_id) and never stored in plain text.
+    upload_token_hash TEXT NOT NULL,
     max_access_count INT,
     current_access_count INT NOT NULL DEFAULT 0,
     -- Rejected unlock proofs. Reaching five burns a short-code package.
@@ -84,8 +89,9 @@ CREATE INDEX IF NOT EXISTS idx_blob_deletion_jobs_created_at ON blob_deletion_jo
 CREATE TABLE IF NOT EXISTS access_sessions (
     id UUID PRIMARY KEY,
     package_id UUID NOT NULL,
-    client_id UUID NOT NULL,
-    is_guest BOOLEAN NOT NULL,
+    -- Opener: the verified OIDC `sub` claim, or NULL for a guest. A session is
+    -- only valid for a caller with the same nullable user id.
+    user_id UUID,
     token_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,

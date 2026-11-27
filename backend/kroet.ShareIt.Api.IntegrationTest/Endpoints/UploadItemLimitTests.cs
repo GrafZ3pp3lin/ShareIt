@@ -18,12 +18,11 @@ public sealed class UploadItemLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_AtMaxItems_IsAccepted()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
         Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
-        var second = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var second = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
         var secondBody = await second.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, second.StatusCode, secondBody);
     }
@@ -31,13 +30,12 @@ public sealed class UploadItemLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_AboveMaxItems_Returns400AndStoresNothing()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
-        await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        await SendUploadItemAsync(packageId, "file", SmallItemBytes);
+        await SendUploadItemAsync(packageId, "file", SmallItemBytes);
 
-        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -50,17 +48,16 @@ public sealed class UploadItemLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_RetryOfExistingItem_DoesNotTripTheItemLimit()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
         var contentId = Guid.NewGuid();
 
-        await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
-        await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId);
+        await SendUploadItemAsync(packageId, "file", SmallItemBytes);
 
         // The package is at its cap, but this is an idempotent retry of an
         // existing item, not a new one.
         var retry = await SendUploadItemAsync(
-            packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+            packageId, "file", SmallItemBytes, contentId: contentId);
 
         var body = await retry.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retry.StatusCode, body);

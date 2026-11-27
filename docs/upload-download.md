@@ -25,16 +25,43 @@ create packages and upload items.
 
 ## Identity
 
-Every create, upload, open and download request carries an identity:
+There is no client-generated guest ID. The API resolves a caller to one
+nullable `user_id`:
 
-- an OIDC bearer token (with a DPoP proof when DPoP is required), or
-- `X-Guest-ID`, a client-generated guest UUID stored in `localStorage`.
+- an OIDC bearer token (with a DPoP proof when DPoP is required) supplies the
+  verified `sub` claim;
+- an unauthenticated request is a guest with `user_id = null`.
 
-The API resolves both to one client id. The package owner is the client that created it, and an
-access session is bound to the package id, the client id and whether that client is a guest.
-Downloads must present both the session and the same identity.
+Guests can create packages and upload items, but only authenticated users can
+list or delete packages. A package stores its owner as `content_packages.user_id`
+(null for guests), and an access session stores the opener in
+`access_sessions.user_id` (also null for guests). Re-fetches and downloads must
+present a session bound to the same nullable `user_id`, so a guest can never use
+a signed-in user's session and vice versa.
 
 ## Upload
+
+### Capability tokens
+
+Uploads and reads use two symmetric capability tokens:
+
+| Token | Header | Minted by | Stored by the server | Used for |
+| --- | --- | --- | --- | --- |
+| Upload token | `X-Upload-Token` | `POST /package` | hex SHA-256 in `content_packages.upload_token_hash` | item uploads and idempotent create retries |
+| Access session | `X-Access-Session` | `GET /package/{id}` | hex SHA-256 in `access_sessions.token_hash` | package re-fetches and downloads |
+
+Both are 32 random bytes encoded as exactly 43 base64url characters (`A-Z`,
+`a-z`, `0-9`, `-`, `_`), and are returned only in the response that mints them,
+with `Cache-Control: no-store`. Every stored hash comes from a token of that
+shape, so a value of another length or with padding or standard-alphabet
+characters cannot match one: it is rejected before it is hashed, as a `400`
+when an upload presents a malformed `X-Upload-Token`, and as simply an invalid
+session when a read presents a malformed `X-Access-Session` (a `401` on
+download, a fresh access claim on open). Upload-token checks compare the
+stored hash with the presented token's hash in constant time; access sessions
+are looked up by their hash. The upload token lives only in composer memory
+until the upload finishes; the access session lives in per-tab `sessionStorage`
+for 15 minutes.
 
 ### Browser preparation
 
@@ -59,13 +86,15 @@ POST /api/v1/content/package
 - `UseShortCode` opts the package into access by code (see below).
 - `TimeToLiveHours` is required and must be within the identity's maximum lifetime.
 - `MaxAccessCount` must be positive and within the identity's maximum; guests must set it.
-- Repeating the create call with the same id and the same owner returns the existing package with
-  `200`; a new package returns `201`. A code-mode retry must also use the same `UseShortCode` value
-  and `UnlockVerifier`, otherwise the API returns `409`. Another client using the id gets `409`. An
-  expired package returns `410`.
-- The response is a `ContentPackageOwnerResponse`. In code mode its `ShortCode` is the
-  three-character server locator; for a regular package it is `null`. The open-package response
-  never exposes it.
+- Repeating the create call with the same id, the same owner and the returned `UploadToken` returns
+  the existing package with `200`; a new package returns `201`. Without the token, with a token that
+  does not match, or with a different owner, an existing id returns `409` — the token on create is
+  optional and only consulted when reusing an id, so a malformed one is simply a non-match rather
+  than a `400`. A code-mode retry must also use the same `UseShortCode` value and `UnlockVerifier`,
+  otherwise the API returns `409`. An expired package with a valid token returns `410`.
+- The response is a `ContentPackageOwnerResponse`; its `UploadToken` is the only copy of the token
+  the server will ever return. In code mode its `ShortCode` is the three-character server locator;
+  for a regular package it is `null`. The open-package response never exposes either.
 
 ### Access by code
 
@@ -141,20 +170,23 @@ slice-by-slice into 4 MiB frames first.
 PUT /api/v1/content/package/{packageId}/content/{contentId}
 Content-Type: application/octet-stream
 Content-Length: <stored byte length>
+X-Upload-Token: <token returned by POST /package>
 X-Content-Kind: text | file
 X-Content-Meta: <base64url metadata blob>
 ```
 
 The server validates in this order, before reading the body:
 
-1. identity and content id;
-2. `Content-Type: application/octet-stream`;
-3. `X-Content-Kind` (`text` or `file`) and base64url `X-Content-Meta` (at most 4 KiB decoded);
-4. a required, positive `Content-Length` within the per-identity file limit;
-5. package existence, ownership and expiry (`404`, `403`, `410`);
-6. an existing item with the same id: same package, kind, size and metadata returns `200`
+1. a non-empty `X-Upload-Token` of the shape described above (`400` when it is missing or malformed);
+2. content id;
+3. `Content-Type: application/octet-stream`;
+4. `X-Content-Kind` (`text` or `file`) and base64url `X-Content-Meta` (at most 4 KiB decoded);
+5. a required, positive `Content-Length` within the per-identity file limit;
+6. package existence (`404`), then the nullable `user_id` and upload token (a mismatch is `403`) and
+   expiry (`410`);
+7. an existing item with the same id: same package, kind, size and metadata returns `200`
    idempotently, anything else is `409`;
-7. the package item count against `MaxItemsPerPackage`.
+8. the package item count against `MaxItemsPerPackage`.
 
 The payload then streams through `DeclaredLengthStream`, which counts the bytes actually read,
 stops forwarding at the first byte above the declared length, and rejects a body that ends early.
@@ -173,11 +205,11 @@ with the item id, package id, kind, stored size, opaque `meta` and blob key. If 
 the newly uploaded blob is deleted.
 
 Sealing is deterministic and ids are stable, so retrying the same item with the same kind, size and
-metadata is idempotent. The composer keeps the package and item ids in its partial state, and the
-result screen is shown only after every item succeeds. For a regular package it displays the
-canonical `/s/{packageId}` link and, when protected, the `#s=` link together with the passphrase.
-A code-mode package shows only the six-character code (`ABC-234`), never a link or a separate
-passphrase.
+metadata is idempotent. The composer keeps the package id, item ids and upload token in its partial
+state; the token is dropped from memory when the upload completes. The result screen is shown only
+after every item succeeds. For a regular package it displays the canonical `/s/{packageId}` link
+and, when protected, the `#s=` link together with the passphrase. A code-mode package shows only the
+six-character code (`ABC-234`), never a link or a separate passphrase.
 
 ```mermaid
 sequenceDiagram
@@ -191,12 +223,12 @@ sequenceDiagram
     API-->>B: identity limits
     B->>B: create package id and item ids<br/>derive key and verifier when protected
     B->>API: POST /package<br/>UseShortCode + X-Unlock-Proof in code mode
-    API->>DB: insert content_packages (with the 3-char locator in code mode)
-    API-->>B: package (ShortCode = server locator in code mode)
+    API->>DB: insert content_packages (upload token hash, 3-char locator in code mode)
+    API-->>B: package (UploadToken, ShortCode = server locator in code mode)
     loop one request per item
         B->>B: seal content and metadata, or use raw bytes
-        B->>API: PUT /package/{id}/content/{itemId}<br/>octet-stream, kind, meta, Content-Length
-        API->>API: validate headers, length, owner, expiry, retry match
+        B->>API: PUT /package/{id}/content/{itemId}<br/>X-Upload-Token, octet-stream, kind, meta, Content-Length
+        API->>API: validate token/owner, headers, length, expiry, retry match
         API->>S3: stream object (single PUT or multipart)
         API->>DB: insert contents row
         API-->>B: updated package
@@ -257,7 +289,8 @@ The API processes the open in this order:
    code-mode package each miss increments `failed_unlock_attempts`; the fifth miss sets the
    package's expiry to now, so it resolves and opens as gone from then on.
 4. Load item metadata. An empty package returns `410` without claiming an access.
-5. Validate `X-Access-Session` when present. A valid session skips the claim and is returned again.
+5. Validate `X-Access-Session` when present. A valid session for the same nullable `user_id` skips
+   the claim and is returned again; a session bound to a different identity is treated as invalid.
 6. If no valid session exists and the access limit is reached, return `410`.
 7. Build the item list in creation order using only metadata: `Id`, `Kind`, `Size` and `Meta`.
 8. Claim one access and insert the access session in the same transaction. Concurrent claims
@@ -307,12 +340,13 @@ X-Access-Session: <opaque token>
 ```
 
 The API requires `X-Access-Session` (missing session `400`) and validates it against the package
-and caller. An invalid or expired session returns `401`, unless the package itself is missing
-(`404`, problem type `urn:shareit:problem:package-gone`) or expired (`410`). The API then checks
-that the item belongs to the package and that the package has not expired. It opens the stored
-blob and streams it with `Content-Type: application/octet-stream`, the stored byte length as
-`Content-Length` and `Cache-Control: no-store`. The response is copied in 64 KiB chunks and stops
-when the client disconnects. A missing blob returns `404`.
+and the caller's nullable `user_id` (a mismatch is `401`). An invalid or expired session returns
+`401`, unless the package itself is missing (`404`, problem type
+`urn:shareit:problem:package-gone`) or expired (`410`). The API then checks that the item belongs to
+the package and that the package has not expired. It opens the stored blob and streams it with
+`Content-Type: application/octet-stream`, the stored byte length as `Content-Length` and
+`Cache-Control: no-store`. The response is copied in 64 KiB chunks and stops when the client
+disconnects. A missing blob returns `404`.
 
 The client treats the bytes differently by kind:
 
@@ -364,9 +398,9 @@ request returns `429` with `Retry-After`.
 
 | Status | Meaning in the transfer flow |
 | --- | --- |
-| `400` | Missing identity, malformed metadata, missing/empty `Content-Length`, or a body that ends early |
+| `400` | Missing upload token/access session, malformed metadata, missing/empty `Content-Length`, or a body that ends early |
 | `401` | Missing/wrong unlock proof, or an invalid/expired access session |
-| `403` | The caller is not the package owner |
+| `403` | The caller's `user_id` or upload token does not match the package |
 | `404` | Unknown package/item, or a package-gone problem on download |
 | `409` | A package or item id is already in use with different content |
 | `410` | Package expired, exhausted, or empty |
@@ -378,9 +412,9 @@ request returns `429` with `Retry-After`.
 
 | Data | Location |
 | --- | --- |
-| Package metadata, verifier, expiry and counters | `content_packages` |
+| Package metadata, verifier, expiry, counters and upload-token hash | `content_packages` |
 | Item kind, size, opaque `meta` and blob key | `contents` |
-| Access sessions (token hash, client binding, expiry) | `access_sessions` |
+| Access sessions (token hash, nullable user binding, expiry) | `access_sessions` |
 | Blob deletion queue | `blob_deletion_jobs` |
 | Payload bytes | S3 object under a random UUID key |
 
@@ -412,5 +446,6 @@ timestamps, sizes, counters, expiry and protection state.
 | `backend/kroet.ShareIt.Api/Services/Storage/StorageHandler.cs` | Blob/metadata coordination and compensation |
 | `backend/kroet.ShareIt.Api/Storage/S3/S3BlobStorageHandler.cs` | Bounded single-PUT and multipart storage |
 | `backend/kroet.ShareIt.Api/Storage/AccessSessionService.cs` | Session token generation, hashing and validation |
+| `backend/kroet.ShareIt.Api/Storage/OpaqueToken.cs` | Shared token creation, SHA-256 hashing and constant-time comparison |
 | `backend/kroet.ShareIt.Api/Storage/Postgres/SqlContentStorageHandler.cs` | Package/item/session persistence and cleanup queries |
 | `backend/kroet.ShareIt.Api/Services/Cleanup/CleanupService.cs` | Expired sessions/packages and queued blob deletion |

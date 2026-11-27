@@ -393,8 +393,7 @@ public class InMemoryContentStorageHandlerTests
         {
             Id = Guid.NewGuid(),
             PackageId = packageId,
-            ClientId = Guid.NewGuid(),
-            IsGuest = true,
+            UserId = null,
             TokenHash = Guid.NewGuid().ToString("N"),
             CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture),
             ExpiresAt = (createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture)).AddMinutes(15)
@@ -415,6 +414,7 @@ public class InMemoryContentStorageHandlerTests
             ShortCode = shortCode ?? new ShortCodeGenerator().Next(),
             CreatedAt = createdAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture),
             UserId = userId ?? Guid.NewGuid(),
+            UploadTokenHash = "upload-token-hash",
             UnlockVerifier = unlockVerifier,
             MaxAccessCount = maxAccessCount,
             CurrentAccessCount = currentAccessCount,

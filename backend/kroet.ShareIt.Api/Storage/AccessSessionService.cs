@@ -1,6 +1,3 @@
-using System.Buffers.Text;
-using System.Security.Cryptography;
-using System.Text;
 using kroet.ShareIt.Api.Configuration;
 using kroet.ShareIt.Api.Models;
 using Microsoft.Extensions.Options;
@@ -13,8 +10,6 @@ namespace kroet.ShareIt.Api.Storage;
 /// </summary>
 public sealed class AccessSessionService : IAccessSessionService
 {
-    private const int TokenLengthBytes = 32;
-
     private readonly IContentStorageHandler _contentStorageHandler;
     private readonly DownloadSettings _settings;
     private readonly TimeProvider _timeProvider;
@@ -32,21 +27,19 @@ public sealed class AccessSessionService : IAccessSessionService
     /// <inheritdoc />
     public async Task<AccessSessionCreationResult> CreateAsync(
         Guid packageId,
-        Guid clientId,
-        bool isGuest,
+        Guid? userId,
         CancellationToken cancellationToken = default)
     {
         var now = _timeProvider.GetUtcNow();
-        var token = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(TokenLengthBytes));
+        var token = OpaqueToken.Create();
         var expiresAt = now.AddMinutes(_settings.AccessSessionLifetimeMinutes);
 
         var session = new AccessSession
         {
             Id = Guid.NewGuid(),
             PackageId = packageId,
-            ClientId = clientId,
-            IsGuest = isGuest,
-            TokenHash = HashToken(token),
+            UserId = userId,
+            TokenHash = OpaqueToken.Hash(token),
             CreatedAt = now,
             ExpiresAt = expiresAt
         };
@@ -68,23 +61,21 @@ public sealed class AccessSessionService : IAccessSessionService
     public async Task<AccessSessionTicket?> ValidateAsync(
         string token,
         Guid packageId,
-        Guid clientId,
-        bool isGuest,
+        Guid? userId,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(token))
+        if (!OpaqueToken.IsWellFormed(token))
         {
             return null;
         }
 
         var session = await _contentStorageHandler.GetAccessSessionByTokenHashAsync(
-            HashToken(token),
+            OpaqueToken.Hash(token),
             cancellationToken);
 
         if (session is null ||
             session.PackageId != packageId ||
-            session.ClientId != clientId ||
-            session.IsGuest != isGuest ||
+            session.UserId != userId ||
             session.ExpiresAt <= _timeProvider.GetUtcNow())
         {
             return null;
@@ -96,11 +87,4 @@ public sealed class AccessSessionService : IAccessSessionService
     /// <inheritdoc />
     public Task<long> CleanupExpiredAsync(CancellationToken cancellationToken = default)
         => _contentStorageHandler.DeleteExpiredAccessSessionsAsync(_timeProvider.GetUtcNow(), cancellationToken);
-
-    /// <summary>
-    /// Hashes the token before lookup so a database read never exposes a
-    /// usable session token.
-    /// </summary>
-    private static string HashToken(string token)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 }

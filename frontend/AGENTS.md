@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-ShareIt frontend: a SolidJS SPA for uploading and sharing content packages (files/text), with optional OIDC login (guests get an auto-generated ID) and client-side encryption by default of pasted text and files (one generated passphrase per package, which can be switched off).
+ShareIt frontend: a SolidJS SPA for uploading and sharing content packages (files/text), with optional OIDC login (unauthenticated visitors are guests) and client-side encryption by default of pasted text and files (one generated passphrase per package, which can be switched off).
 
 ## Commands
 
@@ -62,8 +62,8 @@ Features consume cross-cutting concerns from `src/shared/*` (`api`, `crypto`, `c
 
 The app never calls generated SDK functions directly except through `src/shared/api/`:
 
-- `fetch-client.ts` — `customFetch()` is the Orval mutator. It adds the runtime API base URL and identity headers: DPoP + bearer for an OIDC user, otherwise the persisted guest ID (`X-Guest-ID`, `localStorage` key `shareit-guest-id`). The unlock proof is attached per call: by `createPackage` only in code mode and by `getPackageDetails`, never globally.
-- `content.ts` — `ApiResult` wrappers around the generated calls: `createPackage`, `uploadItem` (raw binary PUT via XHR with real progress + `AbortSignal` cancellation; metadata rides in `X-Content-Kind`/`X-Content-Meta` headers), `getPackageDetails(id, unlockProof)`, `downloadContent` (buffered `Blob`), `downloadContentResponse` (raw `Response` for streaming saves), `listPackages`, `deletePackage`, `getUploadLimits` and `resolveShortCode`. `createPackage(request, unlockProof)` attaches `X-Unlock-Proof` only in code mode. It also narrows generated `number | string` int64 fields.
+- `fetch-client.ts` — `customFetch()` is the Orval mutator. It adds the runtime API base URL and identity headers: DPoP + bearer for an OIDC user, and nothing for a guest (guests have no stored id). The unlock proof and upload token are attached per call: by `createPackage`/`uploadItem` and `getPackageDetails`, never globally.
+- `content.ts` — `ApiResult` wrappers around the generated calls: `createPackage(request, unlockProof?)`, `uploadItem(packageId, item, uploadToken, onProgress?, signal?)` (raw binary PUT via XHR with real progress + `AbortSignal` cancellation; metadata rides in `X-Content-Kind`/`X-Content-Meta` headers and the upload scope in `X-Upload-Token`), `getPackageDetails(id, unlockProof, accessSession)`, `downloadContent` (buffered `Blob`), `downloadContentResponse` (raw `Response` for streaming saves), `listPackages`, `deletePackage`, `getUploadLimits` and `resolveShortCode`. `createPackage` attaches `X-Unlock-Proof` only in code mode; the upload token only exists after a create has succeeded, so it is never sent on create. It also narrows generated `number | string` int64 fields.
 - `error-message.ts` — `getErrorMessage()` normalizes error shapes (string, `Error`, RFC7807 `ProblemDetails`, generic `{message}`) into a display string.
 
 ### Composer flow
@@ -72,11 +72,11 @@ The app never calls generated SDK functions directly except through `src/shared/
 
 1. Generate the package id and one item id per text/file once per attempt.
 2. The composer starts in `generate` mode. When a passphrase is set (the default), derive the package key from the id (`keys.ts`) and compute the unlock verifier.
-3. `POST /package` with `Id`, `UnlockVerifier` (null when password-off) and, in code mode, `UseShortCode: true` plus the verifier in `X-Unlock-Proof`. The server returns the three-character locator and enforces single use + a 10-minute TTL.
-4. Per item: frame content + `meta` when protected, then `PUT /package/{id}/content/{contentId}` — one raw `application/octet-stream` body per request with `X-Content-Kind`/`X-Content-Meta` headers, with progress/cancel and stable ids for retries. The API validates the headers and `Content-Length` before it reads the payload, and the browser streams the file from disk (unencrypted items are never read into JS memory). Files are encrypted slice-by-slice into 4 MiB frames, never as one plaintext buffer; sealing is deterministic, so retries are byte-for-byte idempotent.
-5. The result shows the canonical `/s/{packageId}` link and, when protected, the `#s=` combined link plus the passphrase (shown once). Code mode instead shows only the combined six-character code (`ABC-234`) and never a link or separate passphrase: the server never learns the three-character client secret. The creating tab keeps the full code in `sessionStorage` until it expires so the owner links list can offer “copy code”; other tabs or devices only see `HasShortCode`.
+3. `POST /package` with `Id`, `UnlockVerifier` (null when password-off) and, in code mode, `UseShortCode: true` plus the verifier in `X-Unlock-Proof`. The server returns the three-character locator plus a one-time `UploadToken` (stored as a hash server-side and bound to the package and nullable `user_id`). The composer keeps the token only in its in-memory partial state. The server enforces single use + a 10-minute TTL for code mode.
+4. Per item: frame content + `meta` when protected, then `PUT /package/{id}/content/{contentId}` — one raw `application/octet-stream` body per request with `X-Upload-Token`, `X-Content-Kind`/`X-Content-Meta` headers, with progress/cancel and stable ids for retries. The API validates the token, headers and `Content-Length` before it reads the payload, and the browser streams the file from disk (unencrypted items are never read into JS memory). Files are encrypted slice-by-slice into 4 MiB frames, never as one plaintext buffer; sealing is deterministic, so retries are byte-for-byte idempotent.
+5. The result shows the canonical `/s/{packageId}` link and, when protected, the `#s=` combined link plus the passphrase (shown once). Code mode instead shows only the combined six-character code (`ABC-234`) and never a link or separate passphrase: the server never learns the three-character client secret. The creating tab keeps the full code in `sessionStorage` until it expires so the owner links list can offer “copy code”; other tabs or devices only see `HasShortCode`. The upload token is dropped when the upload finishes.
 
-Per-file size limits come from `GET /package/limits` (anonymous vs authenticated), applied when files are added **and re-checked at submit**, then enforced server-side while streaming. A duplicate create with the owner's id is idempotent; reusing an item id with a different kind/size/meta is a `409`.
+Per-file size limits come from `GET /package/limits` (anonymous vs authenticated), applied when files are added **and re-checked at submit**, then enforced server-side while streaming. The composer never retries the create call: a failed create drops the partial state and the next attempt generates a fresh package id. The API only answers a repeated create with the existing package when the caller still presents its original `X-Upload-Token`; otherwise it is a `409`. Reusing an item id with a different kind/size/meta is a `409`.
 
 ### Share flow
 

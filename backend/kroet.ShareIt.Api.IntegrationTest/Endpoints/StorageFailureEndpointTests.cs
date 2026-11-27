@@ -28,14 +28,13 @@ public sealed class StorageFailureEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_WhenStorageFails_LeavesNoContentRowOrObject()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         var storage = Assert.IsInstanceOfType<ControllableStorageHandler>(
             Services.GetRequiredService<IStorageHandler>());
         storage.FailOnStoreCall = 1;
 
-        var response = await SendUploadItemAsync(packageId, "file", [1, 2, 3], guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", [1, 2, 3]);
 
         Assert.AreEqual(HttpStatusCode.InternalServerError, response.StatusCode);
 
@@ -47,8 +46,7 @@ public sealed class StorageFailureEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_AfterAFailedAttempt_CanBeRetriedWithTheSameIds()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
         var contentId = Guid.NewGuid();
 
         var storage = Assert.IsInstanceOfType<ControllableStorageHandler>(
@@ -56,12 +54,12 @@ public sealed class StorageFailureEndpointTests : ShareItApiTestBase
         storage.FailOnStoreCall = 1;
 
         var failed = await SendUploadItemAsync(
-            packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+            packageId, "file", SmallItemBytes, contentId: contentId);
         Assert.AreEqual(HttpStatusCode.InternalServerError, failed.StatusCode);
 
         storage.FailOnStoreCall = null;
         var retried = await SendUploadItemAsync(
-            packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+            packageId, "file", SmallItemBytes, contentId: contentId);
 
         var body = await retried.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retried.StatusCode, body);

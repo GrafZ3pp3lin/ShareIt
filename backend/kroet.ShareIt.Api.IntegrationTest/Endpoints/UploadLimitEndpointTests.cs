@@ -43,10 +43,9 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_FileExceedingGuestLimit_Returns413()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", OversizedFile, guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", OversizedFile);
 
         Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -58,10 +57,9 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     public async Task UploadItem_FileExactlyAtGuestLimit_IsAccepted()
     {
         // The endpoint rejects files strictly larger than the limit.
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", new byte[1024 * 1024], guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", new byte[1024 * 1024]);
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
@@ -72,10 +70,9 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_FileWithinGuestLimit_Returns200()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", new byte[500_000], guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", new byte[500_000]);
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
     }
@@ -83,17 +80,16 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadItem_FileExceedingGuestLimit_StoresNothing()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, _) = await CreatePackageWithItemAsync(guestId: guestId);
+        var (packageId, _) = await CreatePackageWithItemAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", OversizedFile, guestId: guestId);
+        var response = await SendUploadItemAsync(packageId, "file", OversizedFile);
 
         Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         var problem = await ReadProblemAsync(response);
         Assert.AreEqual("File too large", problem.Title);
 
         // The oversized file must not have been persisted.
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
         Assert.HasCount(1, details.Items);
     }
 
@@ -102,15 +98,13 @@ public sealed class UploadLimitEndpointTests : ShareItApiTestBase
     {
         // A client can lie about the declared size; the streaming limit must
         // stop the payload before it reaches storage.
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         var response = await SendUploadItemAsync(
             packageId,
             "file",
             OversizedFile,
-            declaredSize: 1024,
-            guestId: guestId);
+            declaredSize: 1024);
 
         Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         var problem = await ReadProblemAsync(response);

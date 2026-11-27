@@ -62,25 +62,25 @@ export function PrivacyPage() {
 
       <Section title="Packages, guest use, and sign-in">
         <p class={paragraphClass}>
-          Without an account, your browser generates a random UUID (
-          <code class="font-mono text-xs">shareit-guest-id</code>) and sends it as the owner or client ID. Signing in is
-          optional and uses our self-hosted Keycloak identity provider (
-          <code class="font-mono text-xs">keycloak.kroet.de</code>) with the{' '}
+          You can create packages without an account. Signing in is optional and uses our self-hosted Keycloak identity
+          provider (<code class="font-mono text-xs">keycloak.kroet.de</code>) with the{' '}
           <code class="font-mono text-xs">openid</code> scope; Keycloak processes your login credentials and account
           data, while ShareIt stores only your account UUID (<code class="font-mono text-xs">sub</code> claim) to list
-          and manage your links.
+          and manage your links. Guest packages are not linked to any stored identity.
         </p>
         <p class={paragraphClass}>
-          When you create a package, the server stores the package and item IDs, owner ID, item kind (text or file) and
-          byte size, timestamps, expiry, access limit and count, the uploaded content and metadata blobs (encrypted in
-          your browser by default, or plaintext if you turn encryption off), and—for protected packages—an unlock
-          verifier (plus a three-character server locator in code mode). Opening a package creates a 15-minute access
-          session storing a SHA-256 token hash and the opener’s guest or user ID.
+          When you create a package, the server stores the package and item IDs, the owner’s account UUID (only for
+          signed-in users), item kind (text or file) and byte size, timestamps, expiry, access limit and count, the
+          uploaded content and metadata blobs (encrypted in your browser by default, or plaintext if you turn encryption
+          off), and—for protected packages—an unlock verifier (plus a three-character server locator in code mode).
+          Creating a package returns a one-time upload token that authorizes adding items to that package; the server
+          stores only its SHA-256 hash. Opening a package creates a 15-minute access session storing a SHA-256 token
+          hash and, for signed-in users, the opener’s account UUID.
         </p>
         <p class={paragraphClass}>
           We process this data to provide the sharing and account features you request (Art. 6(1)(b) GDPR) and to
-          prevent unauthorized access and abuse (Art. 6(1)(f) GDPR). Technical connection data and a guest ID or login
-          are technically required to create or open packages (Art. 13(2)(e) GDPR).
+          prevent unauthorized access and abuse (Art. 6(1)(f) GDPR). Technical connection data and, while you upload,
+          the in-memory upload token are technically required to create packages (Art. 13(2)(e) GDPR).
         </p>
         <p class={paragraphClass}>
           Packages and their stored blobs are automatically deleted by a background cleanup job (running every 5
@@ -98,8 +98,7 @@ export function PrivacyPage() {
         <ul class={listClass}>
           <li>
             <code class="font-mono text-xs">localStorage</code>: theme preference (
-            <code class="font-mono text-xs">shareit.theme</code>), guest UUID (
-            <code class="font-mono text-xs">shareit-guest-id</code>), and OIDC login state.
+            <code class="font-mono text-xs">shareit.theme</code>) and OIDC login state.
           </li>
           <li>
             <code class="font-mono text-xs">sessionStorage</code>: 15-minute package access tokens (
@@ -134,8 +133,7 @@ export function PrivacyPage() {
           <a class={linkClass} href={`mailto:${operator.email}`}>
             {operator.email}
           </a>{' '}
-          (for guest packages, please include the package link or your{' '}
-          <code class="font-mono text-xs">shareit-guest-id</code> so the record can be identified).
+          (for guest packages, please include the package link so the record can be identified).
         </p>
         <p class={`${paragraphClass} font-medium`}>
           Right to object (Art. 21 GDPR): You have the right to object at any time, on grounds relating to your

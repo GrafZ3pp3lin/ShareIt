@@ -15,13 +15,12 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WhenExpired_Returns410()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
-        await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var packageId = await CreatePackageAsync(timeToLiveHours: 1);
+        await SendUploadItemAsync(packageId, "file", SmallItemBytes);
 
         TimeProvider.SetUtcNow(TimeProvider.GetUtcNow().AddHours(2));
 
-        var response = await GetPackageAsync(packageId, guestId);
+        var response = await GetPackageAsync(packageId);
 
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -31,10 +30,9 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WhenPackageHasNoContent_Returns410WithoutChargingAnAccess()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, maxAccessCount: 1);
+        var packageId = await CreatePackageAsync(maxAccessCount: 1);
 
-        var response = await GetPackageAsync(packageId, guestId);
+        var response = await GetPackageAsync(packageId);
 
         Assert.AreEqual(HttpStatusCode.Gone, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -48,11 +46,11 @@ public sealed class PackageLifecycleEndpointTests : ShareItApiTestBase
 
         // After a successful upload the same link must still open and then
         // consume exactly one access.
-        var upload = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var upload = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
         var uploadBody = await upload.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, upload.StatusCode, uploadBody);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
         Assert.AreEqual(1, details.Package.CurrentAccessCount);
     }
 }

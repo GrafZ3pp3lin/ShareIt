@@ -1,15 +1,14 @@
 import { getRuntimeConfig } from '../config/runtime-config.ts';
 import { getAuthToken, getDpopAuthHeaders } from '../auth/oidc.ts';
-import { getGuestId } from './guest.ts';
 
 /**
  * Orval mutator (fetch client). Adds the runtime-configured base URL and the
- * identity headers (OIDC DPoP/bearer token or persisted guest ID), then returns
- * the generated `{ data, status, headers }` response shape.
+ * caller's OIDC DPoP/bearer headers, then returns the generated
+ * `{ data, status, headers }` response shape.
  */
 export const customFetch = async <T>(url: string, options: RequestInit = {}): Promise<T> => {
   const headers = new Headers(options.headers);
-  if (!headers.has('Authorization') && !headers.has('X-Guest-ID')) {
+  if (!headers.has('Authorization')) {
     for (const [name, value] of Object.entries(await getAuthHeaders(absoluteApiUrl(url), options.method ?? 'GET'))) {
       headers.set(name, value);
     }
@@ -74,7 +73,8 @@ export const absoluteApiUrl = (url: string): string => {
  * Returns the identity headers to send with API requests. When a target URL is
  * given, DPoP headers are preferred for authenticated requests (falling back to
  * a plain bearer token when DPoP is disabled or no proof could be generated);
- * otherwise the persisted guest ID is sent, keeping uploads working anonymously.
+ * otherwise only the bearer token is attached. Unauthenticated callers send no
+ * identity headers: guests have no id of their own.
  */
 export const getAuthHeaders = async (url?: string, method: string = 'GET'): Promise<Record<string, string>> => {
   if (url) {
@@ -88,12 +88,6 @@ export const getAuthHeaders = async (url?: string, method: string = 'GET'): Prom
   const authToken = await getAuthToken();
   if (authToken) {
     headers['Authorization'] = `Bearer ${authToken}`;
-    return headers;
-  }
-
-  const guestId = getGuestId();
-  if (guestId) {
-    headers['X-Guest-ID'] = guestId;
   }
   return headers;
 };

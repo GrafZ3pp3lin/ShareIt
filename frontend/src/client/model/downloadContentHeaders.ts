@@ -7,5 +7,4 @@
 
 export type DownloadContentHeaders = {
   'X-Access-Session'?: string;
-  'X-Guest-ID'?: string;
 };

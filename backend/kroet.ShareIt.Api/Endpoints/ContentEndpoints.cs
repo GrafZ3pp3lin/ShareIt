@@ -228,8 +228,9 @@ public static class ContentEndpoints
 
     /// <summary>
     /// Creates a new (empty) content package. The client supplies the id
-    /// because the salt and verifier derive from it; repeating the request
-    /// with the same id and mode is idempotent for its owner. Code-mode retries
+    /// because the salt and verifier derive from it. A new package mints the
+    /// upload token returned in the response; repeating the request with the
+    /// same id, the same owner and that token is idempotent. Code-mode retries
     /// must also match the verifier, and they require the client to prove it
     /// knows the passphrase before the server allocates the three-character
     /// locator.
@@ -237,7 +238,7 @@ public static class ContentEndpoints
     private static async Task<Results<Created<ContentPackageOwnerResponse>, Ok<ContentPackageOwnerResponse>, ProblemHttpResult>>
         CreatePackageAsync(
             [FromBody] CreatePackageRequest request,
-            [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
+            [FromHeader(Name = "X-Upload-Token")] string? uploadToken,
             [FromHeader(Name = "X-Unlock-Proof")] string? unlockProof,
             [FromServices] IContentStorageHandler contentStorageHandler,
             [FromServices] IShortCodeGenerator shortCodeGenerator,
@@ -252,17 +253,8 @@ public static class ContentEndpoints
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.create");
 
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
+        var userId = claimsPrincipal.GetUserId();
+        activity?.SetTag("shareit.identity.type", userId is null ? "guest" : "user");
 
         if (request.Id is not { } packageId || packageId == Guid.Empty)
         {
@@ -309,13 +301,13 @@ public static class ContentEndpoints
         }
         else
         {
-            var lifetimeProblem = ValidateLifetime(userIdentity, settings, request.TimeToLiveHours);
+            var lifetimeProblem = ValidateLifetime(userId, settings, request.TimeToLiveHours);
             if (lifetimeProblem is not null)
             {
                 return lifetimeProblem;
             }
 
-            var accessCountProblem = ValidateMaxAccessCount(userIdentity, settings, request.MaxAccessCount);
+            var accessCountProblem = ValidateMaxAccessCount(userId, settings, request.MaxAccessCount);
             if (accessCountProblem is not null)
             {
                 return accessCountProblem;
@@ -325,12 +317,14 @@ public static class ContentEndpoints
             expiresAt = now.AddHours(request.TimeToLiveHours);
         }
 
-        // Idempotent retry: the same owner repeating the create call gets the
-        // existing package back. Another identity must not probe/hijack the id.
+        // Idempotent retry: the same owner repeating the create call with the
+        // upload token it was given gets the existing package back. Another
+        // identity or a missing/wrong token must not probe or hijack the id.
         var existing = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
         if (existing is not null)
         {
-            if (existing.UserId != userIdentity.Id)
+            if (existing.UserId != userId
+                || !OpaqueToken.Matches(existing.UploadTokenHash, uploadToken))
             {
                 return PackageIdConflictProblem("A package with this id already exists.");
             }
@@ -358,14 +352,19 @@ public static class ContentEndpoints
             }
 
             activity?.SetTag("shareit.package.result", "existing");
-            return TypedResults.Ok(ContentPackageOwnerResponse.FromPackage(existing));
+            // Echo the token so a retried request keeps the same upload scope.
+            httpContext.Response.Headers.CacheControl = "no-store";
+            return TypedResults.Ok(ContentPackageOwnerResponse.FromPackage(existing, uploadToken));
         }
+
+        var mintedUploadToken = OpaqueToken.Create();
 
         var package = new ContentPackage
         {
             Id = packageId,
             CreatedAt = now,
-            UserId = userIdentity.Id,
+            UserId = userId,
+            UploadTokenHash = OpaqueToken.Hash(mintedUploadToken),
             MaxAccessCount = maxAccessCount,
             ExpiresAt = expiresAt,
             UnlockVerifier = request.UnlockVerifier
@@ -422,38 +421,12 @@ public static class ContentEndpoints
         }
         catch (PackageIdConflictException)
         {
-            // Another request won the same-id insert race. Re-read and apply
-            // the same idempotency rules as the pre-check above.
-            var raced = await contentStorageHandler.GetPackageShellAsync(packageId, cancellationToken);
-            if (raced is null || raced.UserId != userIdentity.Id)
-            {
-                return PackageIdConflictProblem("A package with this id already exists.");
-            }
-
-            if (raced.IsExpired(now))
-            {
-                return TypedResults.Problem(new ProblemDetails
-                {
-                    Title = "Package expired",
-                    Detail = "This package has expired and is no longer available",
-                    Status = StatusCodes.Status410Gone
-                });
-            }
-
-            if (!IsIdempotentRetry(raced, request))
-            {
-                return PackageIdConflictProblem(
-                    "This package id was already created with a different access mode or passphrase.");
-            }
-
-            if (request.UseShortCode)
-            {
-                metrics.ShortCodeAllocation("existing");
-                activity?.SetTag("shareit.short_code.result", "existing");
-            }
-
-            activity?.SetTag("shareit.package.result", "existing");
-            return TypedResults.Ok(ContentPackageOwnerResponse.FromPackage(raced));
+            // Another request won the same-id insert race. That request minted
+            // its own upload token, so this caller cannot hold a matching one:
+            // the idempotent retry above can never succeed once the insert has
+            // lost. Returning its conflict is the only reachable outcome, so
+            // there is no second re-read to apply the pre-check rules to.
+            return PackageIdConflictProblem("A package with this id already exists.");
         }
 
         metrics.PackageCreated();
@@ -461,7 +434,10 @@ public static class ContentEndpoints
 
         var packageUrl = linkGenerator.GetUriByName(httpContext, "GetPackage", new { packageId = package.Id })!;
 
-        return TypedResults.Created(packageUrl, ContentPackageOwnerResponse.FromPackage(package));
+        httpContext.Response.Headers.CacheControl = "no-store";
+        return TypedResults.Created(
+            packageUrl,
+            ContentPackageOwnerResponse.FromPackage(package, mintedUploadToken));
     }
 
     /// <summary>
@@ -470,11 +446,12 @@ public static class ContentEndpoints
     /// verbatim; the server never parses the metadata.
     /// </summary>
     /// <remarks>
-    /// The request carries the metadata in the <c>X-Content-Kind</c> and
-    /// <c>X-Content-Meta</c> headers and the payload as a standard
-    /// <c>application/octet-stream</c> body with a <c>Content-Length</c>.
-    /// Metadata and length are validated before the payload is read; the body
-    /// then streams through the blob store's bounded probe/part buffer.
+    /// The request carries the upload scope in <c>X-Upload-Token</c>, the
+    /// metadata in the <c>X-Content-Kind</c> and <c>X-Content-Meta</c> headers
+    /// and the payload as a standard <c>application/octet-stream</c> body with
+    /// a <c>Content-Length</c>. The token, metadata and length are validated
+    /// before the payload is read; the body then streams through the blob
+    /// store's bounded probe/part buffer.
     /// </remarks>
     [SuppressMessage(
         "Reliability",
@@ -487,7 +464,7 @@ public static class ContentEndpoints
             [FromHeader(Name = "X-Content-Kind"), Required] string? kind,
             [FromHeader(Name = "X-Content-Meta"), Required] string? meta,
             [FromHeader(Name = "Content-Length"), Required] string? declaredLength,
-            [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
+            [FromHeader(Name = "X-Upload-Token"), Required] string? uploadToken,
             [FromServices] IContentStorageHandler contentStorageHandler,
             [FromServices] IStorageHandler storageHandler,
             [FromServices] TimeProvider timeProvider,
@@ -499,17 +476,26 @@ public static class ContentEndpoints
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.upload");
 
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
+        var userId = claimsPrincipal.GetUserId();
+        activity?.SetTag("shareit.identity.type", userId is null ? "guest" : "user");
+
+        if (string.IsNullOrWhiteSpace(uploadToken))
         {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
+            return BadRequestProblem(
+                "Missing upload token",
+                "An upload token must be provided in the X-Upload-Token header.");
         }
 
-        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
+        // The token is required here, so a value of the wrong shape is a client
+        // bug worth naming rather than a silent 403 further down. Create is the
+        // exception: its token is optional and only consulted when reusing a
+        // package id, so a malformed one simply fails to match (409).
+        if (!OpaqueToken.IsWellFormed(uploadToken))
+        {
+            return BadRequestProblem(
+                "Invalid upload token",
+                $"The upload token must be {OpaqueToken.WellFormedLength} base64url characters.");
+        }
 
         if (contentId == Guid.Empty)
         {
@@ -549,7 +535,7 @@ public static class ContentEndpoints
         }
 
         var settings = uploadOptions.Value;
-        var fileLimitBytes = FileLimitBytes(userIdentity, settings);
+        var fileLimitBytes = FileLimitBytes(userId, settings);
 
         // Content-Length is the declared size: the idempotency fingerprint and
         // the mismatch check both come from it.
@@ -588,7 +574,8 @@ public static class ContentEndpoints
             });
         }
 
-        if (package.UserId != userIdentity.Id)
+        if (package.UserId != userId
+            || !OpaqueToken.Matches(package.UploadTokenHash, uploadToken))
         {
             return TypedResults.Problem(new ProblemDetails
             {
@@ -668,7 +655,7 @@ public static class ContentEndpoints
             ContentType = contentType,
             CreatedAt = now,
             Size = itemSize.Value,
-            UserId = userIdentity.Id,
+            UserId = userId,
             Meta = meta
         };
 
@@ -726,7 +713,6 @@ public static class ContentEndpoints
     /// </summary>
     private static async Task<Results<Ok<ContentPackageDetailsResponse>, ProblemHttpResult>> GetPackageAsync(
         [FromRoute] Guid packageId,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromHeader(Name = "X-Unlock-Proof")] string? unlockProof,
         [FromHeader(Name = "X-Access-Session")] string? accessSession,
         [FromServices] IContentStorageHandler storageHandler,
@@ -740,17 +726,8 @@ public static class ContentEndpoints
     {
         using var activity = ShareItActivitySource.Instance.StartActivity("package.open");
 
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
+        var userId = claimsPrincipal.GetUserId();
+        activity?.SetTag("shareit.identity.type", userId is null ? "guest" : "user");
 
         // Shell first: no items, no names, no session, no blob reads.
         var package = await storageHandler.GetPackageShellAsync(packageId, cancellationToken);
@@ -828,8 +805,7 @@ public static class ContentEndpoints
             existingSession = await accessSessionService.ValidateAsync(
                 accessSession,
                 packageId,
-                userIdentity.Id,
-                userIdentity.IsGuest,
+                userId,
                 cancellationToken);
             activity?.SetTag("shareit.access.session_reused", existingSession is not null);
         }
@@ -875,8 +851,7 @@ public static class ContentEndpoints
         {
             var creation = await accessSessionService.CreateAsync(
                 packageId,
-                userIdentity.Id,
-                userIdentity.IsGuest,
+                userId,
                 cancellationToken);
 
             if (!creation.Success || creation.Ticket is null)
@@ -922,7 +897,6 @@ public static class ContentEndpoints
         [FromRoute] Guid packageId,
         [FromRoute] Guid contentId,
         [FromHeader(Name = "X-Access-Session")] string? accessSession,
-        [FromHeader(Name = "X-Guest-ID")] Guid? guestId,
         [FromServices] IContentStorageHandler storageHandler,
         [FromServices] IBlobStorageHandler blobStorageHandler,
         [FromServices] IAccessSessionService accessSessionService,
@@ -944,24 +918,14 @@ public static class ContentEndpoints
             });
         }
 
-        if (!claimsPrincipal.TryGetUserIdentity(guestId, out var userIdentity))
-        {
-            return TypedResults.Problem(new ProblemDetails
-            {
-                Title = "User ID required",
-                Detail = "Either an authenticated user or a guest ID must be provided.",
-                Status = StatusCodes.Status400BadRequest
-            });
-        }
-
-        activity?.SetTag("shareit.identity.type", userIdentity.IsGuest ? "guest" : "user");
+        var userId = claimsPrincipal.GetUserId();
+        activity?.SetTag("shareit.identity.type", userId is null ? "guest" : "user");
 
         // Read-only validation: downloads never consume the session.
         var session = await accessSessionService.ValidateAsync(
             accessSession,
             packageId,
-            userIdentity.Id,
-            userIdentity.IsGuest,
+            userId,
             cancellationToken);
 
         if (session is null)
@@ -1187,9 +1151,9 @@ public static class ContentEndpoints
     /// <summary>
     /// Resolves the per-file upload limit for the given identity.
     /// </summary>
-    private static long FileLimitBytes(UserIdentity userIdentity, UploadSettings settings)
+    private static long FileLimitBytes(Guid? userId, UploadSettings settings)
     {
-        var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
+        var identityLimits = userId is null ? settings.Anonymous : settings.Authenticated;
         return identityLimits.FileLimitMb * 1024L * 1024L;
     }
 
@@ -1198,7 +1162,7 @@ public static class ContentEndpoints
     /// set a lifetime: abandoned uploads always expire and are swept by
     /// cleanup, without any draft/ready state machine.
     /// </summary>
-    private static ProblemHttpResult? ValidateLifetime(UserIdentity userIdentity, UploadSettings settings, int timeToLiveHours)
+    private static ProblemHttpResult? ValidateLifetime(Guid? userId, UploadSettings settings, int timeToLiveHours)
     {
         if (timeToLiveHours <= 0)
         {
@@ -1207,7 +1171,7 @@ public static class ContentEndpoints
                 "TimeToLiveHours must be a positive number of hours.");
         }
 
-        var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
+        var identityLimits = userId is null ? settings.Anonymous : settings.Authenticated;
         if (timeToLiveHours > identityLimits.MaxLifetimeHours)
         {
             return BadRequestProblem(
@@ -1219,7 +1183,7 @@ public static class ContentEndpoints
     }
 
     private static ProblemHttpResult? ValidateMaxAccessCount(
-        UserIdentity userIdentity, UploadSettings settings, int? maxAccessCount)
+        Guid? userId, UploadSettings settings, int? maxAccessCount)
     {
         if (maxAccessCount is { } count)
         {
@@ -1230,7 +1194,7 @@ public static class ContentEndpoints
                     "MaxAccessCount must be a positive number.");
             }
 
-            var identityLimits = userIdentity.IsGuest ? settings.Anonymous : settings.Authenticated;
+            var identityLimits = userId is null ? settings.Anonymous : settings.Authenticated;
             if (count > identityLimits.MaxAccessCount)
             {
                 return BadRequestProblem(
@@ -1241,7 +1205,7 @@ public static class ContentEndpoints
             return null;
         }
 
-        if (userIdentity.IsGuest)
+        if (userId is null)
         {
             return BadRequestProblem(
                 "Access limit required",

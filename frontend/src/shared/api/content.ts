@@ -132,6 +132,7 @@ export type UploadItemResult = ApiResult<ContentPackageOwnerResponse> & {
 export async function uploadItem(
   packageId: string,
   item: UploadItem,
+  uploadToken: string,
   onProgress?: UploadProgressCallback,
   signal?: AbortSignal
 ): Promise<UploadItemResult> {
@@ -158,6 +159,7 @@ export async function uploadItem(
       xhr.setRequestHeader(name, value);
     }
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-Upload-Token', uploadToken);
     xhr.setRequestHeader('X-Content-Kind', item.Kind);
     xhr.setRequestHeader('X-Content-Meta', item.Meta);
 

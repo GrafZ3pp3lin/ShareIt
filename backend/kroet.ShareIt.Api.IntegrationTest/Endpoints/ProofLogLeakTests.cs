@@ -34,7 +34,7 @@ public sealed class ProofLogLeakTests : ShareItApiTestBase
             userId: ownerId, maxAccessCount: 1, timeToLiveHours: 1, unlockVerifier: Verifier());
 
         var proof = Verifier(7);
-        var response = await GetPackageAsync(packageId, guestId: Guid.NewGuid(), unlockProof: proof);
+        var response = await GetPackageAsync(packageId, unlockProof: proof);
 
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
 

@@ -171,6 +171,13 @@ public class ContentPackageOwnerResponse
     public string? ShortCode { get; init; }
 
     /// <summary>
+    /// Opaque token that authorizes adding items to this package. Returned
+    /// only by the creation call (including an idempotent retry); the composer
+    /// keeps it in memory until the upload finishes.
+    /// </summary>
+    public string? UploadToken { get; init; }
+
+    /// <summary>
     /// When the package was created.
     /// </summary>
     public required DateTimeOffset CreatedAt { get; init; }
@@ -205,12 +212,13 @@ public class ContentPackageOwnerResponse
     /// </summary>
     public required bool IsProtected { get; init; }
 
-    public static ContentPackageOwnerResponse FromPackage(ContentPackage package)
+    public static ContentPackageOwnerResponse FromPackage(ContentPackage package, string? uploadToken = null)
     {
         return new ContentPackageOwnerResponse
         {
             Id = package.Id,
             ShortCode = package.ShortCode,
+            UploadToken = uploadToken,
             CreatedAt = package.CreatedAt,
             ItemCount = package.Contents?.Count ?? package.ItemCount,
             MaxAccessCount = package.MaxAccessCount,

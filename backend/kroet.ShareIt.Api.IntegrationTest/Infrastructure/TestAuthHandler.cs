@@ -10,7 +10,7 @@ namespace kroet.ShareIt.Api.IntegrationTest.Infrastructure;
 /// Test-only authentication scheme for WebApplicationFactory runs.
 /// Authenticates the request as a fixed user when the <c>X-Test-User</c> header
 /// carries a GUID; otherwise returns NoResult so the request stays anonymous
-/// and guest flows (via the X-Guest-ID header) behave exactly like production.
+/// and guest flows behave exactly like production.
 /// </summary>
 public sealed class TestAuthHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,

@@ -59,6 +59,8 @@ type ComposerItem =
 
 type PartialPackage = {
   packageId: string;
+  /** In-memory upload scope; dropped as soon as the package is finished. */
+  uploadToken: string;
   items: ComposerItem[];
   nextIndex: number;
   passphrase: string | undefined;
@@ -333,6 +335,7 @@ export function createComposer() {
 
   const toPartial = (
     packageId: string,
+    uploadToken: string,
     items: ComposerItem[],
     nextIndex: number,
     currentPassphrase: string | undefined,
@@ -340,6 +343,7 @@ export function createComposer() {
     code?: string
   ): PartialPackage => ({
     packageId,
+    uploadToken,
     items,
     nextIndex,
     passphrase: currentPassphrase,
@@ -417,6 +421,7 @@ export function createComposer() {
         password: resume?.passwordLabel ?? passwordLabel()
       };
       const packageId = resume?.packageId ?? crypto.randomUUID();
+      let uploadToken = resume?.uploadToken;
 
       let key: PackageKey | undefined;
       if (currentPassphrase) {
@@ -445,6 +450,14 @@ export function createComposer() {
           return;
         }
 
+        if (!created.data.UploadToken) {
+          setProgress(null);
+          setError(t('errors.createPackage'));
+          return;
+        }
+
+        uploadToken = created.data.UploadToken;
+
         if (isCodeMode) {
           if (!created.data.ShortCode || !codeSecret) {
             setProgress(null);
@@ -461,6 +474,14 @@ export function createComposer() {
       }
 
       // Step 2: seal content + metadata, then upload one item per request.
+      // The upload token stays in memory only; a retry carries it forward.
+      if (!uploadToken) {
+        setProgress(null);
+        setError(t('errors.createPackage'));
+        return;
+      }
+      const uploadScope = uploadToken;
+
       abortController = new AbortController();
 
       for (let index = resume?.nextIndex ?? 0; index < items.length; index += 1) {
@@ -504,7 +525,7 @@ export function createComposer() {
         } catch {
           setProgress(null);
           setError(t('errors.encrypt', { fileName }));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
+          setPartial(toPartial(packageId, uploadScope, items, index, currentPassphrase, labels, code));
           return;
         }
 
@@ -528,6 +549,7 @@ export function createComposer() {
               Meta: meta,
               File: payload
             },
+            uploadScope,
             (sentBytes, totalBytes) => {
               setProgress((current) => (current ? { ...current, phase: 'uploading', sentBytes, totalBytes } : current));
             },
@@ -536,26 +558,28 @@ export function createComposer() {
         } catch (err) {
           setProgress(null);
           setError(getErrorMessage(err, t('errors.upload', { fileName })));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
+          setPartial(toPartial(packageId, uploadScope, items, index, currentPassphrase, labels, code));
           return;
         }
 
         if (outcome.canceled) {
           setProgress(null);
           setError(t('errors.canceled'));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
+          setPartial(toPartial(packageId, uploadScope, items, index, currentPassphrase, labels, code));
           return;
         }
 
         if (!outcome.data) {
           setProgress(null);
           setError(getErrorMessage(outcome.error, t('errors.upload', { fileName })));
-          setPartial(toPartial(packageId, items, index, currentPassphrase, labels, code));
+          setPartial(toPartial(packageId, uploadScope, items, index, currentPassphrase, labels, code));
           return;
         }
       }
 
       setProgress(null);
+      // The upload is complete: drop the token and the retry state.
+      setPartial(null);
       abortController = null;
 
       const link = `${window.location.origin}/s/${packageId}`;

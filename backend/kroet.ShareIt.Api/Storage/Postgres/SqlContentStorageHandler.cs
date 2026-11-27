@@ -39,11 +39,11 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         const string insertPackageSql = """
                                         INSERT INTO content_packages (
-                                            id, short_code, created_at, user_id,
+                                            id, short_code, created_at, user_id, upload_token_hash,
                                             max_access_count, current_access_count, failed_unlock_attempts,
                                             last_access_at, expires_at, unlock_verifier
                                         ) VALUES (
-                                            @Id, @ShortCode, @CreatedAt, @UserId,
+                                            @Id, @ShortCode, @CreatedAt, @UserId, @UploadTokenHash,
                                             @MaxAccessCount, 0, @FailedUnlockAttempts,
                                             @LastAccessAt, @ExpiresAt, @UnlockVerifier
                                         );
@@ -63,6 +63,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                         package.ShortCode,
                         package.CreatedAt,
                         package.UserId,
+                        package.UploadTokenHash,
                         package.MaxAccessCount,
                         package.FailedUnlockAttempts,
                         package.LastAccessAt,
@@ -152,7 +153,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         const string getPackageSql = """
                                      SELECT
-                                         id, short_code, created_at, user_id,
+                                         id, short_code, created_at, user_id, upload_token_hash,
                                          max_access_count, current_access_count, failed_unlock_attempts,
                                          last_access_at, expires_at, unlock_verifier,
                                          (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = content_packages.id) AS item_count
@@ -205,7 +206,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         const string getPackageSql = """
                                      SELECT
-                                         id, short_code, created_at, user_id,
+                                         id, short_code, created_at, user_id, upload_token_hash,
                                          max_access_count, current_access_count, failed_unlock_attempts,
                                          last_access_at, expires_at, unlock_verifier,
                                          (SELECT COUNT(*)::int FROM contents c WHERE c.package_id = content_packages.id) AS item_count
@@ -324,10 +325,10 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
                                     """;
         const string insertSessionSql = """
                                         INSERT INTO access_sessions (
-                                            id, package_id, client_id, is_guest, token_hash,
+                                            id, package_id, user_id, token_hash,
                                             created_at, expires_at
                                         ) VALUES (
-                                            @Id, @PackageId, @ClientId, @IsGuest, @TokenHash,
+                                            @Id, @PackageId, @UserId, @TokenHash,
                                             @CreatedAt, @ExpiresAt
                                         )
                                         """;
@@ -355,8 +356,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             {
                 session.Id,
                 session.PackageId,
-                session.ClientId,
-                session.IsGuest,
+                session.UserId,
                 session.TokenHash,
                 session.CreatedAt,
                 session.ExpiresAt
@@ -378,7 +378,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         CancellationToken cancellationToken = default)
     {
         const string selectSql = """
-                                 SELECT id, package_id, client_id, is_guest, token_hash,
+                                 SELECT id, package_id, user_id, token_hash,
                                         created_at, expires_at
                                  FROM access_sessions
                                  WHERE token_hash = @TokenHash
@@ -662,8 +662,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         {
             Id = dbDto.Id,
             PackageId = dbDto.PackageId,
-            ClientId = dbDto.ClientId,
-            IsGuest = dbDto.IsGuest,
+            UserId = dbDto.UserId,
             TokenHash = dbDto.TokenHash,
             CreatedAt = dbDto.CreatedAt,
             ExpiresAt = dbDto.ExpiresAt
@@ -681,6 +680,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
             ShortCode = dbDto.ShortCode,
             CreatedAt = dbDto.CreatedAt,
             UserId = dbDto.UserId,
+            UploadTokenHash = dbDto.UploadTokenHash,
             UnlockVerifier = dbDto.UnlockVerifier,
             MaxAccessCount = dbDto.MaxAccessCount,
             CurrentAccessCount = dbDto.CurrentAccessCount,
@@ -700,6 +700,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
         public string? ShortCode { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public Guid? UserId { get; init; }
+        public string UploadTokenHash { get; init; } = string.Empty;
         public int? MaxAccessCount { get; init; }
         public int CurrentAccessCount { get; init; }
         public int FailedUnlockAttempts { get; init; }
@@ -741,8 +742,7 @@ public class SqlContentStorageHandler : IContentStorageHandler, IMetricsSnapshot
     {
         public Guid Id { get; init; }
         public Guid PackageId { get; init; }
-        public Guid ClientId { get; init; }
-        public bool IsGuest { get; init; }
+        public Guid? UserId { get; init; }
         public string TokenHash { get; init; } = string.Empty;
         public DateTimeOffset CreatedAt { get; init; }
         public DateTimeOffset ExpiresAt { get; init; }

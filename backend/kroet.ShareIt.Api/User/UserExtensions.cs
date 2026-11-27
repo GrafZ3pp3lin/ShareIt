@@ -6,7 +6,11 @@ public static class UserExtensions
 {
     extension(ClaimsPrincipal claimsPrincipal)
     {
-        private AuthenticatedUserIdentity? ToOptionalUserIdentity()
+        /// <summary>
+        /// Returns the verified OIDC subject as a user id, or null for an
+        /// unauthenticated caller. Guests have no identity of their own.
+        /// </summary>
+        public Guid? GetUserId()
         {
             var userIdClaim = claimsPrincipal.FindFirst("sub");
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
@@ -14,49 +18,18 @@ public static class UserExtensions
                 return null;
             }
 
-            return new AuthenticatedUserIdentity
-            {
-                Id = userId,
-            };
-        }
-
-        public bool TryGetUserIdentity(Guid? guestId, out UserIdentity userIdentity)
-        {
-            var identity = claimsPrincipal.ToOptionalUserIdentity();
-            if (identity != null)
-            {
-                userIdentity = identity;
-                return true;
-            }
-
-            if (guestId.HasValue)
-            {
-                userIdentity = new GuestUserIdentity
-                {
-                    Id = guestId.Value
-                };
-                return true;
-            }
-
-            userIdentity = null!;
-            return false;
+            return userId;
         }
 
         /// <summary>
-        /// Resolves the authenticated user only, for endpoints that require
-        /// authorization. Guests have no identity here.
+        /// Resolves an authenticated user only, for endpoints that require
+        /// authorization. Guests have no user id here.
         /// </summary>
-        public bool TryGetUserIdentity(out UserIdentity userIdentity)
+        public bool TryGetUserId(out Guid userId)
         {
-            var identity = claimsPrincipal.ToOptionalUserIdentity();
-            if (identity is null)
-            {
-                userIdentity = null!;
-                return false;
-            }
-
-            userIdentity = identity;
-            return true;
+            var resolved = claimsPrincipal.GetUserId();
+            userId = resolved ?? Guid.Empty;
+            return resolved.HasValue;
         }
     }
 }

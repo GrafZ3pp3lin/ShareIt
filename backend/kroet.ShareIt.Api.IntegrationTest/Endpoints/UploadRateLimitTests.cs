@@ -20,16 +20,14 @@ public sealed class UploadRateLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_AfterThePermitLimit_Returns429WithRetryAfter()
     {
-        var guestId = Guid.NewGuid();
-
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            var response = await SendCreatePackageAsync(guestId: guestId);
+            var response = await SendCreatePackageAsync();
             var body = await response.Content.ReadAsStringAsync();
             Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, $"Attempt {attempt} should be allowed. {body}");
         }
 
-        var limited = await SendCreatePackageAsync(guestId: guestId);
+        var limited = await SendCreatePackageAsync();
 
         Assert.AreEqual(HttpStatusCode.TooManyRequests, limited.StatusCode);
         Assert.IsNotNull(limited.Headers.RetryAfter);
@@ -41,17 +39,15 @@ public sealed class UploadRateLimitTests : ShareItApiTestBase
     [TestMethod]
     public async Task Upload_AfterThePermitLimit_Returns429WithRetryAfter()
     {
-        var guestId = Guid.NewGuid();
-
         // Package creation shares the upload budget and consumes one permit,
         // leaving exactly one permit for item uploads.
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var allowed = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var allowed = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
         var allowedBody = await allowed.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, allowed.StatusCode, allowedBody);
 
-        var limited = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var limited = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
 
         Assert.AreEqual(HttpStatusCode.TooManyRequests, limited.StatusCode);
         Assert.IsNotNull(limited.Headers.RetryAfter);

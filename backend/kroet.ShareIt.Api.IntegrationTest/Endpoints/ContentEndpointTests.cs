@@ -40,23 +40,25 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task GetPackage_WithoutAnyIdentity_ReturnsEndpoint400InsteadOfAuthChallenge()
+    public async Task GetPackage_WithoutAuthentication_IsAllowedAsGuest()
     {
         var response = await Client.GetAsync($"/api/v1/content/package/{Guid.NewGuid()}");
 
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        // Guests are unauthenticated callers (user_id = null), not a separate
+        // identity; an unknown package is a plain 404.
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("User ID required", problem.Title);
+        Assert.AreEqual("Package not found", problem.Title);
     }
 
     [TestMethod]
-    public async Task CreatePackage_WithoutAnyIdentity_Returns400()
+    public async Task CreatePackage_WithoutAuthentication_IsAllowedAsGuest()
     {
         var response = await SendCreatePackageAsync();
 
-        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
-        var problem = await ReadProblemAsync(response);
-        Assert.AreEqual("User ID required", problem.Title);
+        Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
+        var package = await ReadJsonAsync<ContentPackageOwnerResponse>(response);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(package.UploadToken));
     }
 
     // ---------------------------------------------------------------
@@ -66,10 +68,9 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task CreatePackage_AsGuest_Returns201WithLocationAndNoNames()
     {
-        var guestId = Guid.NewGuid();
         var packageId = Guid.NewGuid();
 
-        var response = await SendCreatePackageAsync(packageId: packageId, guestId: guestId);
+        var response = await SendCreatePackageAsync(packageId: packageId);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode, body);
 
@@ -78,6 +79,8 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         Assert.AreEqual(0, package.ItemCount);
         Assert.AreEqual(1, package.MaxAccessCount);
         Assert.IsNull(package.ShortCode);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(package.UploadToken));
+        Assert.AreEqual("no-store", response.Headers.CacheControl?.ToString());
 
         // Nothing names a package: neither title/description nor owner id are
         // part of the response anymore.
@@ -104,7 +107,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         };
         ActivitySource.AddActivityListener(listener);
 
-        var response = await SendCreatePackageAsync(guestId: Guid.NewGuid());
+        var response = await SendCreatePackageAsync();
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
 
         var span = activities.Single(activity => activity.OperationName == "package.create");
@@ -113,7 +116,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task CreatePackage_WithClientId_IsIdempotentForOwnerAndConflictsForOthers()
+    public async Task CreatePackage_Retry_RequiresTheOwnerAndUploadToken()
     {
         var ownerId = Guid.NewGuid();
         var otherId = Guid.NewGuid();
@@ -122,45 +125,61 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var first = await SendCreatePackageAsync(packageId: packageId, userId: ownerId, maxAccessCount: 3);
         Assert.AreEqual(HttpStatusCode.Created, first.StatusCode);
         var firstPackage = await ReadJsonAsync<ContentPackageOwnerResponse>(first);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(firstPackage.UploadToken));
 
-        var retry = await SendCreatePackageAsync(packageId: packageId, userId: ownerId, maxAccessCount: 3);
+        var retry = await SendCreatePackageAsync(
+            packageId: packageId,
+            userId: ownerId,
+            maxAccessCount: 3,
+            uploadToken: firstPackage.UploadToken);
         var retryBody = await retry.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retry.StatusCode, retryBody);
+        Assert.AreEqual("no-store", retry.Headers.CacheControl?.ToString());
         var retriedPackage = await ReadJsonAsync<ContentPackageOwnerResponse>(retry);
         Assert.AreEqual(packageId, retriedPackage.Id);
+        Assert.AreEqual(firstPackage.UploadToken, retriedPackage.UploadToken);
         Assert.IsNull(firstPackage.ShortCode);
         Assert.IsNull(retriedPackage.ShortCode);
 
-        var conflict = await SendCreatePackageAsync(packageId: packageId, userId: otherId, maxAccessCount: 3);
-        Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
-        var problem = await ReadProblemAsync(conflict);
-        Assert.AreEqual("Package id already in use", problem.Title);
+        var missingToken = await SendCreatePackageAsync(packageId: packageId, userId: ownerId, maxAccessCount: 3);
+        Assert.AreEqual(HttpStatusCode.Conflict, missingToken.StatusCode);
+        Assert.AreEqual("Package id already in use", (await ReadProblemAsync(missingToken)).Title);
+
+        var wrongToken = await SendCreatePackageAsync(
+            packageId: packageId,
+            userId: ownerId,
+            maxAccessCount: 3,
+            uploadToken: "wrong-token");
+        Assert.AreEqual(HttpStatusCode.Conflict, wrongToken.StatusCode);
+        Assert.AreEqual("Package id already in use", (await ReadProblemAsync(wrongToken)).Title);
+
+        var wrongOwner = await SendCreatePackageAsync(
+            packageId: packageId,
+            userId: otherId,
+            maxAccessCount: 3,
+            uploadToken: firstPackage.UploadToken);
+        Assert.AreEqual(HttpStatusCode.Conflict, wrongOwner.StatusCode);
+        Assert.AreEqual("Package id already in use", (await ReadProblemAsync(wrongOwner)).Title);
     }
 
     [TestMethod]
-    public async Task CreatePackage_ConcurrentSameId_IsIdempotent()
+    public async Task CreatePackage_ConcurrentSameId_OneWinsAndTheOtherConflicts()
     {
-        var guestId = Guid.NewGuid();
         var packageId = Guid.NewGuid();
 
         var responses = await Task.WhenAll(
-            SendCreatePackageAsync(packageId: packageId, guestId: guestId),
-            SendCreatePackageAsync(packageId: packageId, guestId: guestId));
+            SendCreatePackageAsync(packageId: packageId),
+            SendCreatePackageAsync(packageId: packageId));
 
         var statuses = responses.Select(response => response.StatusCode).ToArray();
-        Assert.IsTrue(statuses.All(status => status is HttpStatusCode.Created or HttpStatusCode.OK));
         Assert.AreEqual(1, statuses.Count(status => status == HttpStatusCode.Created));
-
-        foreach (var response in responses)
-        {
-            Assert.AreEqual(packageId, (await ReadJsonAsync<ContentPackageOwnerResponse>(response)).Id);
-        }
+        Assert.AreEqual(1, statuses.Count(status => status == HttpStatusCode.Conflict));
     }
 
     [TestMethod]
     public async Task CreatePackage_WithoutId_Returns400()
     {
-        var response = await SendCreatePackageAsync(new CreatePackageRequest { MaxAccessCount = 1, TimeToLiveHours = 1 }, Guid.NewGuid());
+        var response = await SendCreatePackageAsync(new CreatePackageRequest { MaxAccessCount = 1, TimeToLiveHours = 1 });
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -171,7 +190,6 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     public async Task CreatePackage_WithInvalidVerifier_Returns400()
     {
         var response = await SendCreatePackageAsync(
-            guestId: Guid.NewGuid(),
             unlockVerifier: Verifier()[..20]);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
@@ -186,9 +204,8 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task ResolveShortCode_ReturnsTheCanonicalPackageIdWithoutClaimingAnAccess()
     {
-        var guestId = Guid.NewGuid();
-        var created = await CreateShortCodePackageAsync(guestId: guestId);
-        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+        var created = await CreateShortCodePackageAsync();
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes);
 
         var response = await ResolveShortCodeAsync(created.ShortCode!.ToLowerInvariant());
         var body = await response.Content.ReadAsStringAsync();
@@ -200,18 +217,17 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
 
         // Resolution is only an alias lookup and must not consume the package's
         // single access; the open with the correct proof does.
-        var details = await GetPackageDetailsAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        var details = await GetPackageDetailsAsync(created.Id, unlockProof: Verifier());
         Assert.AreEqual(1, details.Package.CurrentAccessCount);
     }
 
     [TestMethod]
     public async Task GetPackage_DoesNotExposeTheOwnerShortCode()
     {
-        var guestId = Guid.NewGuid();
-        var created = await CreateShortCodePackageAsync(guestId: guestId);
-        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+        var created = await CreateShortCodePackageAsync();
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes);
 
-        var response = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        var response = await GetPackageAsync(created.Id, unlockProof: Verifier());
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
         Assert.IsFalse(body.Contains("ShortCode", StringComparison.Ordinal), body);
@@ -220,7 +236,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task ResolveShortCode_NormalizesHyphensAndCase()
     {
-        var created = await CreateShortCodePackageAsync(guestId: Guid.NewGuid());
+        var created = await CreateShortCodePackageAsync();
         var code = created.ShortCode!;
         var formatted = $" {char.ToLowerInvariant(code[0])}-{char.ToLowerInvariant(code[1])}-{char.ToLowerInvariant(code[2])} ";
 
@@ -247,26 +263,24 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task ResolveShortCode_ExpiredPackage_Returns404AndOpenReturns410()
     {
-        var guestId = Guid.NewGuid();
-        var created = await CreateShortCodePackageAsync(guestId: guestId);
-        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+        var created = await CreateShortCodePackageAsync();
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes);
         TimeProvider.Advance(ShortCode.PackageLifetime + TimeSpan.FromSeconds(1));
 
         var response = await ResolveShortCodeAsync(created.ShortCode!);
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
 
-        var open = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        var open = await GetPackageAsync(created.Id, unlockProof: Verifier());
         Assert.AreEqual(HttpStatusCode.Gone, open.StatusCode);
     }
 
     [TestMethod]
     public async Task ResolveShortCode_ExhaustedPackage_Returns404ButSessionStillWorks()
     {
-        var guestId = Guid.NewGuid();
-        var created = await CreateShortCodePackageAsync(guestId: guestId);
-        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+        var created = await CreateShortCodePackageAsync();
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes);
 
-        var firstOpen = await GetPackageDetailsAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        var firstOpen = await GetPackageDetailsAsync(created.Id, unlockProof: Verifier());
         Assert.AreEqual(1, firstOpen.Package.CurrentAccessCount);
 
         var resolved = await ResolveShortCodeAsync(created.ShortCode!);
@@ -274,7 +288,6 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
 
         var reOpen = await GetPackageAsync(
             created.Id,
-            guestId: guestId,
             unlockProof: Verifier(),
             accessSession: firstOpen.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.OK, reOpen.StatusCode);
@@ -283,13 +296,12 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_AfterFiveFailedUnlockProofs_BurnsTheShortCodePackage()
     {
-        var guestId = Guid.NewGuid();
-        var created = await CreateShortCodePackageAsync(guestId: guestId);
-        await SendUploadItemAsync(created.Id, "file", SmallItemBytes, guestId: guestId);
+        var created = await CreateShortCodePackageAsync();
+        await SendUploadItemAsync(created.Id, "file", SmallItemBytes);
 
         for (var attempt = 1; attempt <= ShortCode.MaxFailedUnlockAttempts; attempt++)
         {
-            var failed = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier(9));
+            var failed = await GetPackageAsync(created.Id, unlockProof: Verifier(9));
             Assert.AreEqual(HttpStatusCode.Unauthorized, failed.StatusCode, $"Attempt {attempt}");
         }
 
@@ -298,7 +310,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         var resolved = await ResolveShortCodeAsync(created.ShortCode!);
         Assert.AreEqual(HttpStatusCode.NotFound, resolved.StatusCode);
 
-        var open = await GetPackageAsync(created.Id, guestId: guestId, unlockProof: Verifier());
+        var open = await GetPackageAsync(created.Id, unlockProof: Verifier());
         Assert.AreEqual(HttpStatusCode.Gone, open.StatusCode);
     }
 
@@ -309,22 +321,21 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_AddsTextAndFileItemsWithKindAndOpaqueMeta()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
         var textMeta = MetaFor(null, "text/plain");
         var fileMeta = MetaFor("hello.txt", "text/plain");
         var textBytes = Encoding.UTF8.GetBytes("some shared text");
 
-        var textResponse = await SendUploadItemAsync(packageId, "text", textBytes, textMeta, guestId: guestId);
+        var textResponse = await SendUploadItemAsync(packageId, "text", textBytes, textMeta);
         var textBody = await textResponse.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, textResponse.StatusCode, textBody);
 
-        var fileResponse = await SendUploadItemAsync(packageId, "file", SmallItemBytes, fileMeta, guestId: guestId);
+        var fileResponse = await SendUploadItemAsync(packageId, "file", SmallItemBytes, fileMeta);
         var fileBody = await fileResponse.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, fileResponse.StatusCode, fileBody);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
 
         Assert.HasCount(2, details.Items);
         Assert.AreEqual(2, details.Package.ItemCount);
@@ -336,12 +347,12 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         Assert.AreEqual(fileMeta, file.Meta);
 
         // Nothing is inlined: every item's bytes come through the access session.
-        var textDownload = await SendDownloadAsync(DownloadUrl(packageId, text.Id), details.AccessSession.Token, guestId);
+        var textDownload = await SendDownloadAsync(DownloadUrl(packageId, text.Id), details.AccessSession.Token);
         var textDownloadBody = await textDownload.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, textDownload.StatusCode, textDownloadBody);
         Assert.AreSequenceEqual(textBytes, await textDownload.Content.ReadAsByteArrayAsync());
 
-        var fileDownload = await SendDownloadAsync(DownloadUrl(packageId, file.Id), details.AccessSession.Token, guestId);
+        var fileDownload = await SendDownloadAsync(DownloadUrl(packageId, file.Id), details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.OK, fileDownload.StatusCode);
         Assert.AreSequenceEqual(SmallItemBytes, await fileDownload.Content.ReadAsByteArrayAsync());
     }
@@ -349,14 +360,13 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_WithSameItemId_IsIdempotent()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
         var contentId = Guid.NewGuid();
 
-        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+        var first = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId);
         Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
 
-        var retry = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+        var retry = await SendUploadItemAsync(packageId, "file", SmallItemBytes, contentId: contentId);
         var retryBody = await retry.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retry.StatusCode, retryBody);
         Assert.AreEqual(1, (await ReadJsonAsync<ContentPackageOwnerResponse>(retry)).ItemCount);
@@ -368,27 +378,59 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task UploadContent_WithItemIdFromAnotherPackage_Returns409()
     {
-        var guestId = Guid.NewGuid();
-        var firstPackageId = await CreatePackageAsync(guestId: guestId);
-        var secondPackageId = await CreatePackageAsync(guestId: guestId);
+        var firstPackageId = await CreatePackageAsync();
+        var secondPackageId = await CreatePackageAsync();
         var contentId = Guid.NewGuid();
 
-        var first = await SendUploadItemAsync(firstPackageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+        var first = await SendUploadItemAsync(firstPackageId, "file", SmallItemBytes, contentId: contentId);
         Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
 
-        var conflict = await SendUploadItemAsync(secondPackageId, "file", SmallItemBytes, contentId: contentId, guestId: guestId);
+        var conflict = await SendUploadItemAsync(secondPackageId, "file", SmallItemBytes, contentId: contentId);
         Assert.AreEqual(HttpStatusCode.Conflict, conflict.StatusCode);
         var problem = await ReadProblemAsync(conflict);
         Assert.AreEqual("Content id already in use", problem.Title);
     }
 
     [TestMethod]
-    public async Task UploadContent_AsNonOwner_Returns403()
+    public async Task UploadContent_WithWrongUploadToken_Returns403()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: Guid.NewGuid());
+        // Well-formed but not this package's: a shape error is a 400, so this
+        // must reach the owner check to exercise the 403.
+        var response = await SendUploadItemAsync(
+            packageId, "file", SmallItemBytes, uploadToken: OpaqueToken.Create());
+
+        Assert.AreEqual(HttpStatusCode.Forbidden, response.StatusCode);
+        var problem = await ReadProblemAsync(response);
+        Assert.AreEqual("Forbidden", problem.Title);
+    }
+
+    [TestMethod]
+    public async Task UploadContent_WithMalformedUploadToken_Returns400()
+    {
+        var packageId = await CreatePackageAsync();
+
+        var response = await SendUploadItemAsync(
+            packageId, "file", SmallItemBytes, uploadToken: "not-a-valid-upload-token");
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ReadProblemAsync(response);
+        Assert.AreEqual("Invalid upload token", problem.Title);
+        Assert.Contains(
+            $"{OpaqueToken.WellFormedLength} base64url characters",
+            problem.Detail ?? string.Empty);
+    }
+
+    [TestMethod]
+    public async Task UploadContent_AsAuthenticatedNonOwner_Returns403()
+    {
+        var packageId = await CreatePackageAsync();
+
+        // The user id does not match the guest-owned package, even with the
+        // package's upload token.
+        var response = await SendUploadItemAsync(
+            packageId, "file", SmallItemBytes, userId: Guid.NewGuid());
 
         Assert.AreEqual(HttpStatusCode.Forbidden, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -398,7 +440,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_ForUnknownPackage_Returns404()
     {
-        var response = await GetPackageAsync(Guid.NewGuid(), guestId: Guid.NewGuid());
+        var response = await GetPackageAsync(Guid.NewGuid());
 
         Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -408,10 +450,9 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_ResponseIsNotCacheable()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, _) = await CreatePackageWithItemAsync(guestId: guestId);
+        var (packageId, _) = await CreatePackageWithItemAsync();
 
-        var response = await GetPackageAsync(packageId, guestId: guestId);
+        var response = await GetPackageAsync(packageId);
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         Assert.AreEqual("no-store", response.Headers.CacheControl!.ToString());
@@ -424,13 +465,12 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WithAccessSession_ReturnsOpaqueBytes()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
         Assert.IsFalse(string.IsNullOrEmpty(details.AccessSession.Token));
 
-        var response = await SendDownloadAsync(DownloadUrl(packageId, contentId), details.AccessSession.Token, guestId);
+        var response = await SendDownloadAsync(DownloadUrl(packageId, contentId), details.AccessSession.Token);
         var body = await response.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
 
@@ -441,17 +481,16 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     }
 
     [TestMethod]
-    public async Task DownloadContent_WithSessionForDifferentGuest_Returns401()
+    public async Task DownloadContent_WithSessionForDifferentIdentity_Returns401()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
 
         var response = await SendDownloadAsync(
             DownloadUrl(packageId, contentId),
             details.AccessSession.Token,
-            Guid.NewGuid());
+            userId: Guid.NewGuid());
 
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -461,15 +500,14 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WithReusedSession_SucceedsRepeatedly()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
 
-        var first = await SendDownloadAsync(DownloadUrl(packageId, contentId), details.AccessSession.Token, guestId);
+        var first = await SendDownloadAsync(DownloadUrl(packageId, contentId), details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.OK, first.StatusCode);
 
-        var second = await SendDownloadAsync(DownloadUrl(packageId, contentId), details.AccessSession.Token, guestId);
+        var second = await SendDownloadAsync(DownloadUrl(packageId, contentId), details.AccessSession.Token);
         var secondBody = await second.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, second.StatusCode, secondBody);
     }
@@ -477,15 +515,14 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WithSessionInParallel_BothSucceed()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
         var downloadUrl = DownloadUrl(packageId, contentId);
 
         var responses = await Task.WhenAll(
-            SendDownloadAsync(downloadUrl, details.AccessSession.Token, guestId),
-            SendDownloadAsync(downloadUrl, details.AccessSession.Token, guestId));
+            SendDownloadAsync(downloadUrl, details.AccessSession.Token),
+            SendDownloadAsync(downloadUrl, details.AccessSession.Token));
 
         Assert.IsTrue(responses.All(response => response.StatusCode == HttpStatusCode.OK));
     }
@@ -493,10 +530,9 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WhenBlobIsMissing_KeepsSessionUsable()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
 
         var content = await Services.GetRequiredService<IContentStorageHandler>().GetContentAsync(contentId);
         Assert.IsNotNull(content);
@@ -512,7 +548,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         using var metrics = new MetricsCapture();
 
         var downloadUrl = DownloadUrl(packageId, contentId);
-        var failed = await SendDownloadAsync(downloadUrl, details.AccessSession.Token, guestId);
+        var failed = await SendDownloadAsync(downloadUrl, details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.NotFound, failed.StatusCode);
         Assert.AreEqual(0L, metrics.Sum("shareit.bytes.authorized"));
 
@@ -524,7 +560,7 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
             InputStream = new MemoryStream(LargeItemBytes)
         });
 
-        var retried = await SendDownloadAsync(downloadUrl, details.AccessSession.Token, guestId);
+        var retried = await SendDownloadAsync(downloadUrl, details.AccessSession.Token);
         var retriedBody = await retried.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, retried.StatusCode, retriedBody);
         Assert.AreEqual((long)LargeItemBytes.Length, metrics.Sum("shareit.bytes.authorized"));
@@ -533,10 +569,9 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task DownloadContent_WithoutSession_Returns400()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes);
 
-        var response = await SendDownloadAsync(DownloadUrl(packageId, contentId), null, guestId);
+        var response = await SendDownloadAsync(DownloadUrl(packageId, contentId), null);
 
         Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
         var problem = await ReadProblemAsync(response);
@@ -553,36 +588,34 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
         // Opening the link consumes one access: with a limit of 1, the very
         // first view wins and every further view without its session is
         // rejected. Downloads within the session stay available.
-        var guestId = Guid.NewGuid();
-        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId, maxAccessCount: 1);
+        var (packageId, contentId) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, maxAccessCount: 1);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
 
-        var second = await GetPackageAsync(packageId, guestId: guestId);
+        var second = await GetPackageAsync(packageId);
         Assert.AreEqual(HttpStatusCode.Gone, second.StatusCode);
         var problem = await ReadProblemAsync(second);
         Assert.AreEqual("Package access limit reached", problem.Title);
 
         var download = await SendDownloadAsync(
-            DownloadUrl(packageId, contentId), details.AccessSession.Token, guestId);
+            DownloadUrl(packageId, contentId), details.AccessSession.Token);
         var downloadBody = await download.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, download.StatusCode, downloadBody);
 
         var downloadAgain = await SendDownloadAsync(
-            DownloadUrl(packageId, contentId), details.AccessSession.Token, guestId);
+            DownloadUrl(packageId, contentId), details.AccessSession.Token);
         Assert.AreEqual(HttpStatusCode.OK, downloadAgain.StatusCode);
     }
 
     [TestMethod]
     public async Task GetPackage_WithItsSession_ReusesTheAccess()
     {
-        var guestId = Guid.NewGuid();
-        var (packageId, _) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, guestId: guestId, maxAccessCount: 1);
+        var (packageId, _) = await CreatePackageWithItemAsync(bytes: LargeItemBytes, maxAccessCount: 1);
 
-        var first = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var first = await GetPackageDetailsAsync(packageId);
         Assert.AreEqual(1, first.Package.CurrentAccessCount);
 
-        var second = await GetPackageDetailsAsync(packageId, guestId: guestId, accessSession: first.AccessSession.Token);
+        var second = await GetPackageDetailsAsync(packageId, accessSession: first.AccessSession.Token);
 
         Assert.AreEqual(first.AccessSession.Token, second.AccessSession.Token);
         Assert.AreEqual(1, second.Package.CurrentAccessCount);
@@ -591,20 +624,20 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task GetPackage_WithAccessLimit_AllowsExactlyMaxViews()
     {
-        // Three distinct viewers may open the link; the fourth is rejected.
-        // The limit is the creator's: guests are capped at 1, so an
+        // Three opens without a session each claim an access; the fourth is
+        // rejected. The limit is the creator's: guests are capped at 1, so an
         // authenticated owner sets the limit here.
         var (packageId, _) = await CreatePackageWithItemAsync(
             userId: Guid.NewGuid(), maxAccessCount: 3, timeToLiveHours: 24);
 
         for (var access = 1; access <= 3; access++)
         {
-            var response = await GetPackageAsync(packageId, guestId: Guid.NewGuid());
+            var response = await GetPackageAsync(packageId);
             var body = await response.Content.ReadAsStringAsync();
             Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
         }
 
-        var fourth = await GetPackageAsync(packageId, guestId: Guid.NewGuid());
+        var fourth = await GetPackageAsync(packageId);
         Assert.AreEqual(HttpStatusCode.Gone, fourth.StatusCode);
         var problem = await ReadProblemAsync(fourth);
         Assert.AreEqual("Package access limit reached", problem.Title);
@@ -629,10 +662,9 @@ public sealed class ContentEndpointTests : ShareItApiTestBase
     {
         // A guest owns the package but is not authenticated, so authorization
         // must still deny the request.
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId);
+        var packageId = await CreatePackageAsync();
 
-        var response = await DeletePackageAsync(packageId, guestId: guestId);
+        var response = await DeletePackageAsync(packageId);
 
         Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }

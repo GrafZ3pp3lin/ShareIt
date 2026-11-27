@@ -7,9 +7,10 @@ Accept: application/json
 ###
 
 # Create a package. Id is client-supplied; TimeToLiveHours is required.
+# The response contains an UploadToken; send it as X-Upload-Token on every
+# item upload and on an idempotent retry of this request.
 POST {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package
 Content-Type: application/json
-X-Guest-ID: {{$guid}}
 
 {
   "Id": "{{$guid}}",
@@ -21,12 +22,13 @@ X-Guest-ID: {{$guid}}
 ###
 
 # Upload one item as a raw binary PUT. X-Content-Kind is "text" or "file";
-# X-Content-Meta is the base64url per-item metadata blob.
+# X-Content-Meta is the base64url per-item metadata blob. X-Upload-Token is
+# the token returned when the package was created.
 PUT {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package/<packageId>/content/<contentId>
 Content-Type: application/octet-stream
 X-Content-Kind: text
 X-Content-Meta: eyJuYW1lIjpudWxsLCJtaW1lIjoidGV4dC9wbGFpbiJ9
-X-Guest-ID: {{$guid}}
+X-Upload-Token: <uploadToken>
 
 hello world
 
@@ -35,14 +37,12 @@ hello world
 # Open a package. The proof header is required for protected packages; the
 # session header reuses an existing access instead of claiming another.
 GET {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package/<packageId>
-X-Guest-ID: {{$guid}}
 
 ###
 
 # Download an item with the package's access session.
 GET {{kroet.ShareIt.Api_HostAddress}}/api/v1/content/package/<packageId>/content/<contentId>/download
 X-Access-Session: <sessionToken>
-X-Guest-ID: {{$guid}}
 
 ###
 

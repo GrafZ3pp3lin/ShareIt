@@ -16,8 +16,8 @@ caller in the same change rather than keeping a migration or deprecation path ar
   a three-character server locator and a three-character secret generated in the browser. It is
   single-use, expires after ten minutes, and never becomes a link; only the locator reaches the
   API.
-- **Guest or signed in.** Guests get a client-generated identity and can create links. Signing in
-  (OIDC) additionally lets owners list and delete their links.
+- **Guest or signed in.** Guests need no account or stored identity and can create links.
+  Signing in (OIDC) additionally lets owners list and delete their links.
 - **Expiry and access limits.** Every package has a lifetime and a maximum number of opens, with
   larger limits for authenticated users.
 - **Client-side encryption by default.** One generated passphrase per package (switch it off for a

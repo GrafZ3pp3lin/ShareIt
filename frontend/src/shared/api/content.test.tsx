@@ -423,7 +423,7 @@ describe('uploadItem', () => {
   });
 
   it('puts the raw bytes with metadata headers to the per-item upload endpoint', async () => {
-    const result = await uploadItem('pkg-1', uploadRequest());
+    const result = await uploadItem('pkg-1', uploadRequest(), 'upload-token-1');
 
     expect(result.data?.Id).toBe('fake-package');
     expect(result.error).toBeUndefined();
@@ -432,6 +432,7 @@ describe('uploadItem', () => {
     const xhr = FakeXhr.sent[0];
     expect(xhr.method).toBe('PUT');
     expect(xhr.url.endsWith('/api/v1/content/package/pkg-1/content/item-1')).toBe(true);
+    expect(xhr.requestHeaders['X-Upload-Token']).toBe('upload-token-1');
     expect(xhr.requestHeaders['X-Content-Kind']).toBe('file');
     expect(xhr.requestHeaders['X-Content-Meta']).toBe('bWV0YQ');
     expect(xhr.requestHeaders['Content-Type']).toBe('application/octet-stream');
@@ -445,7 +446,7 @@ describe('uploadItem', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const result = await uploadItem('pkg-1', uploadRequest(), undefined, controller.signal);
+    const result = await uploadItem('pkg-1', uploadRequest(), 'upload-token-1', undefined, controller.signal);
 
     expect(result.canceled).toBe(true);
     expect(FakeXhr.sent).toHaveLength(0);
@@ -454,7 +455,7 @@ describe('uploadItem', () => {
   it('reports upload progress through the callback', async () => {
     const onProgress = vi.fn();
 
-    await uploadItem('pkg-1', uploadRequest(), onProgress);
+    await uploadItem('pkg-1', uploadRequest(), 'upload-token-1', onProgress);
 
     expect(onProgress).toHaveBeenCalledWith(6, 10);
   });
@@ -463,7 +464,7 @@ describe('uploadItem', () => {
     const body = { title: 'Payload too large', detail: 'file exceeds the limit' };
     FakeXhr.responses = [{ status: 413, body }];
 
-    const result = await uploadItem('pkg-1', uploadRequest());
+    const result = await uploadItem('pkg-1', uploadRequest(), 'upload-token-1');
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(body);
@@ -472,7 +473,7 @@ describe('uploadItem', () => {
   it('resolve a network error when the request fails', async () => {
     FakeXhr.responses = [{ status: 0, networkError: true }];
 
-    const result = await uploadItem('pkg-1', uploadRequest());
+    const result = await uploadItem('pkg-1', uploadRequest(), 'upload-token-1');
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(new Error('Network error during upload'));
@@ -481,7 +482,7 @@ describe('uploadItem', () => {
   it('rejects a success response with the wrong shape', async () => {
     FakeXhr.responses = [{ status: 200, body: { not: 'a package' } }];
 
-    const result = await uploadItem('pkg-1', uploadRequest());
+    const result = await uploadItem('pkg-1', uploadRequest(), 'upload-token-1');
 
     expect(result.data).toBeUndefined();
     expect(result.error).toEqual(new Error('Unexpected upload response (status 200)'));
@@ -491,7 +492,7 @@ describe('uploadItem', () => {
     FakeXhr.loadDelayMs = 50;
     const controller = new AbortController();
 
-    const promise = uploadItem('pkg-1', uploadRequest(), undefined, controller.signal);
+    const promise = uploadItem('pkg-1', uploadRequest(), 'upload-token-1', undefined, controller.signal);
     // The signal listener is registered once the request is in flight.
     await vi.waitFor(() => expect(FakeXhr.sent).toHaveLength(1));
     controller.abort();
@@ -502,11 +503,10 @@ describe('uploadItem', () => {
     expect(result.data).toBeUndefined();
   });
 
-  it('sends the persisted guest ID as an identity header', async () => {
-    window.localStorage.setItem('shareit-guest-id', 'guest-test-1');
+  it('sends the upload token in the X-Upload-Token header', async () => {
+    await uploadItem('pkg-1', uploadRequest(), 'upload-token-1');
 
-    await uploadItem('pkg-1', uploadRequest());
-
-    expect(FakeXhr.sent[0].requestHeaders['X-Guest-ID']).toBe('guest-test-1');
+    expect(FakeXhr.sent[0].requestHeaders['X-Upload-Token']).toBe('upload-token-1');
+    expect(FakeXhr.sent[0].requestHeaders['X-Guest-ID']).toBeUndefined();
   });
 });

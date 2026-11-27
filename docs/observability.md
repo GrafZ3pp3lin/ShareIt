@@ -140,9 +140,9 @@ Important distinctions:
   depth is exported as the `shareit_blob_deletion_queue_depth` gauge (see the
   table above); no per-failure counter is exported.
 - The metric labels are aggregate-only. Never add package IDs, user IDs,
-  guest IDs, access sessions, URLs or content to metric labels. Traces and logs are
+  access sessions, URLs or content to metric labels. Traces and logs are
   per-request and may contain opaque package/content IDs, but never access sessions,
-  unlock proofs, user/guest IDs, filenames or content.
+  unlock proofs, user IDs, filenames or content.
 
 ## Traces
 

@@ -55,6 +55,7 @@ public class ContentPackageTests
             Id = Guid.NewGuid(),
             ShortCode = new ShortCodeGenerator().Next(),
             CreatedAt = DateTimeOffset.Parse("2026-03-05T10:00:00+00:00", CultureInfo.InvariantCulture),
+            UploadTokenHash = "upload-token-hash",
             MaxAccessCount = maxAccessCount,
             CurrentAccessCount = currentAccessCount,
             ExpiresAt = expiresAt ?? DateTimeOffset.Parse("2026-03-05T12:00:00+00:00", CultureInfo.InvariantCulture)

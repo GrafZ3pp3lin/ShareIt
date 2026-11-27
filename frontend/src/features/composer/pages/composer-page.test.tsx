@@ -64,7 +64,7 @@ describe('<ComposerPage />', () => {
     authState.authenticated = false;
     api.getUploadLimits.mockResolvedValue({ data: undefined });
     api.createPackage.mockImplementation(async (request: { Id: string; UseShortCode?: boolean }) => ({
-      data: { Id: request.Id, ShortCode: request.UseShortCode ? 'ABC' : null }
+      data: { Id: request.Id, ShortCode: request.UseShortCode ? 'ABC' : null, UploadToken: 'upload-token-1' }
     }));
     api.uploadItem.mockResolvedValue({ data: { Id: 'package-1' } });
     api.resolveShortCode.mockResolvedValue({ data: { PackageId: PACKAGE_ID }, status: 200 });
@@ -244,7 +244,7 @@ describe('<ComposerPage />', () => {
   it('uses a static accessible label for upload progress', async () => {
     let resolveUpload: ((result: { data: { Id: string } }) => void) | undefined;
     api.uploadItem.mockImplementation(
-      (_packageId, _item, onProgress: (sent: number, total: number) => void) =>
+      (_packageId, _item, _uploadToken, onProgress: (sent: number, total: number) => void) =>
         new Promise((resolve) => {
           onProgress(5, 10);
           resolveUpload = resolve;

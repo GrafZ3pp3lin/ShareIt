@@ -6,6 +6,6 @@
  */
 
 export type CreatePackageHeaders = {
-  'X-Guest-ID'?: string;
+  'X-Upload-Token'?: string;
   'X-Unlock-Proof'?: string;
 };

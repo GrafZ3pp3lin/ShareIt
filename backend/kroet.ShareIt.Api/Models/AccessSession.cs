@@ -17,14 +17,9 @@ public sealed record AccessSession
     public required Guid PackageId { get; init; }
 
     /// <summary>
-    /// Recipient identity: an authenticated user id or a guest id.
+    /// Recipient identity: the verified OIDC user id, or null for a guest.
     /// </summary>
-    public required Guid ClientId { get; init; }
-
-    /// <summary>
-    /// Whether <see cref="ClientId"/> is a guest id rather than a user id.
-    /// </summary>
-    public required bool IsGuest { get; init; }
+    public required Guid? UserId { get; init; }
 
     /// <summary>
     /// SHA-256 hash of the session token, hex-encoded.

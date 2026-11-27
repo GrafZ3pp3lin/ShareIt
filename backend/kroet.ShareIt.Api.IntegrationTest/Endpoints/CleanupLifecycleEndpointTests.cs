@@ -16,11 +16,10 @@ public sealed class CleanupLifecycleEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task Cleanup_RetainsExhaustedPackageUntilRetentionElapses_ThenDeletesRowsAndBlobs()
     {
-        var guestId = Guid.NewGuid();
         var (packageId, _) = await CreatePackageWithItemAsync(
-            bytes: LargeItemBytes, guestId: guestId, maxAccessCount: 1);
+            bytes: LargeItemBytes, maxAccessCount: 1);
 
-        var details = await GetPackageDetailsAsync(packageId, guestId: guestId);
+        var details = await GetPackageDetailsAsync(packageId);
         Assert.AreEqual(1, details.Package.CurrentAccessCount);
 
         // Exhausted: cleanup must retain the package so its access session
@@ -34,8 +33,7 @@ public sealed class CleanupLifecycleEndpointTests : ShareItApiTestBase
         // The session issued by the final access must still work after cleanup.
         var download = await SendDownloadAsync(
             DownloadUrl(packageId, details.Items.Single().Id),
-            details.AccessSession.Token,
-            guestId);
+            details.AccessSession.Token);
         Assert.AreEqual(
             HttpStatusCode.OK,
             download.StatusCode,
@@ -54,9 +52,8 @@ public sealed class CleanupLifecycleEndpointTests : ShareItApiTestBase
     [TestMethod]
     public async Task Cleanup_DeletesExpiredPackageImmediately_EvenWithinRetention()
     {
-        var guestId = Guid.NewGuid();
-        var packageId = await CreatePackageAsync(guestId: guestId, timeToLiveHours: 1);
-        var upload = await SendUploadItemAsync(packageId, "file", SmallItemBytes, guestId: guestId);
+        var packageId = await CreatePackageAsync(timeToLiveHours: 1);
+        var upload = await SendUploadItemAsync(packageId, "file", SmallItemBytes);
         var uploadBody = await upload.Content.ReadAsStringAsync();
         Assert.AreEqual(HttpStatusCode.OK, upload.StatusCode, uploadBody);
 

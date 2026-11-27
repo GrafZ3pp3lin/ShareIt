@@ -39,9 +39,18 @@ public record ContentPackage
     public required DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>
-    /// Optional identifier of the user who created the package.
+    /// Optional identifier of the user who created the package. Null for a
+    /// guest package.
     /// </summary>
     public Guid? UserId { get; init; }
+
+    /// <summary>
+    /// SHA-256 hash (hex) of the upload token returned once at creation. The
+    /// token authorizes adding items to this package. Required so a package
+    /// cannot be built without an upload scope: an empty hash satisfies the
+    /// column but matches no token, silently locking every upload out.
+    /// </summary>
+    public required string UploadTokenHash { get; init; }
 
     /// <summary>
     /// List of contents in this package.

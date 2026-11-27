@@ -9,5 +9,5 @@ export type UploadContentHeaders = {
   'X-Content-Kind': string;
   'X-Content-Meta': string;
   'Content-Length': string;
-  'X-Guest-ID'?: string;
+  'X-Upload-Token': string;
 };
