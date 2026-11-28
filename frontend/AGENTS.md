@@ -23,7 +23,7 @@ pnpm generate:open-api # regenerate src/client from a *running* backend at http:
 
 Run a single test file: `npx vitest run src/shared/crypto/framed.test.ts`.
 
-oxlint runs with type-aware linting enabled (`.oxlintrc.json` → `options.typeAware`, powered by `oxlint-tsgolint`) plus the `typescript` plugin. Type-aware rules like `no-floating-promises` and `no-misused-promises` need that package — don't remove it from devDependencies.
+oxlint runs with type-aware linting enabled (`.oxlintrc.json` → `options.typeAware`) plus the `typescript` plugin. The backend is `tsrs`, the Rust port of TypeScript 7.1: it ships a `tsrs-lint` binary that oxlint prefers over `tsgolint`, so installing `tsrs` is what makes type-aware rules like `no-floating-promises` and `no-misused-promises` work — don't remove it from devDependencies. It only has beta releases, so the version is pinned exactly and `pnpm-workspace.yaml` exempts it from `trustPolicy`.
 Run a single project: `npx vitest run --project unit` or `--project components`.
 
 There are two Vitest projects (`vite.config.ts`):

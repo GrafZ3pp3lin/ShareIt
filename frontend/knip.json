@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "project": ["src/**/*"],
-  "ignoreDependencies": ["@iconify-json/lucide"],
+  "ignoreDependencies": ["@iconify-json/lucide", "tsrs"],
   "ignoreIssues": {
     "src/client/**": ["exports", "types"]
   }

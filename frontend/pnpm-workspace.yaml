@@ -29,6 +29,15 @@ minimumReleaseAgeExclude: []
 trustPolicy: no-downgrade
 trustPolicyIgnoreAfter: 43200
 
+# Opt a package out of the no-downgrade check. `tsrs` is oxlint's Rust type-aware
+# backend; it ships only betas, published with trusted publishing and provenance
+# from github.com/oxc-project/tsrs like `oxlint-tsgolint` before it, but on a cold
+# metadata cache pnpm's evidence lookup still calls the newest release a
+# downgrade, which fails `install --frozen-lockfile` (CI, Docker build). Remove
+# the entry once a plain install of `tsrs@latest` passes the check.
+trustPolicyExclude:
+  - tsrs
+
 # --- Peer dependency ranges ---------------------------------------------------
 
 # @solidjs/vite-plugin (via vite-plugin-solid) still declares its
