@@ -75,7 +75,7 @@ export function Gate(props: GateProps) {
             {props.message ? t('gate.tryAgain') : t('gate.unlock')}
           </button>
 
-          <p class="font-mono text-[10.5px] leading-relaxed text-muted">{t('gate.note')}</p>
+          <p class="note">{t('gate.note')}</p>
         </Show>
       </form>
     </div>

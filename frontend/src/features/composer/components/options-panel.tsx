@@ -22,9 +22,10 @@ type OptionsPanelProps = {
 };
 
 /**
- * Expanded link options: expiry, accesses and password. Guests only get the
- * password row; the fixed expiry/access values stay in the collapsed summary.
- * Code mode hides the pickers and shows its fixed guardrails instead.
+ * Expanded link options as one flat list of separated setting rows: expiry,
+ * accesses and password. Guests only get the password row; code mode hides the
+ * expiry/access rows. The password mode picker and its details stay in the
+ * password row's block.
  */
 export function OptionsPanel(props: OptionsPanelProps) {
   const { t } = useI18n();
@@ -37,45 +38,31 @@ export function OptionsPanel(props: OptionsPanelProps) {
   };
 
   return (
-    <div id="composer-options" class="grid gap-2 rounded-xl border border-border-soft bg-panel p-3.5">
-      <Show
-        when={props.passwordMode !== 'code'}
-        fallback={
-          <div class="rounded-lg border border-dashed border-border-soft bg-panel-soft p-2.5">
-            <p class="font-mono text-[10.5px] leading-relaxed text-muted">{t('options.code.guardrails')}</p>
-          </div>
-        }
-      >
-        <Show when={props.isAuthenticated}>
-          <label class="option-row">
-            <span>{t('options.expiry.label')}</span>
-            <select
-              class="cursor-pointer border-0 bg-transparent font-mono text-xs font-medium text-ink outline-none"
-              value={props.expiryIndex}
-              onChange={(event) => props.onExpiryChange(Number(event.currentTarget.value))}
-            >
-              <For each={EXPIRY_OPTIONS}>
-                {(option, index) => <option value={index()}>{t(option.labelKey)}</option>}
-              </For>
-            </select>
-          </label>
+    <div id="composer-options" class="divide-y divide-border-soft rounded-xl border border-border-soft bg-panel px-4">
+      <Show when={props.isAuthenticated && props.passwordMode !== 'code'}>
+        <label class="setting-row py-3">
+          <span>{t('options.expiry.label')}</span>
+          <select
+            class="setting-select"
+            value={props.expiryIndex}
+            onChange={(event) => props.onExpiryChange(Number(event.currentTarget.value))}
+          >
+            <For each={EXPIRY_OPTIONS}>{(option, index) => <option value={index()}>{t(option.labelKey)}</option>}</For>
+          </select>
+        </label>
 
-          <label class="option-row">
-            <span class="grid gap-0.5">
-              <span>{t('options.downloads.label')}</span>
-              <span class="text-[10px] text-muted/85">{t('options.downloads.hint')}</span>
-            </span>
-            <select
-              class="cursor-pointer border-0 bg-transparent font-mono text-xs font-medium text-ink outline-none"
-              value={props.accessIndex}
-              onChange={(event) => props.onDownloadsChange(Number(event.currentTarget.value))}
-            >
-              <For each={ACCESS_COUNT_OPTIONS}>
-                {(count, index) => <option value={index()}>{downloadLabel(count)}</option>}
-              </For>
-            </select>
-          </label>
-        </Show>
+        <label class="setting-row py-3">
+          <span>{t('options.downloads.label')}</span>
+          <select
+            class="setting-select"
+            value={props.accessIndex}
+            onChange={(event) => props.onDownloadsChange(Number(event.currentTarget.value))}
+          >
+            <For each={ACCESS_COUNT_OPTIONS}>
+              {(count, index) => <option value={index()}>{downloadLabel(count)}</option>}
+            </For>
+          </select>
+        </label>
       </Show>
 
       <PasswordControl
@@ -90,7 +77,7 @@ export function OptionsPanel(props: OptionsPanelProps) {
       />
 
       <Show when={!props.isAuthenticated && props.passwordMode !== 'code'}>
-        <p class="px-1 font-mono text-[10.5px] leading-relaxed text-muted">{t('options.guestNote')}</p>
+        <p class="note py-3">{t('options.guestNote')}</p>
       </Show>
     </div>
   );

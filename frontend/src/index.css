@@ -32,7 +32,7 @@
   --shadow-tab: 0 2px 8px rgba(0, 0, 0, 0.07);
 
   --radius-composer: 14px;
-  --composer-height: 480px;
+  --composer-height: 18rem;
 }
 
 .dark {
@@ -75,7 +75,7 @@
 }
 
 @utility caution {
-  @apply rounded-lg border border-dashed border-border-soft px-3 py-2.5 font-mono text-[10.5px] leading-relaxed text-muted;
+  @apply rounded-lg border border-dashed border-border-soft px-3 py-2.5 text-xs leading-relaxed text-muted;
 }
 
 @utility pill-badge {
@@ -102,12 +102,16 @@
   @apply flex items-center gap-2 rounded-md border border-border-soft bg-panel px-2 py-1.5 font-mono text-xs text-ink;
 }
 
-@utility option-row {
-  @apply flex items-center justify-between gap-3 rounded-lg border border-border-soft bg-panel px-2.5 py-2 font-mono text-xs text-muted;
+@utility setting-row {
+  @apply flex min-h-10 items-center justify-between gap-3 font-mono text-xs text-muted;
+}
+
+@utility setting-select {
+  @apply cursor-pointer self-stretch border-0 bg-transparent font-mono text-xs font-medium text-ink;
 }
 
 @utility segmented {
-  @apply inline-flex overflow-hidden rounded-md border border-border-soft bg-panel-soft font-mono text-xs;
+  @apply inline-flex overflow-hidden rounded-lg border border-border-soft bg-panel-soft font-mono;
 }
 
 @utility gate {
@@ -116,6 +120,10 @@
 
 @utility list-row {
   @apply grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3.5 border-b border-border-soft px-1 py-3 font-mono text-xs last:border-b-0;
+}
+
+@utility note {
+  @apply text-xs leading-relaxed text-muted;
 }
 
 @utility tiny-label {

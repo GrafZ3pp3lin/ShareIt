@@ -20,7 +20,7 @@ export function AppLayout(props: AppLayoutProps) {
   return (
     <div class="min-h-screen flex flex-col">
       <header class="border-b border-border-soft/80 bg-panel/90 sm:sticky sm:top-0 sm:z-50 sm:backdrop-blur-sm">
-        <div class="mx-auto flex w-full max-w-275 flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+        <div class="mx-auto flex w-full max-w-275 flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-3 sm:py-4 sm:px-8">
           <div class="flex items-center gap-6">
             <a class="flex items-center gap-2 text-sm font-semibold text-ink" href="/">
               <img class="h-7 w-7 shrink-0" src="/favicon.svg" alt="" width="28" height="28" />
@@ -41,18 +41,14 @@ export function AppLayout(props: AppLayoutProps) {
             <Show when={!isShare() && !auth.isAuthenticated() && auth.isEnabled}>
               <button
                 type="button"
-                class="font-mono text-sm text-muted transition hover:text-ink"
+                class="text-sm text-muted transition hover:text-ink"
                 onClick={() => void auth.login()}
               >
                 {t('auth.signIn')}
               </button>
             </Show>
             <Show when={!isShare() && auth.isAuthenticated()}>
-              <button
-                type="button"
-                class="font-mono text-sm text-muted transition hover:text-ink"
-                onClick={auth.logout}
-              >
+              <button type="button" class="text-sm text-muted transition hover:text-ink" onClick={auth.logout}>
                 {t('app.nav.logout')}
               </button>
             </Show>
@@ -80,19 +76,13 @@ export function AppLayout(props: AppLayoutProps) {
             >
               <IconLock class="h-3.5 w-3.5" />
             </span>
-            <p class="font-mono text-[11px] leading-relaxed tracking-[0.02em] text-ink">{t('app.footer')}</p>
+            <p class="text-xs leading-relaxed text-ink">{t('app.footer')}</p>
           </div>
           <div class="flex items-center gap-4">
-            <a
-              class="inline-flex min-h-6 items-center font-mono text-[11px] text-muted transition hover:text-ink"
-              href="/privacy"
-            >
+            <a class="inline-flex min-h-6 items-center text-xs text-muted transition hover:text-ink" href="/privacy">
               {t('privacy.link')}
             </a>
-            <a
-              class="inline-flex min-h-6 items-center font-mono text-[11px] text-muted transition hover:text-ink"
-              href="/imprint"
-            >
+            <a class="inline-flex min-h-6 items-center text-xs text-muted transition hover:text-ink" href="/imprint">
               {t('imprint.link')}
             </a>
           </div>

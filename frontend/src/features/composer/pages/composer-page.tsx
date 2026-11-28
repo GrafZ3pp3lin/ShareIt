@@ -39,7 +39,7 @@ export function ComposerPage() {
           />
 
           <Show when={!composer.isAuthenticated()}>
-            <p class="px-1 font-mono text-[10.5px] leading-relaxed text-muted">{t('composer.guestListNote')}</p>
+            <p class="note px-1">{t('composer.guestListNote')}</p>
           </Show>
 
           <Show when={composer.optionsOpen()}>
@@ -107,16 +107,16 @@ export function ComposerPage() {
           <div class="grid gap-3 border-t border-border-soft pt-4">
             <div class="tiny-label">{t('composer.how.title')}</div>
             <ol class="grid list-none gap-3 p-0 sm:grid-cols-3">
-              <li class="flex gap-2.5">
-                <span class="mt-px font-mono text-[10px] font-semibold text-brand">01</span>
+              <li class="flex items-center gap-2.5">
+                <span class="font-mono text-[10px] font-semibold text-brand">01</span>
                 <span class="text-xs leading-relaxed text-muted">{t('composer.how.one')}</span>
               </li>
-              <li class="flex gap-2.5">
-                <span class="mt-px font-mono text-[10px] font-semibold text-brand">02</span>
+              <li class="flex items-center gap-2.5">
+                <span class="font-mono text-[10px] font-semibold text-brand">02</span>
                 <span class="text-xs leading-relaxed text-muted">{t('composer.how.two')}</span>
               </li>
-              <li class="flex gap-2.5">
-                <span class="mt-px font-mono text-[10px] font-semibold text-brand">03</span>
+              <li class="flex items-center gap-2.5">
+                <span class="font-mono text-[10px] font-semibold text-brand">03</span>
                 <span class="text-xs leading-relaxed text-muted">{t('composer.how.three')}</span>
               </li>
             </ol>
@@ -124,9 +124,7 @@ export function ComposerPage() {
         </form>
 
         <div class="border-t border-border-soft pt-4">
-          <div class="max-w-sm">
-            <CodeEntry />
-          </div>
+          <CodeEntry />
         </div>
       </div>
     </Show>

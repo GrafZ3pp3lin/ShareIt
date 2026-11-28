@@ -154,7 +154,9 @@ export function createComposer() {
   });
   const passphraseCheck = createMemo(() => validatePassphrase(customPassphrase()));
   const passphraseError = createMemo(() =>
-    passwordMode() === 'custom' && !passphraseCheck().valid ? t('options.password.errors.tooShort') : null
+    passwordMode() === 'custom' && customPassphrase().length > 0 && !passphraseCheck().valid
+      ? t('options.password.errors.tooShort')
+      : null
   );
 
   onSettled(() => {

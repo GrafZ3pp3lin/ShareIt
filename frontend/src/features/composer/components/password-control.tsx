@@ -17,17 +17,14 @@ type PasswordControlProps = {
   onRegenerate: () => void;
 };
 
-const MODES: PasswordMode[] = ['off', 'generate', 'custom', 'code'];
+const MODES = ['off', 'generate', 'custom', 'code'] as const satisfies readonly PasswordMode[];
 
-const modeLabelKey = (mode: PasswordMode) => {
-  if (mode === 'generate') {
-    return 'options.password.mode.generate';
-  }
-  if (mode === 'custom') {
-    return 'options.password.mode.custom';
-  }
-  return mode === 'code' ? 'options.password.mode.code' : 'options.password.mode.off';
-};
+const MODE_LABELS = {
+  off: 'options.password.mode.off',
+  generate: 'options.password.mode.generate',
+  custom: 'options.password.mode.custom',
+  code: 'options.password.mode.code'
+} as const satisfies Record<PasswordMode, string>;
 
 export function PasswordControl(props: PasswordControlProps) {
   const { t } = useI18n();
@@ -42,53 +39,56 @@ export function PasswordControl(props: PasswordControlProps) {
   };
 
   return (
-    <div class="grid gap-2">
-      <div class="option-row">
-        <span class="grid gap-0.5">
-          <span>{t('options.password.label')}</span>
-          <span class="text-[10px] text-muted/85">{t('options.password.hint')}</span>
-        </span>
-        <div class="segmented" role="group" aria-label={t('options.password.label')}>
+    <div class="grid gap-2 py-3">
+      <div class="setting-row flex-wrap">
+        <span id="password-mode-label">{t('options.password.label')}</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="password-mode-label">
           <For each={MODES}>
             {(mode) => (
-              <button
-                type="button"
+              <label
                 class={clsx(
-                  'cursor-pointer border-l border-border-soft px-2.5 py-1 font-mono text-[11px] text-muted transition first:border-l-0',
+                  'cursor-pointer border-l border-border-soft px-3 py-1.5 text-[11px] text-muted transition first:border-l-0 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand has-[:focus-visible]:ring-inset',
                   props.mode === mode && 'bg-ink text-panel'
                 )}
-                aria-pressed={props.mode === mode ? 'true' : 'false'}
-                onClick={() => props.onModeChange(mode)}
               >
-                {t(modeLabelKey(mode))}
-              </button>
+                <input
+                  type="radio"
+                  name="password-mode"
+                  value={mode}
+                  class="sr-only"
+                  checked={props.mode === mode}
+                  onChange={() => props.onModeChange(mode)}
+                />
+                {t(MODE_LABELS[mode])}
+              </label>
             )}
           </For>
         </div>
       </div>
 
       <Show when={props.mode === 'custom'}>
-        <div class="grid gap-2 rounded-lg border border-dashed border-border-soft bg-panel-soft p-2.5">
-          <div class="flex items-center gap-2 rounded-md border border-border-soft bg-panel px-2.5 py-2">
+        <div class="grid gap-2">
+          <div class="flex items-center gap-2 rounded-lg bg-panel-soft px-3 py-2">
             <input
               type={revealed() ? 'text' : 'password'}
-              class="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none"
+              class="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink"
               value={props.customPassphrase}
-              aria-label={t('options.password.mode.custom')}
+              aria-label={t('options.password.customLabel')}
+              placeholder={t('options.password.customPlaceholder')}
               autocomplete="new-password"
               onInput={(event) => props.onCustomInput(event.currentTarget.value)}
             />
             <button
               type="button"
-              class="cursor-pointer font-mono text-[10.5px] text-muted transition hover:text-ink"
+              class="cursor-pointer font-mono text-[11px] text-muted transition hover:text-ink"
               onClick={() => setRevealed((value) => !value)}
             >
               {revealed() ? t('options.password.hide') : t('options.password.show')}
             </button>
           </div>
 
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-1 font-mono text-[10.5px] text-muted">
+          <div class="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-muted">
+            <span class="flex items-center gap-1">
               <For each={[1, 2, 3]}>
                 {(level) => (
                   <i
@@ -102,24 +102,24 @@ export function PasswordControl(props: PasswordControlProps) {
               <span class="ml-1">
                 {props.customError === null && props.customPassphrase.length > 0 ? strengthLabel() : ''}
               </span>
-            </div>
-            <span class="font-mono text-[10.5px] text-muted">{t('options.password.suggestion')}</span>
+            </span>
+            <span>{t('options.password.suggestion')}</span>
           </div>
 
           <Show when={props.customError}>
-            <p class="font-mono text-[10.5px] text-ink">{props.customError}</p>
+            <p class="font-mono text-[11px] text-ink">{props.customError}</p>
           </Show>
-          <p class="font-mono text-[10.5px] leading-relaxed text-muted">{t('options.password.note')}</p>
+          <p class="note">{t('options.password.note')}</p>
         </div>
       </Show>
 
       <Show when={props.mode === 'generate'}>
-        <div class="grid gap-2 rounded-lg border border-dashed border-border-soft bg-panel-soft p-2.5">
-          <div class="flex items-center gap-2 rounded-md border border-border-soft bg-panel px-2.5 py-2">
+        <div class="grid gap-2">
+          <div class="flex items-center gap-2 rounded-lg bg-panel-soft px-3 py-2">
             <span class="min-w-0 flex-1 truncate font-mono text-xs text-ink">{props.generatedPassphrase}</span>
             <CopyButton value={props.generatedPassphrase} variant="inline" />
           </div>
-          <div class="flex flex-wrap items-center justify-between gap-2 font-mono text-[10.5px] text-muted">
+          <div class="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-muted">
             <span>{t('options.password.shownOnce')}</span>
             <button
               type="button"
@@ -131,6 +131,10 @@ export function PasswordControl(props: PasswordControlProps) {
             </button>
           </div>
         </div>
+      </Show>
+
+      <Show when={props.mode === 'code'}>
+        <p class="note">{t('options.code.guardrails')}</p>
       </Show>
     </div>
   );

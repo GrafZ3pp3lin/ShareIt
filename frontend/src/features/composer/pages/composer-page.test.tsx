@@ -92,7 +92,7 @@ describe('<ComposerPage />', () => {
   it('resolves a normalized code before navigating to the UUID route', async () => {
     renderPage();
 
-    const input = screen.getByLabelText('Have a code?');
+    const input = screen.getByRole('textbox', { name: 'Have a code?' });
     fireEvent.input(input, { target: { value: 'abc-234' } });
     flush();
     fireEvent.click(screen.getByRole('button', { name: 'open' }));
@@ -110,7 +110,7 @@ describe('<ComposerPage />', () => {
     api.resolveShortCode.mockResolvedValue({ data: undefined, status: 429, retryAfterSeconds: 90 });
     renderPage();
 
-    const input = screen.getByLabelText('Have a code?');
+    const input = screen.getByRole('textbox', { name: 'Have a code?' });
     fireEvent.input(input, { target: { value: 'ABC234' } });
     flush();
     fireEvent.click(screen.getByRole('button', { name: 'open' }));
@@ -124,7 +124,7 @@ describe('<ComposerPage />', () => {
     api.resolveShortCode.mockResolvedValue({ data: undefined, status: 429 });
     renderPage();
 
-    const input = screen.getByLabelText('Have a code?');
+    const input = screen.getByRole('textbox', { name: 'Have a code?' });
     fireEvent.input(input, { target: { value: 'ABC234' } });
     flush();
     fireEvent.click(screen.getByRole('button', { name: 'open' }));
@@ -137,7 +137,7 @@ describe('<ComposerPage />', () => {
     api.resolveShortCode.mockRejectedValue(new Error('network down'));
     renderPage();
 
-    const input = screen.getByLabelText('Have a code?');
+    const input = screen.getByRole('textbox', { name: 'Have a code?' });
     fireEvent.input(input, { target: { value: 'ABC234' } });
     flush();
     fireEvent.click(screen.getByRole('button', { name: 'open' }));
@@ -149,7 +149,7 @@ describe('<ComposerPage />', () => {
   it('rejects an invalid code before navigating', () => {
     renderPage();
 
-    const input = screen.getByLabelText('Have a code?');
+    const input = screen.getByRole('textbox', { name: 'Have a code?' });
     fireEvent.input(input, { target: { value: 'ABC23O' } });
     flush();
     fireEvent.click(screen.getByRole('button', { name: 'open' }));
@@ -221,10 +221,10 @@ describe('<ComposerPage />', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /expires in 6 hours/ }));
     flush();
-    fireEvent.click(screen.getByRole('button', { name: 'code' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'code' }));
     flush();
 
-    expect(screen.getByText(/single use \u2022 valid for 10 minutes/i)).toBeInTheDocument();
+    expect(screen.getByText(/single use · valid for 10 minutes/i)).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create link' }));
@@ -304,17 +304,17 @@ describe('<ComposerPage />', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: /expires in 6 hours/ }));
     flush();
-    fireEvent.click(screen.getByRole('button', { name: 'custom' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'custom' }));
     flush();
 
-    fireEvent.input(screen.getByLabelText('custom'), { target: { value: 'too short' } });
+    fireEvent.input(screen.getByLabelText('custom passphrase'), { target: { value: 'too short' } });
     fireEvent.input(screen.getByPlaceholderText('paste or type your text'), { target: { value: 'hello' } });
     flush();
 
     expect(screen.getByText('Use at least 12 characters.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create link' })).toBeDisabled();
 
-    fireEvent.input(screen.getByLabelText('custom'), { target: { value: 'long enough passphrase' } });
+    fireEvent.input(screen.getByLabelText('custom passphrase'), { target: { value: 'long enough passphrase' } });
     flush();
 
     expect(screen.queryByText('Use at least 12 characters.')).not.toBeInTheDocument();
@@ -325,7 +325,7 @@ describe('<ComposerPage />', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: /expires in 6 hours/ }));
     flush();
-    fireEvent.click(screen.getByRole('button', { name: 'generate' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'generate' }));
     flush();
 
     const first = screen.getByText(/^[A-Za-z0-9_-]{22}$/).textContent;

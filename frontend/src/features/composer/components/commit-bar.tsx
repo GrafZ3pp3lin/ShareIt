@@ -23,7 +23,7 @@ export function CommitBar(props: CommitBarProps) {
     <div class="commit-bar">
       <button
         type="button"
-        class="flex cursor-pointer flex-wrap items-center gap-1.5 text-left font-mono text-[11.5px] text-muted"
+        class="flex cursor-pointer items-center gap-1.5 text-left font-mono text-[11.5px] text-muted"
         aria-expanded={props.optionsOpen ? 'true' : 'false'}
         aria-controls="composer-options"
         onClick={props.onToggleOptions}
@@ -34,7 +34,7 @@ export function CommitBar(props: CommitBarProps) {
         </span>
       </button>
 
-      <div class="flex items-center gap-3">
+      <div class="flex w-full items-center gap-3 sm:w-auto">
         {props.showCancel ? (
           <button
             type="button"
@@ -44,7 +44,7 @@ export function CommitBar(props: CommitBarProps) {
             {t('composer.cancel')}
           </button>
         ) : null}
-        <button type="submit" class="btn btn-primary" disabled={!props.canSubmit}>
+        <button type="submit" class="btn btn-primary flex-1 sm:flex-none" disabled={!props.canSubmit}>
           {props.submitting ? t('composer.submitting') : t('composer.submit')}
         </button>
       </div>

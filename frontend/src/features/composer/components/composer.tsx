@@ -16,9 +16,10 @@ type ComposerProps = {
 };
 
 /**
- * One surface for text and files. The textarea keeps a fixed height (long
- * pastes scroll inside), files sit on the right, and every drop target is the
- * whole box. The add-files button stays in the bottom-right corner in every state.
+ * One surface for text and files. The text column keeps a fixed height; the
+ * textarea fills it above the hint row (long pastes scroll inside), and files
+ * sit on the right. Every drop target is the whole box. The add-files button
+ * stays in the bottom-right corner in every state.
  */
 export function Composer(props: ComposerProps) {
   const { t } = useI18n();
@@ -69,9 +70,9 @@ export function Composer(props: ComposerProps) {
       onDrop={handleDrop}
     >
       <div class={clsx('grid min-h-0 gap-4', hasFiles() ? 'sm:grid-cols-2' : 'grid-cols-1')}>
-        <div class="flex min-h-0 flex-col">
+        <div class="flex h-60 min-h-0 flex-col sm:h-(--composer-height)">
           <textarea
-            class="h-80 w-full resize-none overflow-auto rounded-lg bg-transparent p-1 pb-14 text-sm leading-relaxed text-ink outline-none placeholder:text-muted/80 sm:h-(--composer-height)"
+            class="min-h-0 w-full flex-1 resize-none overflow-auto rounded-lg bg-transparent p-1 text-sm leading-relaxed text-ink outline-none placeholder:text-muted/80"
             placeholder={t('composer.placeholder')}
             aria-label={t('composer.placeholder')}
             value={props.text}
@@ -83,7 +84,9 @@ export function Composer(props: ComposerProps) {
               }
             }}
           />
-          <p class="pointer-events-none -mt-12 px-1 font-mono text-[10.5px] leading-relaxed text-muted/90">
+          {/* The hint stays in flow below the scroll area: scrolled text paints
+              into a textarea's padding, so an overlaid hint would be covered. */}
+          <p class="pointer-events-none flex min-h-10 shrink-0 items-end px-1 pr-14 pb-0.5 text-xs leading-relaxed text-muted">
             {t('composer.hint')}
           </p>
         </div>
@@ -100,7 +103,7 @@ export function Composer(props: ComposerProps) {
 
       <button
         type="button"
-        class="absolute right-3 bottom-3 z-20 grid h-10 w-10 cursor-pointer place-items-center rounded-full bg-ink text-panel shadow-button transition hover:bg-brand-hover"
+        class="absolute right-3 bottom-3 z-20 grid h-10 w-10 cursor-pointer place-items-center rounded-full border border-border-soft bg-panel text-ink shadow-button-soft transition hover:shadow-button-soft-hover"
         aria-label={t('composer.addFiles')}
         onClick={() => fileInput?.click()}
       >

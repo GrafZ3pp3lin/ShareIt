@@ -126,7 +126,7 @@ export function SharedDocument(props: SharedDocumentProps) {
         </div>
       </Show>
 
-      <p class="font-mono text-[10.5px] leading-relaxed text-muted">{accessNote()}</p>
+      <p class="note">{accessNote()}</p>
     </div>
   );
 }

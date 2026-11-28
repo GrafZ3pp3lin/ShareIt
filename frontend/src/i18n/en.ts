@@ -36,6 +36,7 @@ export const dict = {
     limit: 'limit {{ limit }}/file',
     guestListNote: "Sign in to keep links in your list. Guest links can't be listed later — copy it when it's ready.",
     haveCode: 'Have a code?',
+    haveCodeHint: 'Open a link with its six-character code.',
     codePlaceholder: 'ABC-234',
     codeSubmit: 'open',
     codeOpening: 'opening…',
@@ -80,24 +81,24 @@ export const dict = {
     },
     downloads: {
       label: 'accesses allowed',
-      hint: 'one person, one access',
       once: 'one access',
       count: '{{ count }} accesses',
       unlimited: 'unlimited accesses'
     },
     password: {
       label: 'password',
-      hint: 'encrypt text and files before upload',
+      off: 'no password',
+      generated: 'use generated password',
+      custom: 'use custom password',
+      code: 'use a code',
       mode: {
         off: 'off',
         generate: 'generate',
         custom: 'custom',
         code: 'code'
       },
-      off: 'no password',
-      generated: 'use generated password',
-      custom: 'use custom password',
-      code: 'use a code',
+      customLabel: 'custom passphrase',
+      customPlaceholder: 'enter passphrase',
       regenerate: 'regenerate',
       show: 'show',
       hide: 'hide',
@@ -114,8 +115,7 @@ export const dict = {
       }
     },
     code: {
-      guardrails:
-        'Code mode generates a 6-character code • single use • valid for 10 minutes. It is less secure and meant for devices where you cannot share a link.'
+      guardrails: 'Single use · valid for 10 minutes. Less secure, but works on devices where you cannot share a link.'
     },
     guestNote: 'Expiry and accesses are fixed for links created without an account. Sign in to choose them.'
   },

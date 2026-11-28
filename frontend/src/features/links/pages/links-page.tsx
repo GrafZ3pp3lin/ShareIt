@@ -147,7 +147,7 @@ export function LinksPage() {
                 </Show>
               </div>
 
-              <p class="font-mono text-[10.5px] leading-relaxed text-muted">{t('links.copyNote')}</p>
+              <p class="note">{t('links.copyNote')}</p>
             </div>
           </Show>
         }

@@ -74,36 +74,50 @@ export function CodeEntry() {
   };
 
   return (
-    <form class="grid gap-1.5" onSubmit={submit}>
-      <label class="tiny-label" for="short-code-entry">
-        {t('composer.haveCode')}
-      </label>
-      <div class="flex gap-2">
-        <input
-          id="short-code-entry"
-          class="text-field min-w-0 flex-1 font-mono tracking-[0.08em] uppercase"
-          type="text"
-          inputmode="text"
-          autocomplete="off"
-          autocapitalize="characters"
-          spellcheck={false}
-          placeholder={t('composer.codePlaceholder')}
-          value={code()}
-          disabled={submitting()}
-          onInput={(event) => {
-            setCode(event.currentTarget.value);
-            setError(null);
-          }}
-        />
-        <button class="btn btn-secondary shrink-0" type="submit" disabled={submitting()}>
-          {submitting() ? t('composer.codeOpening') : t('composer.codeSubmit')}
-        </button>
-      </div>
-      <Show when={error()}>
-        <p class="font-mono text-[10.5px] text-muted" role="alert">
-          {error()}
+    <form
+      class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
+      aria-labelledby="short-code-heading"
+      onSubmit={submit}
+    >
+      <div class="grid gap-1">
+        <label id="short-code-heading" class="tiny-label" for="short-code-entry">
+          {t('composer.haveCode')}
+        </label>
+        <p id="short-code-hint" class="text-xs leading-relaxed text-muted">
+          {t('composer.haveCodeHint')}
         </p>
-      </Show>
+      </div>
+
+      <div class="grid w-full gap-1.5 sm:w-80 sm:shrink-0">
+        <div class="flex gap-2">
+          <input
+            id="short-code-entry"
+            class="text-field min-w-0 flex-1 font-mono tracking-[0.08em] uppercase"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck={false}
+            placeholder={t('composer.codePlaceholder')}
+            value={code()}
+            disabled={submitting()}
+            aria-describedby={error() ? 'short-code-hint short-code-error' : 'short-code-hint'}
+            aria-invalid={error() ? 'true' : undefined}
+            onInput={(event) => {
+              setCode(event.currentTarget.value);
+              setError(null);
+            }}
+          />
+          <button class="btn btn-secondary shrink-0" type="submit" disabled={submitting()}>
+            {submitting() ? t('composer.codeOpening') : t('composer.codeSubmit')}
+          </button>
+        </div>
+        <Show when={error()}>
+          <p id="short-code-error" class="font-mono text-[10.5px] text-muted" role="alert">
+            {error()}
+          </p>
+        </Show>
+      </div>
     </form>
   );
 }
