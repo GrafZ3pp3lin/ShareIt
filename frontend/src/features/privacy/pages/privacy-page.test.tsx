@@ -20,7 +20,7 @@ describe('<PrivacyPage />', () => {
     expect(emailLinks[0]).toHaveAttribute('href', 'mailto:shareit@kroet.de');
 
     expect(screen.getByRole('heading', { name: 'Web analytics' })).toBeInTheDocument();
-    expect(screen.getByText('/umami/')).toBeInTheDocument();
+    expect(screen.getByText('/m/')).toBeInTheDocument();
     expect(screen.queryByText('umami.kroet.de')).not.toBeInTheDocument();
 
     expect(screen.getByRole('heading', { name: 'Cookies and browser storage' })).toBeInTheDocument();

@@ -107,7 +107,7 @@ The app is a static SPA that must be reconfigured without rebuilding per environ
 
 The image sets no security headers. They belong to the edge, including the `Content-Security-Policy`, so the policy is a single static string there.
 
-That only holds while the served HTML has **no inline `<script>` or `<style>`**: an inline block would pin a `sha256` hash into the edge config, which then has to be bumped by hand with the deploy and silently breaks the page when forgotten. Anything that must run before first paint goes in `public/` — see `public/theme.js`, loaded as a render-blocking classic script from `index.html`. Analytics is production-only: `index.html` carries the umami tag between `analytics:start`/`analytics:end` markers and `vite.config.ts` strips it for `pnpm dev`, because the first-party `/umami` proxy only exists in Traefik.
+That only holds while the served HTML has **no inline `<script>` or `<style>`**: an inline block would pin a `sha256` hash into the edge config, which then has to be bumped by hand with the deploy and silently breaks the page when forgotten. Anything that must run before first paint goes in `public/` — see `public/theme.js`, loaded as a render-blocking classic script from `index.html`. Analytics is production-only: `index.html` carries the umami tag between `analytics:start`/`analytics:end` markers and `vite.config.ts` strips it for `pnpm dev`, because the first-party `/m` proxy only exists in Traefik.
 
 ### Client-side crypto (`src/shared/crypto/`)
 

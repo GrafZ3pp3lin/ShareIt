@@ -53,8 +53,8 @@ export function PrivacyPage() {
       <Section title="Web analytics">
         <p class={paragraphClass}>
           We use self-hosted Umami for aggregate usage statistics. The tracker and its collect endpoint are served from
-          this site’s own origin under <code class="font-mono text-xs">/umami/</code> and proxied to our Umami instance,
-          so your browser contacts no third-party origin. It sets no cookies, uses no browser storage (§ 25 TDDDG), and
+          this site’s own origin under <code class="font-mono text-xs">/m/</code> and proxied to our Umami instance, so
+          your browser contacts no third-party origin. It sets no cookies, uses no browser storage (§ 25 TDDDG), and
           records the page path (excluding URL hashes and query parameters), referrer, browser, OS, device type, screen
           size, and language. Your IP address is used only transiently to derive a rotating, non-reversible session hash
           and is not stored in Umami. The legal basis is Art. 6(1)(f) GDPR (legitimate interest in understanding usage

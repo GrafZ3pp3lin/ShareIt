@@ -6,7 +6,7 @@ import type { Plugin } from 'vite';
 
 /**
  * Analytics is production-only: the tracker is served first-party from
- * /umami/script.js by Traefik (the shareit-umami router in ../server-config),
+ * /m/script.js by Traefik (the shareit-umami router in ../server-config),
  * which the dev server does not have — and dev pageviews should not reach umami
  * either. The block in index.html is marked so this cannot silently rot: a
  * missing marker fails the dev server instead of requesting a 404.
