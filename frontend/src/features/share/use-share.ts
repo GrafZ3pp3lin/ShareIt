@@ -1,4 +1,4 @@
-import { createEffect, createSignal } from 'solid-js';
+import { createEffect, createMemo, createSignal } from 'solid-js';
 import type { ContentItemInPackage, ContentPackageDetailsResponse } from '../../client/model/index.ts';
 import { useI18n } from '../../i18n/i18n.tsx';
 import { getPackageDetails } from '../../shared/api/content.ts';
@@ -59,16 +59,16 @@ const dropFragment = () => {
 export function createShare(packageId: () => string, initialSecret: () => string | undefined = () => undefined) {
   const { t } = useI18n();
 
-  // A combined link or a code entry starts in the unlocking state so the gate
-  // never flashes between the first render and the effect that starts the
-  // fragment/code attempt.
-  const initialPassphrase = initialSecret() ?? fragmentPassphrase();
-  const [status, setStatus] = createSignal<ShareStatus>(initialPassphrase !== undefined ? 'unlocking' : 'locked');
+  // Null until the start effect has run. Until then a combined link or a code
+  // entry reads as unlocking, so the gate never flashes before the attempt.
+  const [startedStatus, setStatus] = createSignal<ShareStatus | null>(null);
+  const status = (): ShareStatus =>
+    startedStatus() ?? ((initialSecret() ?? fragmentPassphrase()) !== undefined ? 'unlocking' : 'locked');
   const [details, setDetails] = createSignal<ContentPackageDetailsResponse | null>(null);
   const [items, setItems] = createSignal<ShareItem[]>([]);
   const [packageKey, setPackageKey] = createSignal<PackageKey | undefined>(undefined);
   const [accessSessionToken, setAccessSessionToken] = createSignal<string | undefined>(undefined);
-  const [passphrase, setPassphrase] = createSignal(initialPassphrase ?? '');
+  const [passphrase, setPassphrase] = createSignal('');
   const [gateMessage, setGateMessage] = createSignal<GateMessage | null>(null);
 
   let attempt = 0;
@@ -103,7 +103,7 @@ export function createShare(packageId: () => string, initialSecret: () => string
       })
     );
 
-  const failUnlock = (httpStatus: number | undefined, attemptedPassphrase: boolean, error: unknown) => {
+  const failUnlock = (id: string, httpStatus: number | undefined, attemptedPassphrase: boolean, error: unknown) => {
     if (httpStatus === 401) {
       setStatus('invalid');
       setGateMessage(
@@ -115,7 +115,7 @@ export function createShare(packageId: () => string, initialSecret: () => string
     }
 
     if (httpStatus === 400 || httpStatus === 404 || httpStatus === 410) {
-      clearAccessSession(packageId());
+      clearAccessSession(id);
       setStatus('gone');
       setGateMessage(null);
       return;
@@ -134,8 +134,7 @@ export function createShare(packageId: () => string, initialSecret: () => string
     });
   };
 
-  const unlockWith = async (value: string) => {
-    const id = packageId();
+  const unlockWith = async (id: string, value: string) => {
     const current = ++attempt;
 
     if (!id) {
@@ -173,7 +172,7 @@ export function createShare(packageId: () => string, initialSecret: () => string
       }
 
       if (!outcome.data) {
-        failUnlock(outcome.status, value !== '', outcome.error);
+        failUnlock(id, outcome.status, value !== '', outcome.error);
         return;
       }
 
@@ -237,7 +236,7 @@ export function createShare(packageId: () => string, initialSecret: () => string
     setGateMessage(null);
   };
 
-  const start = () => {
+  const start = ({ id, secret }: { id: string; secret: string | undefined }) => {
     // Cancel any request from the previous package id before starting over.
     attempt += 1;
     setDetails(null);
@@ -247,27 +246,30 @@ export function createShare(packageId: () => string, initialSecret: () => string
     setGateMessage(null);
     setPassphrase('');
 
-    const secret = initialSecret();
     if (secret !== undefined) {
       setPassphrase(secret);
-      void unlockWith(secret);
+      void unlockWith(id, secret);
       return;
     }
 
     const fragment = fragmentPassphrase();
     if (fragment !== undefined) {
       setPassphrase(fragment);
-      void unlockWith(fragment);
+      void unlockWith(id, fragment);
       return;
     }
 
     setStatus('locked');
   };
 
-  createEffect(() => `${packageId()}\u0000${initialSecret() ?? ''}`, start);
+  // Memos so the effect restarts only when the id or secret value changes, not
+  // on every router location update.
+  const currentId = createMemo(packageId);
+  const currentSecret = createMemo(initialSecret);
+  createEffect(() => ({ id: currentId(), secret: currentSecret() }), start);
 
   const unlock = () => {
-    void unlockWith(passphrase());
+    void unlockWith(packageId(), passphrase());
   };
 
   return {
