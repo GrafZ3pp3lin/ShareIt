@@ -393,6 +393,13 @@ try
 
     app.UseRateLimiter();
 
+    // Registered explicitly so the pipeline order is the one below: the
+    // WebApplication auto-added authentication middleware would run before
+    // UseCors, and a 401 challenge would then reach the browser without CORS
+    // headers (the SPA sees a network error instead of the 401).
+    app.UseAuthentication();
+    app.UseAuthorization();
+
     // Liveness/readiness probes, outside the versioned API surface.
     app.MapHealthEndpoints();
 

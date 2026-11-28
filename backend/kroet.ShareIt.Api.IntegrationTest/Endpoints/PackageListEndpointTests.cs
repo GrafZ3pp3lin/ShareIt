@@ -11,6 +11,26 @@ namespace kroet.ShareIt.Api.IntegrationTest.Endpoints;
 [TestClass]
 public sealed class PackageListEndpointTests : ShareItApiTestBase
 {
+    private const string AllowedOrigin = "https://app.example";
+
+    protected override IReadOnlyDictionary<string, string?> Settings =>
+        new Dictionary<string, string?> { ["Cors:AllowedOrigins:0"] = AllowedOrigin };
+
+    [TestMethod]
+    public async Task ListPackages_UnauthenticatedChallengeCarriesCorsHeaders()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/content/packages");
+        request.Headers.Add("Origin", AllowedOrigin);
+
+        var response = await Client.SendAsync(request);
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.IsTrue(
+            response.Headers.TryGetValues("Access-Control-Allow-Origin", out var origins),
+            "The 401 challenge must carry CORS headers so the SPA can read the status.");
+        Assert.AreEqual(AllowedOrigin, origins.Single());
+    }
+
     [TestMethod]
     public async Task ListPackages_WithoutIdentity_Returns401Challenge()
     {
